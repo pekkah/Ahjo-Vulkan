@@ -2,7 +2,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace AhjoVulkan.Native;
+namespace Ahjo.Vulkan.Native;
 
 internal static class VulkanLoaderResolver
 {

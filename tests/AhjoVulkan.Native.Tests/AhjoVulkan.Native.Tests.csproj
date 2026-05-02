@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <RootNamespace>AhjoVulkan.Native.Tests</RootNamespace>
-    <AssemblyName>AhjoVulkan.Native.Tests</AssemblyName>
+    <RootNamespace>Ahjo.Vulkan.Native.Tests</RootNamespace>
+    <AssemblyName>Ahjo.Vulkan.Native.Tests</AssemblyName>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>

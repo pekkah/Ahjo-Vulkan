@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <RootNamespace>AhjoVulkan.Utilities</RootNamespace>
+    <RootNamespace>Ahjo.Vulkan.Utilities</RootNamespace>
     <AssemblyName>AhjoVulkan.Utilities</AssemblyName>
     <IsPackable>false</IsPackable>
   </PropertyGroup>

@@ -1,0 +1,72 @@
+--file
+native/vma/downloaded/VulkanMemoryAllocator-v3.1.0/include/vk_mem_alloc.h
+--include-directory
+native/include
+--include-directory
+native/vma/downloaded/VulkanMemoryAllocator-v3.1.0/include
+--namespace
+Ahjo.Vulkan.Vma.Native
+--methodClassName
+Vma
+--libraryPath
+vma
+--output
+src/AhjoVulkan.Vma.Native/Generated
+--output-mode
+CSharp
+--language
+cpp
+--config
+latest-codegen
+generate-helper-types
+generate-file-scoped-namespaces
+generate-unmanaged-constants
+generate-disable-runtime-marshalling
+generate-aggressive-inlining
+exclude-enum-operators
+strip-enum-member-type-name
+multi-file
+--define-macro
+VMA_VULKAN_VERSION=1003000
+--define-macro
+VMA_DYNAMIC_VULKAN_FUNCTIONS=1
+--define-macro
+VMA_STATIC_VULKAN_FUNCTIONS=0
+--remap
+size_t=nuint
+VkBool32=uint
+--with-type
+VkFlags=uint
+VkFlags64=ulong
+--with-access-specifier
+*=public
+# ------------------------------------------------------------------
+# Route every Vulkan handle / struct / enum that VMA mentions back to
+# Ahjo.Vulkan.Native. Without these remaps you get parallel, incompatible
+# Vk* type definitions and mixed-package code fails to compile.
+# Keep this list aligned with whatever VMA's public surface exposes — if
+# a regen run produces a duplicate Vk* under AhjoVulkan.Vma.Native/Generated,
+# add the remap here and regenerate.
+# ------------------------------------------------------------------
+--remap
+VkInstance=Ahjo.Vulkan.Native.VkInstance
+VkPhysicalDevice=Ahjo.Vulkan.Native.VkPhysicalDevice
+VkDevice=Ahjo.Vulkan.Native.VkDevice
+VkBuffer=Ahjo.Vulkan.Native.VkBuffer
+VkImage=Ahjo.Vulkan.Native.VkImage
+VkDeviceMemory=Ahjo.Vulkan.Native.VkDeviceMemory
+VkResult=Ahjo.Vulkan.Native.VkResult
+VkDeviceSize=ulong
+VkBufferCreateInfo=Ahjo.Vulkan.Native.VkBufferCreateInfo
+VkImageCreateInfo=Ahjo.Vulkan.Native.VkImageCreateInfo
+VkMemoryRequirements=Ahjo.Vulkan.Native.VkMemoryRequirements
+VkMemoryRequirements2=Ahjo.Vulkan.Native.VkMemoryRequirements2
+VkMemoryPropertyFlags=Ahjo.Vulkan.Native.VkMemoryPropertyFlags
+VkMemoryHeapFlags=Ahjo.Vulkan.Native.VkMemoryHeapFlags
+VkPhysicalDeviceProperties=Ahjo.Vulkan.Native.VkPhysicalDeviceProperties
+VkPhysicalDeviceMemoryProperties=Ahjo.Vulkan.Native.VkPhysicalDeviceMemoryProperties
+VkPhysicalDeviceMemoryProperties2=Ahjo.Vulkan.Native.VkPhysicalDeviceMemoryProperties2
+VkAllocationCallbacks=Ahjo.Vulkan.Native.VkAllocationCallbacks
+VkExternalMemoryHandleTypeFlagsKHR=Ahjo.Vulkan.Native.VkExternalMemoryHandleTypeFlagsKHR
+PFN_vkGetInstanceProcAddr=Ahjo.Vulkan.Native.PFN_vkGetInstanceProcAddr
+PFN_vkGetDeviceProcAddr=Ahjo.Vulkan.Native.PFN_vkGetDeviceProcAddr

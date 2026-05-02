@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <RootNamespace>AhjoVulkan</RootNamespace>
+    <RootNamespace>Ahjo.Vulkan</RootNamespace>
     <AssemblyName>AhjoVulkan</AssemblyName>
   </PropertyGroup>
 
@@ -21,7 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="AhjoVulkan.Tests" />
+    <InternalsVisibleTo Include="Ahjo.Vulkan.Tests" />
   </ItemGroup>
 
 </Project>

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <RootNamespace>AhjoVulkan.Native</RootNamespace>
+    <RootNamespace>Ahjo.Vulkan.Native</RootNamespace>
     <AssemblyName>AhjoVulkan.Native</AssemblyName>
     <GeneratedDir>$(MSBuildProjectDirectory)\Generated\</GeneratedDir>
     <GeneratorResponseFile>$(ToolsDir)generate.rsp</GeneratorResponseFile>

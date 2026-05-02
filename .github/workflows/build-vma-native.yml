@@ -1,0 +1,118 @@
+name: Build VMA Native
+
+# Cross-RID build matrix for the VMA SHARED library. Each job builds
+# vma.{dll,so,dylib} for one RID and uploads it as a workflow artifact
+# named vma-native-<rid>. The publish workflow downloads all artifacts
+# and aggregates them into a single multi-RID nupkg.
+#
+# Triggers:
+#   - workflow_call: invoked by publish.yml before pack
+#   - workflow_dispatch: manual run to refresh artifacts during dev
+#   - push to main, paths-filtered: rebuild whenever the impl TU,
+#     CMake setup, or pinned VMA version changes.
+
+on:
+  workflow_call: {}
+  workflow_dispatch: {}
+  push:
+    branches: [main, master]
+    paths:
+      - 'native/vma/**'
+      - 'Directory.Build.props'
+      - '.github/workflows/build-vma-native.yml'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  DOTNET_NOLOGO: "true"
+
+jobs:
+  build:
+    name: Build vma (${{ matrix.rid }})
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            runs-on: windows-latest
+            cmake-arch: x64
+            lib-file: vma.dll
+            built-path: build/win-x64/Release/vma.dll
+          - rid: win-arm64
+            runs-on: windows-latest
+            cmake-arch: arm64
+            lib-file: vma.dll
+            built-path: build/win-arm64/Release/vma.dll
+          - rid: linux-x64
+            runs-on: ubuntu-latest
+            lib-file: libvma.so
+            built-path: build/linux-x64/libvma.so
+          - rid: linux-arm64
+            runs-on: ubuntu-24.04-arm
+            lib-file: libvma.so
+            built-path: build/linux-arm64/libvma.so
+          - rid: osx-x64
+            runs-on: macos-13
+            lib-file: libvma.dylib
+            built-path: build/osx-x64/libvma.dylib
+          - rid: osx-arm64
+            runs-on: macos-latest
+            lib-file: libvma.dylib
+            built-path: build/osx-arm64/libvma.dylib
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # Reuse the MSBuild Regenerate flow's fetch step purely for the
+      # side effect of populating native/include/ + native/vma/downloaded/.
+      # SkipVmaNativeBuild prevents the local cmake invocation — CI's
+      # explicit cmake step below uses per-RID generator/arch flags that
+      # the local Build target doesn't pass.
+      - name: Fetch VMA + Vulkan-Headers
+        run: dotnet build src/AhjoVulkan.Vma.Native/AhjoVulkan.Vma.Native.csproj -t:FetchVma`;EnsureVulkanHeaders -p:SkipVmaNativeBuild=true --nologo
+
+      - name: Configure
+        if: runner.os != 'Windows'
+        run: |
+          cmake -S native/vma \
+                -B native/vma/build/${{ matrix.rid }} \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DAHJO_VMA_HEADERS_DIR="$PWD/native/vma/downloaded/VulkanMemoryAllocator-${VMA_VERSION}/include" \
+                -DAHJO_VULKAN_HEADERS_DIR="$PWD/native/include"
+        env:
+          # VmaVersion lives in Directory.Build.props; replicate here to
+          # construct the extracted-headers path. Update both together.
+          VMA_VERSION: v3.1.0
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vma = "v3.1.0"
+          cmake -S native/vma `
+                -B native/vma/build/${{ matrix.rid }} `
+                -A ${{ matrix.cmake-arch }} `
+                -DCMAKE_BUILD_TYPE=Release `
+                -DAHJO_VMA_HEADERS_DIR="$pwd/native/vma/downloaded/VulkanMemoryAllocator-$vma/include" `
+                -DAHJO_VULKAN_HEADERS_DIR="$pwd/native/include"
+
+      - name: Build
+        run: cmake --build native/vma/build/${{ matrix.rid }} --config Release --parallel
+
+      - name: List output
+        shell: bash
+        run: ls -la native/vma/build/${{ matrix.rid }} || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vma-native-${{ matrix.rid }}
+          path: native/vma/${{ matrix.built-path }}
+          if-no-files-found: error
+          retention-days: 14

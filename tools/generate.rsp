@@ -3,7 +3,7 @@ native/include/vulkan/vulkan.h
 --include-directory
 native/include
 --namespace
-AhjoVulkan.Native
+Ahjo.Vulkan.Native
 --methodClassName
 Vk
 --libraryPath

@@ -16,6 +16,11 @@
          bindings are committed and a regen run is required after a bump.
          See https://github.com/KhronosGroup/Vulkan-Headers/releases. -->
     <VulkanHeadersVersion>v1.4.300</VulkanHeadersVersion>
+    <!-- Pinned VulkanMemoryAllocator tag. Independent cadence from
+         VulkanHeadersVersion. Bump deliberately; the generated bindings are
+         committed and a regen run is required after a bump.
+         See https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/releases. -->
+    <VmaVersion>v3.1.0</VmaVersion>
     <RepositoryRoot>$(MSBuildThisFileDirectory)</RepositoryRoot>
     <NativeDir>$(RepositoryRoot)native\</NativeDir>
     <ToolsDir>$(RepositoryRoot)tools\</ToolsDir>

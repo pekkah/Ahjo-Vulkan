@@ -1,0 +1,208 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ahjo.Vulkan.Vma.Native</RootNamespace>
+    <AssemblyName>AhjoVulkan.Vma.Native</AssemblyName>
+    <GeneratedDir>$(MSBuildProjectDirectory)\Generated\</GeneratedDir>
+    <GeneratorResponseFile>$(ToolsDir)generate-vma.rsp</GeneratorResponseFile>
+  </PropertyGroup>
+
+  <!--
+    Published as "Ahjo.Vulkan.Vma.Native" on NuGet.
+
+    VMA is C++ header-only; we ship a SHARED library built from a single
+    impl translation unit (see native/vma/src/vma.cpp + CMakeLists.txt).
+    The host-RID native binary is built locally before the consuming
+    project's build resolves the staged Content item; the multi-RID nupkg
+    aggregates per-RID artifacts produced by .github/workflows/build-vma-native.yml.
+  -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Ahjo.Vulkan.Vma.Native</PackageId>
+    <Title>Ahjo.Vulkan.Vma.Native</Title>
+    <Description>Raw P/Invoke bindings for AMD VulkanMemoryAllocator ($(VmaVersion)). Ships native runtime binaries for Windows, Linux, and macOS (x64 + arm64).</Description>
+    <PackageTags>vulkan;vma;memory;allocator;graphics;gpu;interop;native;pinvoke;bindings</PackageTags>
+    <MinVerTagPrefix>vma-v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+  </PropertyGroup>
+
+  <!--
+    Host-RID detection. The build target uses these to (a) decide where
+    cmake stages output and (b) compute the staged binary path that
+    downstream consumers copy via ProjectReference propagation.
+  -->
+  <PropertyGroup>
+    <_VmaRid Condition="$([MSBuild]::IsOSPlatform('Windows')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">win-x64</_VmaRid>
+    <_VmaRid Condition="$([MSBuild]::IsOSPlatform('Windows')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'Arm64'">win-arm64</_VmaRid>
+    <_VmaRid Condition="$([MSBuild]::IsOSPlatform('Linux')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">linux-x64</_VmaRid>
+    <_VmaRid Condition="$([MSBuild]::IsOSPlatform('Linux')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'Arm64'">linux-arm64</_VmaRid>
+    <_VmaRid Condition="$([MSBuild]::IsOSPlatform('OSX')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">osx-x64</_VmaRid>
+    <_VmaRid Condition="$([MSBuild]::IsOSPlatform('OSX')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'Arm64'">osx-arm64</_VmaRid>
+
+    <_VmaLibFile Condition="$([MSBuild]::IsOSPlatform('Windows'))">vma.dll</_VmaLibFile>
+    <_VmaLibFile Condition="$([MSBuild]::IsOSPlatform('Linux'))">libvma.so</_VmaLibFile>
+    <_VmaLibFile Condition="$([MSBuild]::IsOSPlatform('OSX'))">libvma.dylib</_VmaLibFile>
+
+    <_VmaSrcDir>$(NativeDir)vma\</_VmaSrcDir>
+    <_VmaDownloadedRoot>$(_VmaSrcDir)downloaded\</_VmaDownloadedRoot>
+    <_VmaZipPath>$(_VmaDownloadedRoot)VulkanMemoryAllocator-$(VmaVersion).zip</_VmaZipPath>
+    <_VmaExtractDir>$(_VmaDownloadedRoot)VulkanMemoryAllocator-$(VmaVersion)\</_VmaExtractDir>
+    <_VmaHeadersDir>$(_VmaExtractDir)include\</_VmaHeadersDir>
+
+    <_VmaBuildRootDir>$(_VmaSrcDir)build\</_VmaBuildRootDir>
+    <_VmaBuildDir>$(_VmaBuildRootDir)$(_VmaRid)\</_VmaBuildDir>
+    <_VmaStagedBinary>$(_VmaBuildDir)$(_VmaLibFile)</_VmaStagedBinary>
+
+    <!-- Path to Vulkan-Headers staging from the sibling AhjoVulkan.Native
+         project. The Native csproj's CopyGeneratedHeaders already populates
+         this directory; VMA's compile uses it as the system include root. -->
+    <_VulkanHeadersIncludeDir>$(NativeDir)include\</_VulkanHeadersIncludeDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <ProjectReference Include="..\AhjoVulkan.Native\AhjoVulkan.Native.csproj" />
+  </ItemGroup>
+
+  <!--
+    Stage the host's vma binary into every downstream project's output.
+    Same Content+Link trick AhjoVulkan.Native uses for vulkan-1: the file
+    propagates through ProjectReference automatically.
+  -->
+  <ItemGroup Condition="'$(_VmaLibFile)' != ''">
+    <None Include="$(_VmaStagedBinary)"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false"
+          Pack="false"
+          Link="$(_VmaLibFile)" />
+  </ItemGroup>
+
+  <!--
+    Regenerate target: fetches pinned VMA tag, ensures Vulkan headers
+    have been staged, then runs ClangSharpPInvokeGenerator. Not wired
+    into Build — regeneration is deliberate; generated C# is committed.
+
+    Usage: dotnet build src/AhjoVulkan.Vma.Native /t:Regenerate
+  -->
+  <Target Name="Regenerate" DependsOnTargets="FetchVma;EnsureVulkanHeaders;RunClangSharpVmaGenerator" />
+
+  <Target Name="FetchVma"
+          Condition="!Exists('$(_VmaHeadersDir)vk_mem_alloc.h')">
+    <MakeDir Directories="$(_VmaDownloadedRoot)" />
+
+    <DownloadFile
+      SourceUrl="https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/archive/refs/tags/$(VmaVersion).zip"
+      DestinationFolder="$(_VmaDownloadedRoot)"
+      DestinationFileName="VulkanMemoryAllocator-$(VmaVersion).zip"
+      SkipUnchangedFiles="true"
+      Condition="!Exists('$(_VmaZipPath)')" />
+
+    <Unzip
+      SourceFiles="$(_VmaZipPath)"
+      DestinationFolder="$(_VmaDownloadedRoot)"
+      OverwriteReadOnlyFiles="true" />
+
+    <!-- The archive extracts to VulkanMemoryAllocator-<version-without-v>/.
+         Normalize to a predictable path so downstream targets don't have
+         to do tag-string surgery. -->
+    <ItemGroup>
+      <_VmaExtractedRoot Include="$(_VmaDownloadedRoot)VulkanMemoryAllocator-*\" Exclude="$(_VmaExtractDir)" />
+    </ItemGroup>
+    <Move
+      SourceFiles="@(_VmaExtractedRoot)"
+      DestinationFolder="$(_VmaExtractDir)"
+      Condition="'@(_VmaExtractedRoot)' != ''" />
+  </Target>
+
+  <!-- Vulkan-Headers fetch is owned by AhjoVulkan.Native. Trigger it via
+       ProjectReference target invocation so VMA's codegen + compile both
+       see vulkan/vulkan.h without duplicating the fetch logic. -->
+  <Target Name="EnsureVulkanHeaders">
+    <MSBuild
+      Projects="..\AhjoVulkan.Native\AhjoVulkan.Native.csproj"
+      Targets="CopyGeneratedHeaders"
+      Properties="GeneratedDir=$([MSBuild]::EnsureTrailingSlash('$(MSBuildProjectDirectory)/../AhjoVulkan.Native/Generated'))" />
+  </Target>
+
+  <Target Name="RunClangSharpVmaGenerator" DependsOnTargets="FetchVma;EnsureVulkanHeaders">
+    <MakeDir Directories="$(GeneratedDir)" />
+    <Exec
+      Command="dotnet tool run ClangSharpPInvokeGenerator @&quot;$(GeneratorResponseFile)&quot;"
+      WorkingDirectory="$(RepositoryRoot)" />
+    <Message Importance="high" Text="Generated VMA bindings written to $(GeneratedDir)" />
+  </Target>
+
+  <!--
+    Build the host-RID vma binary before the project's build step copies
+    Content items. CI cross-builds the other RIDs and drops their
+    artifacts into $(_VmaBuildRootDir)<rid>\ before the pack job runs.
+
+    BeforeTargets="AssignTargetPaths" matches the wgpu-sharp pattern: the
+    target also fires during ProjectReference's GetCopyToOutputDirectoryItems
+    flow, so consumers automatically get vma.dll in their bin/ folder.
+  -->
+  <Target Name="BuildVmaForHost"
+          BeforeTargets="AssignTargetPaths"
+          Condition="'$(_VmaLibFile)' != '' and !Exists('$(_VmaStagedBinary)') and '$(SkipVmaNativeBuild)' != 'true'"
+          DependsOnTargets="FetchVma;EnsureVulkanHeaders">
+    <Error
+      Condition="'$(_VmaRid)' == ''"
+      Text="Unsupported host for VMA native build: OS='$([System.Runtime.InteropServices.RuntimeInformation]::OSDescription)' Arch='$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)'." />
+
+    <MakeDir Directories="$(_VmaBuildDir)" />
+
+    <Exec
+      Command="cmake -S &quot;$(_VmaSrcDir.TrimEnd('\'))&quot; -B &quot;$(_VmaBuildDir.TrimEnd('\'))&quot; -DCMAKE_BUILD_TYPE=Release -DAHJO_VMA_HEADERS_DIR=&quot;$(_VmaHeadersDir.TrimEnd('\'))&quot; -DAHJO_VULKAN_HEADERS_DIR=&quot;$(_VulkanHeadersIncludeDir.TrimEnd('\'))&quot;"
+      WorkingDirectory="$(RepositoryRoot)" />
+
+    <Exec
+      Command="cmake --build &quot;$(_VmaBuildDir.TrimEnd('\'))&quot; --config Release"
+      WorkingDirectory="$(RepositoryRoot)" />
+
+    <!-- MSVC drops the dll under Release/. Normalize so $(_VmaStagedBinary)
+         is correct regardless of single-config vs multi-config generator. -->
+    <ItemGroup>
+      <_VmaProducedBinary Include="$(_VmaBuildDir)Release\$(_VmaLibFile);$(_VmaBuildDir)$(_VmaLibFile)" />
+    </ItemGroup>
+    <Copy
+      SourceFiles="@(_VmaProducedBinary)"
+      DestinationFolder="$(_VmaBuildDir)"
+      SkipUnchangedFiles="true"
+      Condition="Exists('%(_VmaProducedBinary.Identity)')" />
+
+    <Message Importance="high" Text="Built VMA $(VmaVersion) for $(_VmaRid): $(_VmaStagedBinary)" />
+  </Target>
+
+  <!--
+    Multi-RID pack. Expects per-RID binaries to exist under
+    native/vma/build/<rid>/<libname> by the time pack runs. CI does this
+    by downloading the build matrix's upload-artifact outputs into those
+    directories before invoking dotnet pack.
+
+    Local pack only includes the host's RID — that's intentional. Producing
+    a fully cross-RID nupkg requires the CI matrix.
+  -->
+  <Target Name="PackVmaRuntimes" BeforeTargets="_GetPackageFiles;GenerateNuspec" Condition="'$(IsPackable)' == 'true'">
+    <ItemGroup>
+      <_VmaPackRid Include="win-x64">     <LibFile>vma.dll</LibFile>     </_VmaPackRid>
+      <_VmaPackRid Include="win-arm64">   <LibFile>vma.dll</LibFile>     </_VmaPackRid>
+      <_VmaPackRid Include="linux-x64">   <LibFile>libvma.so</LibFile>   </_VmaPackRid>
+      <_VmaPackRid Include="linux-arm64"> <LibFile>libvma.so</LibFile>   </_VmaPackRid>
+      <_VmaPackRid Include="osx-x64">     <LibFile>libvma.dylib</LibFile></_VmaPackRid>
+      <_VmaPackRid Include="osx-arm64">   <LibFile>libvma.dylib</LibFile></_VmaPackRid>
+    </ItemGroup>
+
+    <ItemGroup>
+      <None Include="$(_VmaBuildRootDir)%(_VmaPackRid.Identity)\%(_VmaPackRid.LibFile)"
+            Condition="Exists('$(_VmaBuildRootDir)%(_VmaPackRid.Identity)\%(_VmaPackRid.LibFile)')">
+        <Pack>true</Pack>
+        <PackagePath>runtimes\%(_VmaPackRid.Identity)\native\%(_VmaPackRid.LibFile)</PackagePath>
+        <Visible>false</Visible>
+      </None>
+    </ItemGroup>
+
+    <Message Importance="high" Text="VMA pack: included RIDs from $(_VmaBuildRootDir)" />
+  </Target>
+
+</Project>

@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ahjo.Vulkan.Vma</RootNamespace>
+    <AssemblyName>AhjoVulkan.Vma</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Ahjo.Vulkan.Vma</PackageId>
+    <Title>Ahjo.Vulkan.Vma</Title>
+    <Description>Idiomatic C# wrapper over AMD VulkanMemoryAllocator: ref-struct mapped regions, struct handles, zero-per-frame allocations.</Description>
+    <MinVerTagPrefix>vma-v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AhjoVulkan\AhjoVulkan.csproj" />
+    <ProjectReference Include="..\AhjoVulkan.Vma.Native\AhjoVulkan.Vma.Native.csproj" />
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Ahjo.Vulkan.Vma.Tests" />
+  </ItemGroup>
+
+</Project>
