@@ -1,0 +1,103 @@
+name: Publish
+
+# Publishes Ahjo.Vulkan + Ahjo.Vulkan.Native to NuGet on a pushed git tag.
+#
+# Tagging convention:
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Version is derived by MinVer from the tag itself (see
+# Directory.Build.props). The leading `v` is stripped; tag exactly matches
+# the released package version. Prereleases are fine (`v0.2.0-alpha.1`).
+# A matching GitHub Release is created with the built .nupkg files
+# attached for traceability.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Optional MinVer version override (e.g. 0.1.0). Leave blank to use git tag."
+        required: false
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+
+jobs:
+  publish:
+    name: Pack & Publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # MinVer walks git history to find the nearest tag + commit
+          # height, and Source Link embeds commit SHAs into PDBs. Both
+          # need the full history, not a shallow clone.
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: Directory.Packages.props
+
+      # src/AhjoVulkan references src/AhjoVulkan.Native, so restoring +
+      # building the wrapper pulls the Native project in transitively.
+      - name: Restore
+        run: dotnet restore src/AhjoVulkan/AhjoVulkan.csproj
+
+      - name: Build (Release)
+        env:
+          MinVerVersionOverride: ${{ inputs.version }}
+        run: >-
+          dotnet build src/AhjoVulkan/AhjoVulkan.csproj
+          -c Release
+          --no-restore
+
+      - name: Pack
+        env:
+          MinVerVersionOverride: ${{ inputs.version }}
+        run: |
+          dotnet pack src/AhjoVulkan/AhjoVulkan.csproj \
+            -c Release \
+            --no-build \
+            -o "${{ github.workspace }}/artifacts"
+          dotnet pack src/AhjoVulkan.Native/AhjoVulkan.Native.csproj \
+            -c Release \
+            --no-build \
+            -o "${{ github.workspace }}/artifacts"
+
+      - name: List artifacts
+        run: ls -la ${{ github.workspace }}/artifacts
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: ${{ github.workspace }}/artifacts/*.*nupkg
+          if-no-files-found: error
+
+      - name: Push to NuGet.org
+        run: >-
+          dotnet nuget push "${{ github.workspace }}/artifacts/*.nupkg"
+          --api-key ${{ secrets.NUGET }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            ${{ github.workspace }}/artifacts/*.nupkg
+            ${{ github.workspace }}/artifacts/*.snupkg

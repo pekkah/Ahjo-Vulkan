@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="src/AhjoVulkan.Native/AhjoVulkan.Native.csproj" />
+  <Project Path="src/AhjoVulkan.Utilities/AhjoVulkan.Utilities.csproj" />
+  <Project Path="src/AhjoVulkan/AhjoVulkan.csproj" />
+  <Project Path="tests/AhjoVulkan.Native.Tests/AhjoVulkan.Native.Tests.csproj" />
+  <Project Path="tests/AhjoVulkan.Tests/AhjoVulkan.Tests.csproj" />
+</Solution>

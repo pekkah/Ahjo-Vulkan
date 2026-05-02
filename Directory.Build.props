@@ -1,0 +1,63 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Pinned Vulkan-Headers tag. Bump deliberately; the generated
+         bindings are committed and a regen run is required after a bump.
+         See https://github.com/KhronosGroup/Vulkan-Headers/releases. -->
+    <VulkanHeadersVersion>v1.4.300</VulkanHeadersVersion>
+    <RepositoryRoot>$(MSBuildThisFileDirectory)</RepositoryRoot>
+    <NativeDir>$(RepositoryRoot)native\</NativeDir>
+    <ToolsDir>$(RepositoryRoot)tools\</ToolsDir>
+  </PropertyGroup>
+
+  <!--
+    Package metadata shared by all publishable projects.
+
+    Defaults: nothing is packable unless the project explicitly opts in with
+    <IsPackable>true</IsPackable> + <PackageId>. Today the two publishable
+    projects are src/AhjoVulkan (Ahjo.Vulkan) and src/AhjoVulkan.Native
+    (Ahjo.Vulkan.Native). Samples, tests, and the Utilities helper library
+    stay unpublished.
+
+    Version: the publish workflow (.github/workflows/publish.yml) overrides
+    MinVer's tag-derived version via `MinVerVersionOverride` when needed.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <Authors>Pekka Heikura</Authors>
+    <Company>Ahjo</Company>
+    <Product>Ahjo.Vulkan</Product>
+    <Copyright>Copyright (c) Pekka Heikura</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/pekkah/ahjo-vulkan</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/pekkah/ahjo-vulkan</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>vulkan;graphics;gpu;interop;native</PackageTags>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    <Deterministic>true</Deterministic>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <!--
+    Package READMEs live next to each packable csproj
+    (src/AhjoVulkan/README.md + src/AhjoVulkan.Native/README.md). The
+    repo-root README.md stays contributor-focused and doesn't ship in
+    either nupkg.
+  -->
+
+</Project>

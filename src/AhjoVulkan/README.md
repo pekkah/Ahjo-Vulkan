@@ -1,0 +1,47 @@
+# Ahjo.Vulkan
+
+Idiomatic C# wrapper over [Vulkan](https://www.vulkan.org/). Built for
+games: `ref struct` command-buffer recorders, `readonly struct` resource
+handles, zero heap allocations on per-frame paths.
+
+> **Status: pre-1.0.** The public surface may shift between 0.x releases
+> as the wrapper fills in remaining Vulkan coverage. Tag your
+> `PackageReference` to an exact version.
+
+## Install
+
+```shell
+dotnet add package Ahjo.Vulkan
+```
+
+The Vulkan loader is platform-supplied — see
+[`Ahjo.Vulkan.Native`](https://www.nuget.org/packages/Ahjo.Vulkan.Native)
+for runtime requirements (Windows GPU drivers / `libvulkan1` on Linux /
+MoltenVK on macOS).
+
+## Platforms
+
+Runs everywhere a Vulkan 1.4 loader is available: Windows, Linux, macOS
+(via MoltenVK) on x64 and arm64. TFM: `net10.0`.
+
+## Design principles
+
+Games-first. Low allocation, raw-pointer friendly, minimal ceremony.
+
+This is an **opinionated** wrapper — not a SafeHandle-shaped .NET port.
+Same load-bearing idioms as the Ahjo Wgpu wrapper:
+
+- **Struct handles.** `Buffer`, `Image`, `Pipeline`, etc. are
+  `readonly struct`s holding one Vulkan handle. Copy-by-value, no
+  finalizer, `default(T)` is a legal null handle, double-dispose is UB.
+- **`ref struct` command recorders + span-parameter descriptors.**
+  Recorders don't escape methods; spans live on method parameters, not
+  descriptor fields, to keep escape-analysis happy.
+
+## Repository
+
+Source, issues, samples: <https://github.com/pekkah/ahjo-vulkan>
+
+## License
+
+MIT. © Pekka Heikura.

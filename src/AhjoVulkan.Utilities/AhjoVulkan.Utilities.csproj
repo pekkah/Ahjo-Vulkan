@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AhjoVulkan.Utilities</RootNamespace>
+    <AssemblyName>AhjoVulkan.Utilities</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!--
+    Dep-free helpers usable from samples and tests (e.g. PNG encoding for
+    headless screenshot tests, SPIR-V loading helpers). Not published.
+  -->
+
+</Project>

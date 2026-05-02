@@ -1,0 +1,40 @@
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <!--
+    ClangSharpPInvokeGenerator is consumed as a dotnet tool (see
+    .config/dotnet-tools.json); the tool bundles the libclang natives
+    for all supported RIDs, so no per-OS runtime packages are needed.
+  -->
+
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.4.0" />
+    <PackageVersion Include="xunit.v3" Version="3.2.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="Verify.XunitV3" Version="31.16.1" />
+  </ItemGroup>
+
+  <!-- Derives package version from git tags + commit height; see
+       Directory.Build.props and .github/workflows/publish.yml. -->
+  <ItemGroup>
+    <PackageVersion Include="MinVer" Version="6.0.0" />
+  </ItemGroup>
+
+  <!-- Window/surface integration for samples (SDL3 has built-in Vulkan
+       surface creation helpers). -->
+  <ItemGroup>
+    <PackageVersion Include="SDL3-CS" Version="3.4.2" />
+    <PackageVersion Include="SDL3-CS.Native" Version="3.4.2" />
+  </ItemGroup>
+
+  <!-- On-demand allocation + latency benchmarks (tests/AhjoVulkan.Benchmarks).
+       Not referenced from CI; runs require a GPU. -->
+  <ItemGroup>
+    <PackageVersion Include="BenchmarkDotNet" Version="0.14.0" />
+  </ItemGroup>
+
+</Project>

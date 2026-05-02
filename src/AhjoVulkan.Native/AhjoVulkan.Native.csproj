@@ -1,0 +1,114 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AhjoVulkan.Native</RootNamespace>
+    <AssemblyName>AhjoVulkan.Native</AssemblyName>
+    <GeneratedDir>$(MSBuildProjectDirectory)\Generated\</GeneratedDir>
+    <GeneratorResponseFile>$(ToolsDir)generate.rsp</GeneratorResponseFile>
+  </PropertyGroup>
+
+  <!--
+    Published as "Ahjo.Vulkan.Native" on NuGet.
+
+    Unlike wgpu-native, the Vulkan loader is platform-supplied:
+      Windows: vulkan-1.dll (ships with GPU drivers / VulkanRT / Vulkan SDK)
+      Linux:   libvulkan.so.1 (libvulkan1 package, or Mesa/proprietary driver)
+      macOS:   libvulkan.dylib via MoltenVK (Vulkan SDK install)
+
+    We do NOT bundle the loader in the nupkg. A DllImportResolver in
+    AssemblyAttributes.cs maps the canonical "vulkan-1" library name to the
+    correct per-OS soname so DllImport resolves cleanly without consumer
+    setup. See README for runtime requirements.
+  -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Ahjo.Vulkan.Native</PackageId>
+    <Title>Ahjo.Vulkan.Native</Title>
+    <Description>Raw P/Invoke bindings for Vulkan ($(VulkanHeadersVersion)). 1:1 with vulkan.h. Loader is platform-supplied (Vulkan SDK / VulkanRT / libvulkan1 / MoltenVK).</Description>
+    <PackageTags>vulkan;graphics;gpu;interop;native;pinvoke;bindings</PackageTags>
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <_VulkanHeadersZipUrl>https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/$(VulkanHeadersVersion).zip</_VulkanHeadersZipUrl>
+    <_VulkanHeadersZipPath>$(NativeDir)downloaded\Vulkan-Headers-$(VulkanHeadersVersion).zip</_VulkanHeadersZipPath>
+    <_VulkanHeadersExtractDir>$(NativeDir)downloaded\Vulkan-Headers-$(VulkanHeadersVersion)\</_VulkanHeadersExtractDir>
+    <_VulkanIncludeStaging>$(NativeDir)include\</_VulkanIncludeStaging>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <!--
+    Regenerate target: fetches pinned Vulkan-Headers and runs
+    ClangSharpPInvokeGenerator. Not wired into Build on purpose —
+    regeneration is a deliberate step; the generated C# is committed to
+    the repo.
+
+    Usage: dotnet build src/AhjoVulkan.Native /t:Regenerate
+  -->
+  <Target Name="Regenerate" DependsOnTargets="FetchVulkanHeaders;CopyGeneratedHeaders;RunClangSharpGenerator" />
+
+  <Target Name="FetchVulkanHeaders"
+          Condition="!Exists('$(_VulkanHeadersExtractDir)include\vulkan\vulkan.h')">
+    <MakeDir Directories="$(NativeDir)downloaded" />
+
+    <DownloadFile
+      SourceUrl="$(_VulkanHeadersZipUrl)"
+      DestinationFolder="$(NativeDir)downloaded"
+      DestinationFileName="Vulkan-Headers-$(VulkanHeadersVersion).zip"
+      SkipUnchangedFiles="true"
+      Condition="!Exists('$(_VulkanHeadersZipPath)')" />
+
+    <Unzip
+      SourceFiles="$(_VulkanHeadersZipPath)"
+      DestinationFolder="$(NativeDir)downloaded\"
+      OverwriteReadOnlyFiles="true" />
+
+    <!--
+      The KhronosGroup zip extracts to Vulkan-Headers-<version-without-v>/.
+      Symlink-rename the directory to a predictable path so downstream
+      targets don't have to do tag-string surgery.
+    -->
+    <ItemGroup>
+      <_ExtractedRoot Include="$(NativeDir)downloaded\Vulkan-Headers-*\" Exclude="$(_VulkanHeadersExtractDir)" />
+    </ItemGroup>
+    <Move
+      SourceFiles="@(_ExtractedRoot)"
+      DestinationFolder="$(_VulkanHeadersExtractDir)"
+      Condition="'@(_ExtractedRoot)' != ''" />
+  </Target>
+
+  <Target Name="CopyGeneratedHeaders" DependsOnTargets="FetchVulkanHeaders">
+    <MakeDir Directories="$(_VulkanIncludeStaging)" />
+
+    <ItemGroup>
+      <_HeaderFiles Include="$(_VulkanHeadersExtractDir)include\vulkan\**\*.h" />
+      <_VkVideoFiles Include="$(_VulkanHeadersExtractDir)include\vk_video\**\*.h" />
+    </ItemGroup>
+
+    <Copy
+      SourceFiles="@(_HeaderFiles)"
+      DestinationFiles="@(_HeaderFiles->'$(_VulkanIncludeStaging)vulkan\%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true" />
+
+    <Copy
+      SourceFiles="@(_VkVideoFiles)"
+      DestinationFiles="@(_VkVideoFiles->'$(_VulkanIncludeStaging)vk_video\%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true" />
+
+    <Message Importance="high" Text="Fetched Vulkan-Headers $(VulkanHeadersVersion) to $(_VulkanIncludeStaging)" />
+  </Target>
+
+  <Target Name="RunClangSharpGenerator" DependsOnTargets="CopyGeneratedHeaders">
+    <MakeDir Directories="$(GeneratedDir)" />
+    <Exec
+      Command="dotnet tool run ClangSharpPInvokeGenerator @&quot;$(GeneratorResponseFile)&quot;"
+      WorkingDirectory="$(RepositoryRoot)" />
+    <Message Importance="high" Text="Generated bindings written to $(GeneratedDir)" />
+  </Target>
+
+</Project>

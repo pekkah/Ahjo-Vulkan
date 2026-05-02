@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AhjoVulkan</RootNamespace>
+    <AssemblyName>AhjoVulkan</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Ahjo.Vulkan</PackageId>
+    <Title>Ahjo.Vulkan</Title>
+    <Description>Idiomatic C# wrapper over Vulkan: ref-struct command buffers, struct handles, zero-per-frame allocations.</Description>
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AhjoVulkan.Native\AhjoVulkan.Native.csproj" />
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AhjoVulkan.Tests" />
+  </ItemGroup>
+
+</Project>
