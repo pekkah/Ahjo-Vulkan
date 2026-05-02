@@ -11,7 +11,7 @@ namespace Ahjo.Vulkan.Vma;
 /// is undefined behavior. Copy-by-value is intentional — every wrapper in
 /// this assembly follows the struct-handle pattern.</para>
 /// <para>Skeleton only — implementation lands together with the generated
-/// <c>AhjoVulkan.Vma.Native</c> bindings.</para>
+/// <c>Ahjo.Vulkan.Vma.Native</c> bindings.</para>
 /// </remarks>
 public readonly struct Allocator : IDisposable
 {

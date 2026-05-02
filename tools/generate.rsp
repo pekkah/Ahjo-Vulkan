@@ -9,7 +9,7 @@ Vk
 --libraryPath
 vulkan-1
 --output
-src/AhjoVulkan.Native/Generated
+src/Ahjo.Vulkan.Native/Generated
 --output-mode
 CSharp
 --language

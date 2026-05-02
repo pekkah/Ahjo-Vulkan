@@ -72,7 +72,7 @@ jobs:
       # ---- VMA native artifact aggregation (when shipping VMA) ----
       # Download all per-RID artifacts produced by build-vma-native.yml and
       # stage them at native/vma/build/<rid>/<libname>, which is exactly
-      # where AhjoVulkan.Vma.Native.csproj's PackVmaRuntimes target looks.
+      # where Ahjo.Vulkan.Vma.Native.csproj's PackVmaRuntimes target looks.
       - name: Download VMA native artifacts
         if: needs.build-vma.result == 'success'
         uses: actions/download-artifact@v4
@@ -92,16 +92,16 @@ jobs:
           done
 
       # ---- Core packages (Ahjo.Vulkan + Ahjo.Vulkan.Native) ----
-      # Always packed. src/AhjoVulkan references src/AhjoVulkan.Native, so
+      # Always packed. src/Ahjo.Vulkan references src/Ahjo.Vulkan.Native, so
       # restoring + building the wrapper pulls the Native project in.
       - name: Restore (core)
-        run: dotnet restore src/AhjoVulkan/AhjoVulkan.csproj
+        run: dotnet restore src/Ahjo.Vulkan/Ahjo.Vulkan.csproj
 
       - name: Build (core, Release)
         env:
           MinVerVersionOverride: ${{ inputs.version }}
         run: >-
-          dotnet build src/AhjoVulkan/AhjoVulkan.csproj
+          dotnet build src/Ahjo.Vulkan/Ahjo.Vulkan.csproj
           -c Release
           --no-restore
 
@@ -109,11 +109,11 @@ jobs:
         env:
           MinVerVersionOverride: ${{ inputs.version }}
         run: |
-          dotnet pack src/AhjoVulkan/AhjoVulkan.csproj \
+          dotnet pack src/Ahjo.Vulkan/Ahjo.Vulkan.csproj \
             -c Release \
             --no-build \
             -o "${{ github.workspace }}/artifacts"
-          dotnet pack src/AhjoVulkan.Native/AhjoVulkan.Native.csproj \
+          dotnet pack src/Ahjo.Vulkan.Native/Ahjo.Vulkan.Native.csproj \
             -c Release \
             --no-build \
             -o "${{ github.workspace }}/artifacts"
@@ -123,14 +123,14 @@ jobs:
       # (downloaded above), don't ask MSBuild to rebuild the host RID.
       - name: Restore (VMA)
         if: needs.build-vma.result == 'success'
-        run: dotnet restore src/AhjoVulkan.Vma/AhjoVulkan.Vma.csproj
+        run: dotnet restore src/Ahjo.Vulkan.Vma/Ahjo.Vulkan.Vma.csproj
 
       - name: Build (VMA, Release)
         if: needs.build-vma.result == 'success'
         env:
           MinVerVersionOverride: ${{ inputs.version }}
         run: >-
-          dotnet build src/AhjoVulkan.Vma/AhjoVulkan.Vma.csproj
+          dotnet build src/Ahjo.Vulkan.Vma/Ahjo.Vulkan.Vma.csproj
           -c Release
           --no-restore
           -p:SkipVmaNativeBuild=true
@@ -140,12 +140,12 @@ jobs:
         env:
           MinVerVersionOverride: ${{ inputs.version }}
         run: |
-          dotnet pack src/AhjoVulkan.Vma/AhjoVulkan.Vma.csproj \
+          dotnet pack src/Ahjo.Vulkan.Vma/Ahjo.Vulkan.Vma.csproj \
             -c Release \
             --no-build \
             -p:SkipVmaNativeBuild=true \
             -o "${{ github.workspace }}/artifacts"
-          dotnet pack src/AhjoVulkan.Vma.Native/AhjoVulkan.Vma.Native.csproj \
+          dotnet pack src/Ahjo.Vulkan.Vma.Native/Ahjo.Vulkan.Vma.Native.csproj \
             -c Release \
             --no-build \
             -p:SkipVmaNativeBuild=true \

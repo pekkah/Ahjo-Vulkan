@@ -20,10 +20,9 @@ NuGet as two packages:
   `runtimes/<rid>/native/`. Versioned independently from core via the
   `vma-v*` tag prefix.
 
-All `csproj` `RootNamespace` values use the dotted form (`Ahjo.Vulkan`,
-`Ahjo.Vulkan.Native`, `Ahjo.Vulkan.Vma`, …) to match the published
-package IDs. Project / assembly file names keep the compact
-`AhjoVulkan*` form for filesystem and IDE friendliness.
+Project folders, csproj filenames, `AssemblyName`, `RootNamespace`, and
+NuGet `PackageId` all use the dotted `Ahjo.Vulkan*` form — one canonical
+spelling everywhere.
 
 This sister project parallels [`ahjo-wgpu`](https://github.com/pekkah/wgpu-sharp)
 and follows the same architecture: ClangSharp-generated P/Invokes,
@@ -32,14 +31,14 @@ version derivation, GitHub Actions for CI + tag-driven NuGet publish.
 
 ## Layout
 
-- `src/AhjoVulkan.Native` — ClangSharp-generated P/Invokes against `vulkan.h`. Regenerated via `dotnet build -t:Regenerate`. Ships as `Ahjo.Vulkan.Native`.
-- `src/AhjoVulkan` — idiomatic wrapper. Ships as `Ahjo.Vulkan`.
-- `src/AhjoVulkan.Vma.Native` — ClangSharp-generated P/Invokes against `vk_mem_alloc.h`. Builds + ships `vma.{dll,so,dylib}` for every RID. Ships as `Ahjo.Vulkan.Vma.Native`.
-- `src/AhjoVulkan.Vma` — idiomatic VMA wrapper (`Allocator`, `Allocation`, `AllocatedBuffer`, `MappedRegion`). Ships as `Ahjo.Vulkan.Vma`.
-- `src/AhjoVulkan.Utilities` — dep-free helpers usable from samples and tests. Not published.
+- `src/Ahjo.Vulkan.Native` — ClangSharp-generated P/Invokes against `vulkan.h`. Regenerated via `dotnet build -t:Regenerate`. Ships as `Ahjo.Vulkan.Native`.
+- `src/Ahjo.Vulkan` — idiomatic wrapper. Ships as `Ahjo.Vulkan`.
+- `src/Ahjo.Vulkan.Vma.Native` — ClangSharp-generated P/Invokes against `vk_mem_alloc.h`. Builds + ships `vma.{dll,so,dylib}` for every RID. Ships as `Ahjo.Vulkan.Vma.Native`.
+- `src/Ahjo.Vulkan.Vma` — idiomatic VMA wrapper (`Allocator`, `Allocation`, `AllocatedBuffer`, `MappedRegion`). Ships as `Ahjo.Vulkan.Vma`.
+- `src/Ahjo.Vulkan.Utilities` — dep-free helpers usable from samples and tests. Not published.
 - `native/vma/` — VMA impl translation unit (`src/vma.cpp`) + `CMakeLists.txt`. Source for the SHARED library packaged in `Ahjo.Vulkan.Vma.Native`.
-- `tests/AhjoVulkan.Native.Tests` — xUnit smoke suite over the raw bindings.
-- `tests/AhjoVulkan.Tests` — xUnit integration tests over the wrapper.
+- `tests/Ahjo.Vulkan.Native.Tests` — xUnit smoke suite over the raw bindings.
+- `tests/Ahjo.Vulkan.Tests` — xUnit integration tests over the wrapper.
 
 ## Design principles
 
@@ -51,9 +50,9 @@ is not a goal — perf and zero per-frame allocations take precedence.
 
 ```bash
 dotnet tool restore
-dotnet build src/AhjoVulkan.Native -t:Regenerate       # Vulkan headers + bindings
-dotnet build src/AhjoVulkan.Vma.Native -t:Regenerate   # VMA headers + bindings (also needs cmake on PATH)
-dotnet build AhjoVulkan.slnx
+dotnet build src/Ahjo.Vulkan.Native -t:Regenerate       # Vulkan headers + bindings
+dotnet build src/Ahjo.Vulkan.Vma.Native -t:Regenerate   # VMA headers + bindings (also needs cmake on PATH)
+dotnet build Ahjo.Vulkan.slnx
 dotnet test
 ```
 

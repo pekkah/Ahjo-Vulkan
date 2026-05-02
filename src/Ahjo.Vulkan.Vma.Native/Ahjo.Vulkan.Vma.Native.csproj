@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <RootNamespace>Ahjo.Vulkan.Vma.Native</RootNamespace>
-    <AssemblyName>AhjoVulkan.Vma.Native</AssemblyName>
+    <AssemblyName>Ahjo.Vulkan.Vma.Native</AssemblyName>
     <GeneratedDir>$(MSBuildProjectDirectory)\Generated\</GeneratedDir>
     <GeneratorResponseFile>$(ToolsDir)generate-vma.rsp</GeneratorResponseFile>
   </PropertyGroup>
@@ -53,7 +53,7 @@
     <_VmaBuildDir>$(_VmaBuildRootDir)$(_VmaRid)\</_VmaBuildDir>
     <_VmaStagedBinary>$(_VmaBuildDir)$(_VmaLibFile)</_VmaStagedBinary>
 
-    <!-- Path to Vulkan-Headers staging from the sibling AhjoVulkan.Native
+    <!-- Path to Vulkan-Headers staging from the sibling Ahjo.Vulkan.Native
          project. The Native csproj's CopyGeneratedHeaders already populates
          this directory; VMA's compile uses it as the system include root. -->
     <_VulkanHeadersIncludeDir>$(NativeDir)include\</_VulkanHeadersIncludeDir>
@@ -62,12 +62,12 @@
   <ItemGroup>
     <PackageReference Include="MinVer" PrivateAssets="all" />
     <None Include="README.md" Pack="true" PackagePath="\" />
-    <ProjectReference Include="..\AhjoVulkan.Native\AhjoVulkan.Native.csproj" />
+    <ProjectReference Include="..\Ahjo.Vulkan.Native\Ahjo.Vulkan.Native.csproj" />
   </ItemGroup>
 
   <!--
     Stage the host's vma binary into every downstream project's output.
-    Same Content+Link trick AhjoVulkan.Native uses for vulkan-1: the file
+    Same Content+Link trick Ahjo.Vulkan.Native uses for vulkan-1: the file
     propagates through ProjectReference automatically.
   -->
   <ItemGroup Condition="'$(_VmaLibFile)' != ''">
@@ -83,7 +83,7 @@
     have been staged, then runs ClangSharpPInvokeGenerator. Not wired
     into Build — regeneration is deliberate; generated C# is committed.
 
-    Usage: dotnet build src/AhjoVulkan.Vma.Native /t:Regenerate
+    Usage: dotnet build src/Ahjo.Vulkan.Vma.Native /t:Regenerate
   -->
   <Target Name="Regenerate" DependsOnTargets="FetchVma;EnsureVulkanHeaders;RunClangSharpVmaGenerator" />
 
@@ -115,14 +115,14 @@
       Condition="'@(_VmaExtractedRoot)' != ''" />
   </Target>
 
-  <!-- Vulkan-Headers fetch is owned by AhjoVulkan.Native. Trigger it via
+  <!-- Vulkan-Headers fetch is owned by Ahjo.Vulkan.Native. Trigger it via
        ProjectReference target invocation so VMA's codegen + compile both
        see vulkan/vulkan.h without duplicating the fetch logic. -->
   <Target Name="EnsureVulkanHeaders">
     <MSBuild
-      Projects="..\AhjoVulkan.Native\AhjoVulkan.Native.csproj"
+      Projects="..\Ahjo.Vulkan.Native\Ahjo.Vulkan.Native.csproj"
       Targets="CopyGeneratedHeaders"
-      Properties="GeneratedDir=$([MSBuild]::EnsureTrailingSlash('$(MSBuildProjectDirectory)/../AhjoVulkan.Native/Generated'))" />
+      Properties="GeneratedDir=$([MSBuild]::EnsureTrailingSlash('$(MSBuildProjectDirectory)/../Ahjo.Vulkan.Native/Generated'))" />
   </Target>
 
   <Target Name="RunClangSharpVmaGenerator" DependsOnTargets="FetchVma;EnsureVulkanHeaders">

@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <RootNamespace>Ahjo.Vulkan.Vma</RootNamespace>
-    <AssemblyName>AhjoVulkan.Vma</AssemblyName>
+    <AssemblyName>Ahjo.Vulkan.Vma</AssemblyName>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -15,8 +15,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\AhjoVulkan\AhjoVulkan.csproj" />
-    <ProjectReference Include="..\AhjoVulkan.Vma.Native\AhjoVulkan.Vma.Native.csproj" />
+    <ProjectReference Include="..\Ahjo.Vulkan\Ahjo.Vulkan.csproj" />
+    <ProjectReference Include="..\Ahjo.Vulkan.Vma.Native\Ahjo.Vulkan.Vma.Native.csproj" />
     <PackageReference Include="MinVer" PrivateAssets="all" />
     <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>

@@ -1,0 +1,9 @@
+<Solution>
+  <Project Path="src/Ahjo.Vulkan.Native/Ahjo.Vulkan.Native.csproj" />
+  <Project Path="src/Ahjo.Vulkan.Utilities/Ahjo.Vulkan.Utilities.csproj" />
+  <Project Path="src/Ahjo.Vulkan/Ahjo.Vulkan.csproj" />
+  <Project Path="src/Ahjo.Vulkan.Vma.Native/Ahjo.Vulkan.Vma.Native.csproj" />
+  <Project Path="src/Ahjo.Vulkan.Vma/Ahjo.Vulkan.Vma.csproj" />
+  <Project Path="tests/Ahjo.Vulkan.Native.Tests/Ahjo.Vulkan.Native.Tests.csproj" />
+  <Project Path="tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj" />
+</Solution>

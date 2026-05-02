@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\AhjoVulkan.Native\AhjoVulkan.Native.csproj" />
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan.Native\Ahjo.Vulkan.Native.csproj" />
   </ItemGroup>
 
 </Project>

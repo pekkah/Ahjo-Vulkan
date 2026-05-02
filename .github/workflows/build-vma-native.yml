@@ -75,7 +75,7 @@ jobs:
       # explicit cmake step below uses per-RID generator/arch flags that
       # the local Build target doesn't pass.
       - name: Fetch VMA + Vulkan-Headers
-        run: dotnet build src/AhjoVulkan.Vma.Native/AhjoVulkan.Vma.Native.csproj -t:FetchVma`;EnsureVulkanHeaders -p:SkipVmaNativeBuild=true --nologo
+        run: dotnet build src/Ahjo.Vulkan.Vma.Native/Ahjo.Vulkan.Vma.Native.csproj -t:FetchVma`;EnsureVulkanHeaders -p:SkipVmaNativeBuild=true --nologo
 
       - name: Configure
         if: runner.os != 'Windows'

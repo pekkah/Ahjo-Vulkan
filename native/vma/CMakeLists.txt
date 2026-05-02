@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Inputs are configured by the MSBuild caller (see AhjoVulkan.Vma.Native.csproj):
+# Inputs are configured by the MSBuild caller (see Ahjo.Vulkan.Vma.Native.csproj):
 #   AHJO_VMA_HEADERS_DIR  — directory containing vk_mem_alloc.h (VMA tag checkout)
 #   AHJO_VULKAN_HEADERS_DIR — directory containing vulkan/vulkan.h (Vulkan-Headers tag checkout)
 if(NOT DEFINED AHJO_VMA_HEADERS_DIR)

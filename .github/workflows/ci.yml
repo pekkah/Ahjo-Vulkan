@@ -62,10 +62,10 @@ jobs:
         run: dotnet tool restore
 
       - name: Build (Release)
-        run: dotnet build AhjoVulkan.slnx -c Release --nologo
+        run: dotnet build Ahjo.Vulkan.slnx -c Release --nologo
 
-      - name: Test — AhjoVulkan.Native.Tests
-        run: dotnet test tests/AhjoVulkan.Native.Tests/AhjoVulkan.Native.Tests.csproj -c Release --no-build --nologo
+      - name: Test — Ahjo.Vulkan.Native.Tests
+        run: dotnet test tests/Ahjo.Vulkan.Native.Tests/Ahjo.Vulkan.Native.Tests.csproj -c Release --no-build --nologo
 
-      - name: Test — AhjoVulkan.Tests
-        run: dotnet test tests/AhjoVulkan.Tests/AhjoVulkan.Tests.csproj -c Release --no-build --nologo
+      - name: Test — Ahjo.Vulkan.Tests
+        run: dotnet test tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj -c Release --no-build --nologo

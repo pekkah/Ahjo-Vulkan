@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <RootNamespace>Ahjo.Vulkan.Native</RootNamespace>
-    <AssemblyName>AhjoVulkan.Native</AssemblyName>
+    <AssemblyName>Ahjo.Vulkan.Native</AssemblyName>
     <GeneratedDir>$(MSBuildProjectDirectory)\Generated\</GeneratedDir>
     <GeneratorResponseFile>$(ToolsDir)generate.rsp</GeneratorResponseFile>
   </PropertyGroup>
@@ -48,7 +48,7 @@
     regeneration is a deliberate step; the generated C# is committed to
     the repo.
 
-    Usage: dotnet build src/AhjoVulkan.Native /t:Regenerate
+    Usage: dotnet build src/Ahjo.Vulkan.Native /t:Regenerate
   -->
   <Target Name="Regenerate" DependsOnTargets="FetchVulkanHeaders;CopyGeneratedHeaders;RunClangSharpGenerator" />
 

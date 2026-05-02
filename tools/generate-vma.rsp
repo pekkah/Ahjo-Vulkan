@@ -11,7 +11,7 @@ Vma
 --libraryPath
 vma
 --output
-src/AhjoVulkan.Vma.Native/Generated
+src/Ahjo.Vulkan.Vma.Native/Generated
 --output-mode
 CSharp
 --language
@@ -45,7 +45,7 @@ VkFlags64=ulong
 # Ahjo.Vulkan.Native. Without these remaps you get parallel, incompatible
 # Vk* type definitions and mixed-package code fails to compile.
 # Keep this list aligned with whatever VMA's public surface exposes — if
-# a regen run produces a duplicate Vk* under AhjoVulkan.Vma.Native/Generated,
+# a regen run produces a duplicate Vk* under Ahjo.Vulkan.Vma.Native/Generated,
 # add the remap here and regenerate.
 # ------------------------------------------------------------------
 --remap

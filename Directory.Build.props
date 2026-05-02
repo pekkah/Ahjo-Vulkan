@@ -31,7 +31,7 @@
 
     Defaults: nothing is packable unless the project explicitly opts in with
     <IsPackable>true</IsPackable> + <PackageId>. Today the two publishable
-    projects are src/AhjoVulkan (Ahjo.Vulkan) and src/AhjoVulkan.Native
+    projects are src/Ahjo.Vulkan (Ahjo.Vulkan) and src/Ahjo.Vulkan.Native
     (Ahjo.Vulkan.Native). Samples, tests, and the Utilities helper library
     stay unpublished.
 
@@ -60,7 +60,7 @@
 
   <!--
     Package READMEs live next to each packable csproj
-    (src/AhjoVulkan/README.md + src/AhjoVulkan.Native/README.md). The
+    (src/Ahjo.Vulkan/README.md + src/Ahjo.Vulkan.Native/README.md). The
     repo-root README.md stays contributor-focused and doesn't ship in
     either nupkg.
   -->

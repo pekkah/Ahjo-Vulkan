@@ -14,8 +14,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\AhjoVulkan\AhjoVulkan.csproj" />
-    <ProjectReference Include="..\..\src\AhjoVulkan.Utilities\AhjoVulkan.Utilities.csproj" />
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan\Ahjo.Vulkan.csproj" />
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan.Utilities\Ahjo.Vulkan.Utilities.csproj" />
   </ItemGroup>
 
 </Project>
