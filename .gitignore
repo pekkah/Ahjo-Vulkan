@@ -229,3 +229,6 @@ $RECYCLE.BIN/
 .direnv/
 .cache/
 node_modules/
+
+# Claude Code local state
+.claude/
