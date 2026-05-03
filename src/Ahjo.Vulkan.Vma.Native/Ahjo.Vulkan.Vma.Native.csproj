@@ -202,8 +202,10 @@
       <_VmaPackRid Include="win-arm64">   <LibFile>vma.dll</LibFile>     </_VmaPackRid>
       <_VmaPackRid Include="linux-x64">   <LibFile>libvma.so</LibFile>   </_VmaPackRid>
       <_VmaPackRid Include="linux-arm64"> <LibFile>libvma.so</LibFile>   </_VmaPackRid>
-      <_VmaPackRid Include="osx-x64">     <LibFile>libvma.dylib</LibFile></_VmaPackRid>
-      <_VmaPackRid Include="osx-arm64">   <LibFile>libvma.dylib</LibFile></_VmaPackRid>
+      <!-- macOS RIDs (osx-x64, osx-arm64) intentionally omitted until
+           the MoltenVK runtime path is validated. -->
+      <!-- <_VmaPackRid Include="osx-x64">   <LibFile>libvma.dylib</LibFile></_VmaPackRid> -->
+      <!-- <_VmaPackRid Include="osx-arm64"> <LibFile>libvma.dylib</LibFile></_VmaPackRid> -->
     </ItemGroup>
 
     <ItemGroup>

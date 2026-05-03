@@ -21,8 +21,9 @@ MoltenVK on macOS).
 
 ## Platforms
 
-Runs everywhere a Vulkan 1.4 loader is available: Windows, Linux, macOS
-(via MoltenVK) on x64 and arm64. TFM: `net10.0`.
+Runs on Windows and Linux (x64, arm64) against a system Vulkan 1.4
+loader. TFM: `net10.0`. macOS support (via MoltenVK) is on the roadmap
+but not currently tested.
 
 ## Design principles
 

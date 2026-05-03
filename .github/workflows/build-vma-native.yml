@@ -1,7 +1,7 @@
 name: Build VMA Native
 
 # Cross-RID build matrix for the VMA SHARED library. Each job builds
-# vma.{dll,so,dylib} for one RID and uploads it as a workflow artifact
+# vma.{dll,so} for one RID and uploads it as a workflow artifact
 # named vma-native-<rid>. The publish workflow downloads all artifacts
 # and aggregates them into a single multi-RID nupkg.
 #
@@ -51,14 +51,10 @@ jobs:
             runs-on: ubuntu-24.04-arm
             lib-file: libvma.so
             built-path: build/linux-arm64/libvma.so
-          - rid: osx-x64
-            runs-on: macos-13
-            lib-file: libvma.dylib
-            built-path: build/osx-x64/libvma.dylib
-          - rid: osx-arm64
-            runs-on: macos-latest
-            lib-file: libvma.dylib
-            built-path: build/osx-arm64/libvma.dylib
+          # macOS RIDs (osx-x64, osx-arm64) are intentionally omitted for
+          # now. The MoltenVK runtime path needs validation before shipping
+          # those binaries; revisit when surface bindings + a Mac sample
+          # land.
 
     steps:
       - name: Checkout

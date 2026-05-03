@@ -32,7 +32,10 @@ dotnet add package Ahjo.Vulkan.Native
 |----------|---------------------------------------------------------------|
 | Windows  | GPU drivers ship `vulkan-1.dll`, or install the Vulkan SDK / VulkanRT |
 | Linux    | `libvulkan1` (Debian/Ubuntu) or distro equivalent             |
-| macOS    | [MoltenVK](https://github.com/KhronosGroup/MoltenVK) via the Vulkan SDK |
+
+The loader resolver code already understands MoltenVK / `libvulkan.dylib`
+on macOS, but macOS isn't a tested target yet — revisit when surface
+bindings + a Mac sample land.
 
 TFM: `net10.0`. Native ABI tracks the pinned Vulkan-Headers release
 version; bumps are minor-version bumps here.

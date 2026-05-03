@@ -1,23 +1,22 @@
-name: Publish
+name: Publish (disabled)
 
-# Publishes Ahjo.Vulkan + Ahjo.Vulkan.Native to NuGet on a pushed git tag.
+# NuGet publishing is currently DISABLED. Tag pushes do not trigger this
+# workflow; only manual workflow_dispatch runs do, and even then the
+# nuget push + GitHub Release steps are gated behind the `release`
+# input. The pack-only path stays usable for verifying the artifact
+# pipeline without shipping anything.
 #
-# Tagging convention:
-#   git tag v0.1.0 && git push origin v0.1.0
+# To re-enable real publishing later:
+#   1) restore the `push: tags: ["v*", "vma-v*"]` trigger below
+#   2) drop the `if: inputs.release == true` guards on the push +
+#      release steps
+#   3) confirm the NUGET secret is configured on the repo
 #
-# Version is derived by MinVer from the tag itself (see
-# Directory.Build.props). The leading `v` is stripped; tag exactly matches
-# the released package version. Prereleases are fine (`v0.2.0-alpha.1`).
-# A matching GitHub Release is created with the built .nupkg files
-# attached for traceability.
+# Tagging convention (when re-enabled):
+#   git tag v0.1.0 && git push origin v0.1.0   (core)
+#   git tag vma-v0.1.0 && git push origin vma-v0.1.0   (VMA)
 
 on:
-  push:
-    # Vulkan core packages: tags v*  (e.g. v0.1.0)
-    # VMA packages:         tags vma-v*  (e.g. vma-v0.1.0)
-    tags:
-      - "v*"
-      - "vma-v*"
   workflow_dispatch:
     inputs:
       version:
@@ -25,7 +24,12 @@ on:
         required: false
         type: string
       include_vma:
-        description: "Pack and publish Ahjo.Vulkan.Vma + Ahjo.Vulkan.Vma.Native too."
+        description: "Pack Ahjo.Vulkan.Vma + Ahjo.Vulkan.Vma.Native too."
+        required: false
+        type: boolean
+        default: false
+      release:
+        description: "Push to NuGet.org and create a GitHub Release. Default: pack only."
         required: false
         type: boolean
         default: false
@@ -83,7 +87,7 @@ jobs:
       - name: Stage VMA binaries for pack
         if: needs.build-vma.result == 'success'
         run: |
-          for rid in win-x64 win-arm64 linux-x64 linux-arm64 osx-x64 osx-arm64; do
+          for rid in win-x64 win-arm64 linux-x64 linux-arm64; do
             mkdir -p "native/vma/build/${rid}"
             src_dir="${{ github.workspace }}/vma-artifacts/vma-native-${rid}"
             if [ -d "$src_dir" ]; then
@@ -161,7 +165,12 @@ jobs:
           path: ${{ github.workspace }}/artifacts/*.*nupkg
           if-no-files-found: error
 
+      # Publish steps below are gated behind the `release` input so that
+      # ad-hoc workflow_dispatch runs can produce + verify nupkgs without
+      # actually shipping anything. Set release=true only when ready to
+      # publish.
       - name: Push to NuGet.org
+        if: inputs.release == true
         run: >-
           dotnet nuget push "${{ github.workspace }}/artifacts/*.nupkg"
           --api-key ${{ secrets.NUGET }}
@@ -169,7 +178,7 @@ jobs:
           --skip-duplicate
 
       - name: Create GitHub Release
-        if: github.event_name == 'push'
+        if: inputs.release == true && github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}

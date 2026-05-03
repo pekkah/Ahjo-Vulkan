@@ -29,8 +29,9 @@ dotnet add package Ahjo.Vulkan.Vma.Native
 | `win-arm64`   | `vma.dll`        |
 | `linux-x64`   | `libvma.so`      |
 | `linux-arm64` | `libvma.so`      |
-| `osx-x64`     | `libvma.dylib`   |
-| `osx-arm64`   | `libvma.dylib`   |
+
+macOS RIDs (`osx-x64`, `osx-arm64`) are not currently shipped — the
+MoltenVK runtime path needs validation before adding them.
 
 TFM: `net10.0`. Native ABI tracks the pinned VMA release version.
 

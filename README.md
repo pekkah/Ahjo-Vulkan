@@ -10,15 +10,16 @@ NuGet as two packages:
   — raw P/Invoke bindings against `vulkan.h`. Pulled in transitively by
   `Ahjo.Vulkan`; referenced directly only if you want to bypass the
   wrapper. The Vulkan loader is platform-supplied (Vulkan SDK / VulkanRT
-  on Windows, `libvulkan1` on Linux, MoltenVK on macOS) — no native
-  binary ships in the nupkg.
+  on Windows, `libvulkan1` on Linux) — no native binary ships in the
+  nupkg.
 - [**Ahjo.Vulkan.Vma**](https://www.nuget.org/packages/Ahjo.Vulkan.Vma) +
   [**Ahjo.Vulkan.Vma.Native**](https://www.nuget.org/packages/Ahjo.Vulkan.Vma.Native)
   — optional integration of [AMD VulkanMemoryAllocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator).
   VMA is C++ header-only, so the `.Native` package ships a prebuilt
-  SHARED library (`vma.{dll,so,dylib}`) for every supported RID under
+  SHARED library (`vma.{dll,so}`) for Windows + Linux (x64, arm64) under
   `runtimes/<rid>/native/`. Versioned independently from core via the
-  `vma-v*` tag prefix.
+  `vma-v*` tag prefix. macOS RIDs aren't shipped today; the MoltenVK
+  runtime path needs validation before adding them.
 
 Project folders, csproj filenames, `AssemblyName`, `RootNamespace`, and
 NuGet `PackageId` all use the dotted `Ahjo.Vulkan*` form — one canonical
