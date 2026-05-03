@@ -1,7 +1,24 @@
 --file
 native/include/vulkan/vulkan.h
 --include-directory
+native/stubs
+--include-directory
 native/include
+--traverse
+native/include/vulkan/vulkan_core.h
+native/include/vulkan/vk_platform.h
+native/include/vk_video/vulkan_video_codec_av1std.h
+native/include/vk_video/vulkan_video_codec_av1std_decode.h
+native/include/vk_video/vulkan_video_codec_av1std_encode.h
+native/include/vk_video/vulkan_video_codec_h264std.h
+native/include/vk_video/vulkan_video_codec_h264std_decode.h
+native/include/vk_video/vulkan_video_codec_h264std_encode.h
+native/include/vk_video/vulkan_video_codec_h265std.h
+native/include/vk_video/vulkan_video_codec_h265std_decode.h
+native/include/vk_video/vulkan_video_codec_h265std_encode.h
+native/include/vk_video/vulkan_video_codec_vp9std.h
+native/include/vk_video/vulkan_video_codec_vp9std_decode.h
+native/include/vk_video/vulkan_video_codecs_common.h
 --namespace
 Ahjo.Vulkan.Native
 --methodClassName
@@ -24,16 +41,14 @@ generate-aggressive-inlining
 exclude-enum-operators
 strip-enum-member-type-name
 multi-file
---define-macro
-VK_USE_PLATFORM_WIN32_KHR
---define-macro
-VK_USE_PLATFORM_XLIB_KHR
---define-macro
-VK_USE_PLATFORM_WAYLAND_KHR
---define-macro
-VK_USE_PLATFORM_METAL_EXT
---define-macro
-VK_USE_PLATFORM_ANDROID_KHR
+# Platform-specific Vulkan extensions (VK_KHR_win32_surface,
+# VK_KHR_xlib_surface, VK_EXT_metal_surface, VK_KHR_android_surface, …)
+# are intentionally NOT enabled here. Each one pulls in a system header
+# (windows.h / X11/Xlib.h / Metal/Metal.h / android/native_window.h)
+# that libclang cannot parse without the matching SDK on the build host.
+# Surface bindings are added in a follow-up pass: either by stubbing the
+# referenced platform types or by a per-platform generator invocation
+# that runs against a real SDK.
 --remap
 size_t=nuint
 VkBool32=uint

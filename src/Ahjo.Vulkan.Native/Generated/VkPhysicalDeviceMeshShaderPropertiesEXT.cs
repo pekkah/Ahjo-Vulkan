@@ -1,0 +1,118 @@
+using System.Runtime.CompilerServices;
+
+namespace Ahjo.Vulkan.Native;
+
+public unsafe partial struct VkPhysicalDeviceMeshShaderPropertiesEXT
+{
+    public VkStructureType sType;
+
+    public void* pNext;
+
+    [NativeTypeName("uint32_t")]
+    public uint maxTaskWorkGroupTotalCount;
+
+    [NativeTypeName("uint32_t[3]")]
+    public _maxTaskWorkGroupCount_e__FixedBuffer maxTaskWorkGroupCount;
+
+    [NativeTypeName("uint32_t")]
+    public uint maxTaskWorkGroupInvocations;
+
+    [NativeTypeName("uint32_t[3]")]
+    public _maxTaskWorkGroupSize_e__FixedBuffer maxTaskWorkGroupSize;
+
+    [NativeTypeName("uint32_t")]
+    public uint maxTaskPayloadSize;
+
+    [NativeTypeName("uint32_t")]
+    public uint maxTaskSharedMemorySize;
+
+    [NativeTypeName("uint32_t")]
+    public uint maxTaskPayloadAndSharedMemorySize;
+
+    [NativeTypeName("uint32_t")]
+    public uint maxMeshWorkGroupTotalCount;
+
+    [NativeTypeName("uint32_t[3]")]
+    public _maxMeshWorkGroupCount_e__FixedBuffer maxMeshWorkGroupCount;
+
+    [NativeTypeName("uint32_t")]
+    public uint maxMeshWorkGroupInvocations;
+
+    [NativeTypeName("uint32_t[3]")]
+    public _maxMeshWorkGroupSize_e__FixedBuffer maxMeshWorkGroupSize;
+
+    [NativeTypeName("uint32_t")]
+    public uint maxMeshSharedMemorySize;
+
+    [NativeTypeName("uint32_t")]
+    public uint maxMeshPayloadAndSharedMemorySize;
+
+    [NativeTypeName("uint32_t")]
+    public uint maxMeshOutputMemorySize;
+
+    [NativeTypeName("uint32_t")]
+    public uint maxMeshPayloadAndOutputMemorySize;
+
+    [NativeTypeName("uint32_t")]
+    public uint maxMeshOutputComponents;
+
+    [NativeTypeName("uint32_t")]
+    public uint maxMeshOutputVertices;
+
+    [NativeTypeName("uint32_t")]
+    public uint maxMeshOutputPrimitives;
+
+    [NativeTypeName("uint32_t")]
+    public uint maxMeshOutputLayers;
+
+    [NativeTypeName("uint32_t")]
+    public uint maxMeshMultiviewViewCount;
+
+    [NativeTypeName("uint32_t")]
+    public uint meshOutputPerVertexGranularity;
+
+    [NativeTypeName("uint32_t")]
+    public uint meshOutputPerPrimitiveGranularity;
+
+    [NativeTypeName("uint32_t")]
+    public uint maxPreferredTaskWorkGroupInvocations;
+
+    [NativeTypeName("uint32_t")]
+    public uint maxPreferredMeshWorkGroupInvocations;
+
+    [NativeTypeName("VkBool32")]
+    public uint prefersLocalInvocationVertexOutput;
+
+    [NativeTypeName("VkBool32")]
+    public uint prefersLocalInvocationPrimitiveOutput;
+
+    [NativeTypeName("VkBool32")]
+    public uint prefersCompactVertexOutput;
+
+    [NativeTypeName("VkBool32")]
+    public uint prefersCompactPrimitiveOutput;
+
+    [InlineArray(3)]
+    public partial struct _maxTaskWorkGroupCount_e__FixedBuffer
+    {
+        public uint e0;
+    }
+
+    [InlineArray(3)]
+    public partial struct _maxTaskWorkGroupSize_e__FixedBuffer
+    {
+        public uint e0;
+    }
+
+    [InlineArray(3)]
+    public partial struct _maxMeshWorkGroupCount_e__FixedBuffer
+    {
+        public uint e0;
+    }
+
+    [InlineArray(3)]
+    public partial struct _maxMeshWorkGroupSize_e__FixedBuffer
+    {
+        public uint e0;
+    }
+}

@@ -1,0 +1,7 @@
+namespace Ahjo.Vulkan.Native;
+
+public enum VkDataGraphPipelineSessionBindPointARM
+{
+    VK_DATA_GRAPH_PIPELINE_SESSION_BIND_POINT_TRANSIENT_ARM = 0,
+    VK_DATA_GRAPH_PIPELINE_SESSION_BIND_POINT_MAX_ENUM_ARM = 0x7FFFFFFF,
+}

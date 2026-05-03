@@ -1,0 +1,10 @@
+namespace Ahjo.Vulkan.Native;
+
+public enum VkFilter
+{
+    VK_FILTER_NEAREST = 0,
+    VK_FILTER_LINEAR = 1,
+    VK_FILTER_CUBIC_EXT = 1000015000,
+    VK_FILTER_CUBIC_IMG = VK_FILTER_CUBIC_EXT,
+    VK_FILTER_MAX_ENUM = 0x7FFFFFFF,
+}

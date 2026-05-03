@@ -1,0 +1,9 @@
+namespace Ahjo.Vulkan.Native;
+
+public enum VkShaderInfoTypeAMD
+{
+    VK_SHADER_INFO_TYPE_STATISTICS_AMD = 0,
+    VK_SHADER_INFO_TYPE_BINARY_AMD = 1,
+    VK_SHADER_INFO_TYPE_DISASSEMBLY_AMD = 2,
+    VK_SHADER_INFO_TYPE_MAX_ENUM_AMD = 0x7FFFFFFF,
+}

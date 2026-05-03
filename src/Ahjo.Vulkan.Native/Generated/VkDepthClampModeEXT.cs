@@ -1,0 +1,8 @@
+namespace Ahjo.Vulkan.Native;
+
+public enum VkDepthClampModeEXT
+{
+    VK_DEPTH_CLAMP_MODE_VIEWPORT_RANGE_EXT = 0,
+    VK_DEPTH_CLAMP_MODE_USER_DEFINED_RANGE_EXT = 1,
+    VK_DEPTH_CLAMP_MODE_MAX_ENUM_EXT = 0x7FFFFFFF,
+}

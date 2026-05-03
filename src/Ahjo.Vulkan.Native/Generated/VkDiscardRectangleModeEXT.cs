@@ -1,0 +1,8 @@
+namespace Ahjo.Vulkan.Native;
+
+public enum VkDiscardRectangleModeEXT
+{
+    VK_DISCARD_RECTANGLE_MODE_INCLUSIVE_EXT = 0,
+    VK_DISCARD_RECTANGLE_MODE_EXCLUSIVE_EXT = 1,
+    VK_DISCARD_RECTANGLE_MODE_MAX_ENUM_EXT = 0x7FFFFFFF,
+}

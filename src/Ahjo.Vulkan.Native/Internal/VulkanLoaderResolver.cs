@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -9,6 +10,8 @@ internal static class VulkanLoaderResolver
     private const string LibraryName = "vulkan-1";
 
     [ModuleInitializer]
+    [SuppressMessage("Usage", "CA2255",
+        Justification = "Registering a DllImportResolver at module load maps the canonical 'vulkan-1' DllImport name to the per-OS loader soname. A static ctor would only fire on first member access, which is too late.")]
     internal static void Register()
     {
         NativeLibrary.SetDllImportResolver(typeof(VulkanLoaderResolver).Assembly, Resolve);

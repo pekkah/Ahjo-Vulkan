@@ -12,7 +12,7 @@
   -->
 
   <ItemGroup>
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.4.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.5.1" />
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <PackageVersion Include="Verify.XunitV3" Version="31.16.1" />
@@ -21,7 +21,7 @@
   <!-- Derives package version from git tags + commit height; see
        Directory.Build.props and .github/workflows/publish.yml. -->
   <ItemGroup>
-    <PackageVersion Include="MinVer" Version="6.0.0" />
+    <PackageVersion Include="MinVer" Version="7.0.0" />
   </ItemGroup>
 
   <!-- Window/surface integration for samples (SDL3 has built-in Vulkan

@@ -53,6 +53,12 @@
     <_VmaBuildDir>$(_VmaBuildRootDir)$(_VmaRid)\</_VmaBuildDir>
     <_VmaStagedBinary>$(_VmaBuildDir)$(_VmaLibFile)</_VmaStagedBinary>
 
+    <!-- Stable header staging path (version-independent) so the
+         generator response file at tools/generate-vma.rsp doesn't have
+         to embed the VMA tag. Mirrors how Vulkan-Headers stage to
+         native/include/vulkan/. -->
+    <_VmaStagedHeaderDir>$(_VmaSrcDir)include\</_VmaStagedHeaderDir>
+
     <!-- Path to Vulkan-Headers staging from the sibling Ahjo.Vulkan.Native
          project. The Native csproj's CopyGeneratedHeaders already populates
          this directory; VMA's compile uses it as the system include root. -->
@@ -70,7 +76,7 @@
     Same Content+Link trick Ahjo.Vulkan.Native uses for vulkan-1: the file
     propagates through ProjectReference automatically.
   -->
-  <ItemGroup Condition="'$(_VmaLibFile)' != ''">
+  <ItemGroup Condition="'$(_VmaLibFile)' != '' and '$(SkipVmaNativeBuild)' != 'true'">
     <None Include="$(_VmaStagedBinary)"
           CopyToOutputDirectory="PreserveNewest"
           Visible="false"
@@ -88,7 +94,7 @@
   <Target Name="Regenerate" DependsOnTargets="FetchVma;EnsureVulkanHeaders;RunClangSharpVmaGenerator" />
 
   <Target Name="FetchVma"
-          Condition="!Exists('$(_VmaHeadersDir)vk_mem_alloc.h')">
+          Condition="!Exists('$(_VmaStagedHeaderDir)vk_mem_alloc.h')">
     <MakeDir Directories="$(_VmaDownloadedRoot)" />
 
     <DownloadFile
@@ -103,16 +109,23 @@
       DestinationFolder="$(_VmaDownloadedRoot)"
       OverwriteReadOnlyFiles="true" />
 
-    <!-- The archive extracts to VulkanMemoryAllocator-<version-without-v>/.
-         Normalize to a predictable path so downstream targets don't have
-         to do tag-string surgery. -->
+    <!-- GitHub's archive strips the leading 'v' from tag names, so a
+         tag 'v3.3.0' extracts to 'VulkanMemoryAllocator-3.3.0/'.
+         Discover the header via wildcard instead of computing the
+         extracted directory name from the tag. -->
     <ItemGroup>
-      <_VmaExtractedRoot Include="$(_VmaDownloadedRoot)VulkanMemoryAllocator-*\" Exclude="$(_VmaExtractDir)" />
+      <_VmaExtractedHeader Include="$(_VmaDownloadedRoot)VulkanMemoryAllocator-*\include\vk_mem_alloc.h" />
     </ItemGroup>
-    <Move
-      SourceFiles="@(_VmaExtractedRoot)"
-      DestinationFolder="$(_VmaExtractDir)"
-      Condition="'@(_VmaExtractedRoot)' != ''" />
+
+    <Error
+      Condition="'@(_VmaExtractedHeader)' == ''"
+      Text="Could not locate vk_mem_alloc.h under $(_VmaDownloadedRoot) after extracting $(_VmaZipPath)." />
+
+    <MakeDir Directories="$(_VmaStagedHeaderDir)" />
+    <Copy
+      SourceFiles="@(_VmaExtractedHeader)"
+      DestinationFolder="$(_VmaStagedHeaderDir)"
+      SkipUnchangedFiles="true" />
   </Target>
 
   <!-- Vulkan-Headers fetch is owned by Ahjo.Vulkan.Native. Trigger it via
@@ -153,7 +166,7 @@
     <MakeDir Directories="$(_VmaBuildDir)" />
 
     <Exec
-      Command="cmake -S &quot;$(_VmaSrcDir.TrimEnd('\'))&quot; -B &quot;$(_VmaBuildDir.TrimEnd('\'))&quot; -DCMAKE_BUILD_TYPE=Release -DAHJO_VMA_HEADERS_DIR=&quot;$(_VmaHeadersDir.TrimEnd('\'))&quot; -DAHJO_VULKAN_HEADERS_DIR=&quot;$(_VulkanHeadersIncludeDir.TrimEnd('\'))&quot;"
+      Command="cmake -S &quot;$(_VmaSrcDir.TrimEnd('\'))&quot; -B &quot;$(_VmaBuildDir.TrimEnd('\'))&quot; -DCMAKE_BUILD_TYPE=Release -DAHJO_VMA_HEADERS_DIR=&quot;$(_VmaStagedHeaderDir.TrimEnd('\'))&quot; -DAHJO_VULKAN_HEADERS_DIR=&quot;$(_VulkanHeadersIncludeDir.TrimEnd('\'))&quot;"
       WorkingDirectory="$(RepositoryRoot)" />
 
     <Exec

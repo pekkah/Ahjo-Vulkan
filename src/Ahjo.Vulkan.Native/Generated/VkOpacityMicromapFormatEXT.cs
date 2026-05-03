@@ -1,0 +1,8 @@
+namespace Ahjo.Vulkan.Native;
+
+public enum VkOpacityMicromapFormatEXT
+{
+    VK_OPACITY_MICROMAP_FORMAT_2_STATE_EXT = 1,
+    VK_OPACITY_MICROMAP_FORMAT_4_STATE_EXT = 2,
+    VK_OPACITY_MICROMAP_FORMAT_MAX_ENUM_EXT = 0x7FFFFFFF,
+}

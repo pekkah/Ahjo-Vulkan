@@ -1,0 +1,56 @@
+using System.Runtime.CompilerServices;
+
+namespace Ahjo.Vulkan.Native;
+
+public partial struct StdVideoDecodeH265PictureInfo
+{
+    public StdVideoDecodeH265PictureInfoFlags flags;
+
+    [NativeTypeName("uint8_t")]
+    public byte sps_video_parameter_set_id;
+
+    [NativeTypeName("uint8_t")]
+    public byte pps_seq_parameter_set_id;
+
+    [NativeTypeName("uint8_t")]
+    public byte pps_pic_parameter_set_id;
+
+    [NativeTypeName("uint8_t")]
+    public byte NumDeltaPocsOfRefRpsIdx;
+
+    [NativeTypeName("int32_t")]
+    public int PicOrderCntVal;
+
+    [NativeTypeName("uint16_t")]
+    public ushort NumBitsForSTRefPicSetInSlice;
+
+    [NativeTypeName("uint16_t")]
+    public ushort reserved;
+
+    [NativeTypeName("uint8_t[8]")]
+    public _RefPicSetStCurrBefore_e__FixedBuffer RefPicSetStCurrBefore;
+
+    [NativeTypeName("uint8_t[8]")]
+    public _RefPicSetStCurrAfter_e__FixedBuffer RefPicSetStCurrAfter;
+
+    [NativeTypeName("uint8_t[8]")]
+    public _RefPicSetLtCurr_e__FixedBuffer RefPicSetLtCurr;
+
+    [InlineArray(8)]
+    public partial struct _RefPicSetStCurrBefore_e__FixedBuffer
+    {
+        public byte e0;
+    }
+
+    [InlineArray(8)]
+    public partial struct _RefPicSetStCurrAfter_e__FixedBuffer
+    {
+        public byte e0;
+    }
+
+    [InlineArray(8)]
+    public partial struct _RefPicSetLtCurr_e__FixedBuffer
+    {
+        public byte e0;
+    }
+}

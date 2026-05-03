@@ -1,0 +1,7 @@
+namespace Ahjo.Vulkan.Native;
+
+public enum VkDataGraphModelCacheTypeQCOM
+{
+    VK_DATA_GRAPH_MODEL_CACHE_TYPE_GENERIC_BINARY_QCOM = 0,
+    VK_DATA_GRAPH_MODEL_CACHE_TYPE_MAX_ENUM_QCOM = 0x7FFFFFFF,
+}

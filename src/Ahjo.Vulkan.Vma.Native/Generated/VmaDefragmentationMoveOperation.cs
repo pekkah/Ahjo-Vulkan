@@ -1,0 +1,8 @@
+namespace Ahjo.Vulkan.Vma.Native;
+
+public enum VmaDefragmentationMoveOperation
+{
+    VMA_DEFRAGMENTATION_MOVE_OPERATION_COPY = 0,
+    VMA_DEFRAGMENTATION_MOVE_OPERATION_IGNORE = 1,
+    VMA_DEFRAGMENTATION_MOVE_OPERATION_DESTROY = 2,
+}

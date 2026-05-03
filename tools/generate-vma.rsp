@@ -1,9 +1,11 @@
 --file
-native/vma/downloaded/VulkanMemoryAllocator-v3.1.0/include/vk_mem_alloc.h
+native/vma/include/vk_mem_alloc.h
+--include-directory
+native/stubs
 --include-directory
 native/include
 --include-directory
-native/vma/downloaded/VulkanMemoryAllocator-v3.1.0/include
+native/vma/include
 --namespace
 Ahjo.Vulkan.Vma.Native
 --methodClassName
@@ -15,7 +17,7 @@ src/Ahjo.Vulkan.Vma.Native/Generated
 --output-mode
 CSharp
 --language
-cpp
+c++
 --config
 latest-codegen
 generate-helper-types
@@ -35,38 +37,41 @@ VMA_STATIC_VULKAN_FUNCTIONS=0
 --remap
 size_t=nuint
 VkBool32=uint
+VkDeviceSize=ulong
+VkFlags=uint
+VkFlags64=ulong
+VkMemoryPropertyFlags=uint
+VkMemoryHeapFlags=uint
+VkExternalMemoryHandleTypeFlagsKHR=uint
+VkBufferUsageFlags=uint
+VkImageUsageFlags=uint
+VkResult=Ahjo.Vulkan.Native.VkResult
+VkAllocationCallbacks=Ahjo.Vulkan.Native.VkAllocationCallbacks
+VkBufferCreateInfo=Ahjo.Vulkan.Native.VkBufferCreateInfo
+VkImageCreateInfo=Ahjo.Vulkan.Native.VkImageCreateInfo
+VkMemoryRequirements=Ahjo.Vulkan.Native.VkMemoryRequirements
+VkMemoryRequirements2=Ahjo.Vulkan.Native.VkMemoryRequirements2
+VkPhysicalDeviceProperties=Ahjo.Vulkan.Native.VkPhysicalDeviceProperties
+VkPhysicalDeviceMemoryProperties=Ahjo.Vulkan.Native.VkPhysicalDeviceMemoryProperties
+VkPhysicalDeviceMemoryProperties2=Ahjo.Vulkan.Native.VkPhysicalDeviceMemoryProperties2
+VkInstance_T=Ahjo.Vulkan.Native.VkInstance_T
+VkPhysicalDevice_T=Ahjo.Vulkan.Native.VkPhysicalDevice_T
+VkDevice_T=Ahjo.Vulkan.Native.VkDevice_T
+VkBuffer_T=Ahjo.Vulkan.Native.VkBuffer_T
+VkImage_T=Ahjo.Vulkan.Native.VkImage_T
+VkDeviceMemory_T=Ahjo.Vulkan.Native.VkDeviceMemory_T
+VkCommandBuffer_T=Ahjo.Vulkan.Native.VkCommandBuffer_T
+VkMemoryAllocateInfo=Ahjo.Vulkan.Native.VkMemoryAllocateInfo
+VkMappedMemoryRange=Ahjo.Vulkan.Native.VkMappedMemoryRange
+VkBufferCopy=Ahjo.Vulkan.Native.VkBufferCopy
+VkBufferMemoryRequirementsInfo2=Ahjo.Vulkan.Native.VkBufferMemoryRequirementsInfo2
+VkImageMemoryRequirementsInfo2=Ahjo.Vulkan.Native.VkImageMemoryRequirementsInfo2
+VkBindBufferMemoryInfo=Ahjo.Vulkan.Native.VkBindBufferMemoryInfo
+VkBindImageMemoryInfo=Ahjo.Vulkan.Native.VkBindImageMemoryInfo
+VkDeviceBufferMemoryRequirements=Ahjo.Vulkan.Native.VkDeviceBufferMemoryRequirements
+VkDeviceImageMemoryRequirements=Ahjo.Vulkan.Native.VkDeviceImageMemoryRequirements
 --with-type
 VkFlags=uint
 VkFlags64=ulong
 --with-access-specifier
 *=public
-# ------------------------------------------------------------------
-# Route every Vulkan handle / struct / enum that VMA mentions back to
-# Ahjo.Vulkan.Native. Without these remaps you get parallel, incompatible
-# Vk* type definitions and mixed-package code fails to compile.
-# Keep this list aligned with whatever VMA's public surface exposes — if
-# a regen run produces a duplicate Vk* under Ahjo.Vulkan.Vma.Native/Generated,
-# add the remap here and regenerate.
-# ------------------------------------------------------------------
---remap
-VkInstance=Ahjo.Vulkan.Native.VkInstance
-VkPhysicalDevice=Ahjo.Vulkan.Native.VkPhysicalDevice
-VkDevice=Ahjo.Vulkan.Native.VkDevice
-VkBuffer=Ahjo.Vulkan.Native.VkBuffer
-VkImage=Ahjo.Vulkan.Native.VkImage
-VkDeviceMemory=Ahjo.Vulkan.Native.VkDeviceMemory
-VkResult=Ahjo.Vulkan.Native.VkResult
-VkDeviceSize=ulong
-VkBufferCreateInfo=Ahjo.Vulkan.Native.VkBufferCreateInfo
-VkImageCreateInfo=Ahjo.Vulkan.Native.VkImageCreateInfo
-VkMemoryRequirements=Ahjo.Vulkan.Native.VkMemoryRequirements
-VkMemoryRequirements2=Ahjo.Vulkan.Native.VkMemoryRequirements2
-VkMemoryPropertyFlags=Ahjo.Vulkan.Native.VkMemoryPropertyFlags
-VkMemoryHeapFlags=Ahjo.Vulkan.Native.VkMemoryHeapFlags
-VkPhysicalDeviceProperties=Ahjo.Vulkan.Native.VkPhysicalDeviceProperties
-VkPhysicalDeviceMemoryProperties=Ahjo.Vulkan.Native.VkPhysicalDeviceMemoryProperties
-VkPhysicalDeviceMemoryProperties2=Ahjo.Vulkan.Native.VkPhysicalDeviceMemoryProperties2
-VkAllocationCallbacks=Ahjo.Vulkan.Native.VkAllocationCallbacks
-VkExternalMemoryHandleTypeFlagsKHR=Ahjo.Vulkan.Native.VkExternalMemoryHandleTypeFlagsKHR
-PFN_vkGetInstanceProcAddr=Ahjo.Vulkan.Native.PFN_vkGetInstanceProcAddr
-PFN_vkGetDeviceProcAddr=Ahjo.Vulkan.Native.PFN_vkGetDeviceProcAddr
