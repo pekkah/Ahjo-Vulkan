@@ -31,6 +31,10 @@ set_target_properties(vma PROPERTIES
     OUTPUT_NAME "vma"
     PREFIX ""
     POSITION_INDEPENDENT_CODE ON
+    # VMA's headers declare its C API as extern "C" but never tag it with
+    # __declspec(dllexport). Without this, the resulting DLL on Windows
+    # has zero exported symbols and DllImport fails with EntryPointNotFoundException.
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
 
 if(MSVC)
