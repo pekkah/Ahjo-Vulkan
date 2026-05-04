@@ -34,6 +34,25 @@ public sealed class HandleConventionsTests
         Assert.Equal(VkObjectType.VK_OBJECT_TYPE_BUFFER, ObjectTypeOf<Buffer>());
     }
 
+    [Fact]
+    public void PhysicalDevice_DefaultHandleIsNull()
+    {
+        PhysicalDevice empty = default;
+        Assert.True(empty.IsNull);
+        Assert.Equal(0UL, empty.RawHandle);
+    }
+
+    [Fact]
+    public void PhysicalDevice_FromRaw_RoundTrips()
+    {
+        nint raw = unchecked((nint)0x9A_BCDE_F012);
+        PhysicalDevice gpu = MakeFromRaw<PhysicalDevice>(raw);
+
+        Assert.False(gpu.IsNull);
+        Assert.Equal((ulong)raw, gpu.RawHandle);
+        Assert.Equal(VkObjectType.VK_OBJECT_TYPE_PHYSICAL_DEVICE, ObjectTypeOf<PhysicalDevice>());
+    }
+
     private static T MakeFromRaw<T>(nint raw) where T : unmanaged, IVulkanHandle<T>
         => T.FromRaw(raw);
 
