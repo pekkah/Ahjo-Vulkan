@@ -628,9 +628,9 @@ Open `src/Ahjo.Vulkan/Lifecycle/Instance.cs`. Add `using System.Buffers;` to the
                 ref var f14 = ref fchain.Push<VkPhysicalDeviceVulkan14Features>();
                 Vk.vkGetPhysicalDeviceFeatures2(d, fchain.Head);
 
-                // 2c. Memory.
-                fixed (VkPhysicalDeviceMemoryProperties2* mp = &memory)
-                    Vk.vkGetPhysicalDeviceMemoryProperties2(d, mp);
+                // 2c. Memory. `memory` is a stack local — `fixed` is neither
+                // legal nor needed; `&memory` is already a stable pointer.
+                Vk.vkGetPhysicalDeviceMemoryProperties2(d, &memory);
 
                 // 2d. Queue families.
                 uint qCount = 0;

@@ -178,9 +178,9 @@ public PhysicalDevice PickPhysicalDevice(PhysicalDevicePicker picker)
             ref var f14 = ref fchain.Push<VkPhysicalDeviceVulkan14Features>();
             Vk.vkGetPhysicalDeviceFeatures2(d, fchain.Head);
 
-            // 3c. Memory.
-            fixed (VkPhysicalDeviceMemoryProperties2* mp = &memory)
-                Vk.vkGetPhysicalDeviceMemoryProperties2(d, mp);
+            // 3c. Memory. `memory` is a stack local — `fixed` is neither
+            // legal nor needed; `&memory` is already a stable pointer.
+            Vk.vkGetPhysicalDeviceMemoryProperties2(d, &memory);
 
             // 3d. Queue families.
             uint qCount = 0;
