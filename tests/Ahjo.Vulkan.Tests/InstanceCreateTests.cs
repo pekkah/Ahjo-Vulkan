@@ -180,4 +180,38 @@ public sealed unsafe class InstanceCreateTests
 
         Assert.NotEmpty(captured);
     }
+
+    [Fact]
+    public void Dispose_TwiceIsIdempotent()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        var instance = Instance.Create(new InstanceDescription { ApiVersion = VulkanVersion.V1_4 });
+        instance.Dispose();
+        instance.Dispose(); // must not throw
+    }
+
+    [Fact]
+    public void Dispose_AfterValidationCreate_DestroysMessengerAndInstance()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver,           "No Vulkan driver on host.");
+        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer,  "Validation layer not installed.");
+
+        var first = Instance.Create(new InstanceDescription
+        {
+            ApiVersion = VulkanVersion.V1_4,
+            EnableValidation = true,
+        });
+        first.Dispose();
+
+        // If the prior dispose left the messenger or instance dangling we'd
+        // see a driver-level error or layer error on a fresh create.
+        using var second = Instance.Create(new InstanceDescription
+        {
+            ApiVersion = VulkanVersion.V1_4,
+            EnableValidation = true,
+        });
+
+        Assert.True(second.Handle != null);
+    }
 }
