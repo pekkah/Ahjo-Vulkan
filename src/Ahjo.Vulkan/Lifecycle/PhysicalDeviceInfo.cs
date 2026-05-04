@@ -49,6 +49,10 @@ public readonly ref struct PhysicalDeviceInfo
         Name          = name;
     }
 
+    /// <summary>
+    /// Shorthand for <see cref="Properties"/>.<c>deviceType</c>. The dominant
+    /// picker discriminator, exposed flat for readability.
+    /// </summary>
     public VkPhysicalDeviceType Type => Properties.deviceType;
 
     /// <summary>

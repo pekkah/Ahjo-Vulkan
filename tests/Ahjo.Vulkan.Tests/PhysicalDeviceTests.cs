@@ -138,6 +138,9 @@ public sealed unsafe class PhysicalDeviceTests
         {
             // VK_KHR_maintenance1 promoted to core in 1.1 but still
             // reported as a device extension on every shipping driver.
+            // If a future minimal software rasteriser (lavapipe / SwiftShader)
+            // omits it, swap to "VK_KHR_storage_buffer_storage_class"u8 or
+            // "VK_KHR_dedicated_allocation"u8 — both are equally universal.
             observedMaintenance1  = info.SupportsExtension("VK_KHR_maintenance1"u8);
             observedFakeExtension = info.SupportsExtension("VK_FAKE_does_not_exist"u8);
             return true;
