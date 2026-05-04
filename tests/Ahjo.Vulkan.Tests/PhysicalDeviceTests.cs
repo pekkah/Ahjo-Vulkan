@@ -174,4 +174,27 @@ public sealed unsafe class PhysicalDeviceTests
         Assert.True(dynamicRendering == 0u || dynamicRendering == 1u,
             "VkBool32 must be 0 or 1.");
     }
+
+    [Fact]
+    public void Pick_PrefersDiscrete_OrFallsBack()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+
+        // First pass: prefer discrete.
+        PhysicalDevice gpu;
+        try
+        {
+            gpu = instance.PickPhysicalDevice(static (in PhysicalDeviceInfo info) =>
+                info.Type == VkPhysicalDeviceType.VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU);
+        }
+        catch (VulkanException)
+        {
+            // No discrete GPU on this host (CI / llvmpipe). Fall back to any.
+            gpu = instance.PickPhysicalDevice(static (in PhysicalDeviceInfo _) => true);
+        }
+
+        Assert.False(gpu.IsNull);
+    }
 }
