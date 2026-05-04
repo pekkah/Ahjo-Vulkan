@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -152,6 +153,153 @@ public sealed unsafe class Instance : IDisposable
             throw;
         }
     }
+
+    /// <summary>
+    /// Walks the host's physical devices and returns the first one for
+    /// which <paramref name="picker"/> returns <see langword="true"/>. The
+    /// <see cref="PhysicalDeviceInfo"/> handed to the picker is a view
+    /// over scratch owned by this call; do not stash references that
+    /// escape it.
+    /// </summary>
+    /// <exception cref="VulkanException">No physical devices reported, or
+    /// no candidate satisfied the picker.</exception>
+    /// <remarks>Assumes the instance was created with
+    /// <c>apiVersion &gt;= 1.1</c> (the default in
+    /// <see cref="InstanceDescription"/> is 1.4). On a pre-1.1 instance
+    /// the chained 1.x feature structs would silently read back as
+    /// zero.</remarks>
+    public PhysicalDevice PickPhysicalDevice(PhysicalDevicePicker picker)
+    {
+        ArgumentNullException.ThrowIfNull(picker);
+
+        // 1. Enumerate device handles.
+        uint count = 0;
+        Vk.vkEnumeratePhysicalDevices(Handle, &count, null).ThrowIfFailed();
+        if (count == 0)
+            throw new VulkanException(VkResult.VK_ERROR_INITIALIZATION_FAILED,
+                "No Vulkan physical devices reported by the driver.");
+
+        Span<nint> deviceHandles = count <= 16
+            ? stackalloc nint[(int)count]
+            : new nint[count];
+        fixed (nint* p = deviceHandles)
+            Vk.vkEnumeratePhysicalDevices(Handle, &count, (VkPhysicalDevice_T**)p).ThrowIfFailed();
+
+        // 2. Reusable per-device scratch.
+        Span<byte>                         propsChain    = stackalloc byte[1024];
+        Span<byte>                         featuresChain = stackalloc byte[1024];
+        Span<VkQueueFamilyProperties2>     queueScratch  = stackalloc VkQueueFamilyProperties2[16];
+        Span<QueueFamilyInfo>              queueViews    = stackalloc QueueFamilyInfo[16];
+        VkPhysicalDeviceMemoryProperties2  memory        = default;
+        memory.sType = VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
+
+        var extPool = ArrayPool<VkExtensionProperties>.Shared;
+        VkExtensionProperties[] extBuf = [];
+
+        try
+        {
+            for (int i = 0; i < (int)count; i++)
+            {
+                var d = (VkPhysicalDevice_T*)deviceHandles[i];
+
+                // 2a. Properties chain (root only).
+                propsChain.Clear();
+                var pchain = ChainBuilder.For<VkPhysicalDeviceProperties2>(propsChain);
+                pchain.Root();
+                Vk.vkGetPhysicalDeviceProperties2(d, pchain.Head);
+
+                // 2b. Features chain — base + 1.1/1.2/1.3/1.4.
+                featuresChain.Clear();
+                var fchain = ChainBuilder.For<VkPhysicalDeviceFeatures2>(featuresChain);
+                fchain.Root();
+                ref var f11 = ref fchain.Push<VkPhysicalDeviceVulkan11Features>();
+                ref var f12 = ref fchain.Push<VkPhysicalDeviceVulkan12Features>();
+                ref var f13 = ref fchain.Push<VkPhysicalDeviceVulkan13Features>();
+                ref var f14 = ref fchain.Push<VkPhysicalDeviceVulkan14Features>();
+                Vk.vkGetPhysicalDeviceFeatures2(d, fchain.Head);
+
+                // 2c. Memory.
+                Vk.vkGetPhysicalDeviceMemoryProperties2(d, &memory);
+
+                // 2d. Queue families.
+                uint qCount = 0;
+                Vk.vkGetPhysicalDeviceQueueFamilyProperties2(d, &qCount, null);
+                if (qCount > queueScratch.Length) ThrowQueueOverflow(qCount);
+                for (int q = 0; q < (int)qCount; q++)
+                    queueScratch[q].sType = VkStructureType.VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2;
+                fixed (VkQueueFamilyProperties2* qp = queueScratch)
+                    Vk.vkGetPhysicalDeviceQueueFamilyProperties2(d, &qCount, qp);
+                for (int q = 0; q < (int)qCount; q++)
+                {
+                    ref var src = ref queueScratch[q].queueFamilyProperties;
+                    queueViews[q] = new QueueFamilyInfo(
+                        index: (uint)q,
+                        flags: (VkQueueFlagBits)src.queueFlags,
+                        queueCount: src.queueCount,
+                        timestampValidBits: src.timestampValidBits,
+                        minImageTransferGranularity: src.minImageTransferGranularity);
+                }
+
+                // 2e. Device extensions — pool-rent, grow once across iterations.
+                uint extCount = 0;
+                Vk.vkEnumerateDeviceExtensionProperties(d, null, &extCount, null).ThrowIfFailed();
+                if (extBuf.Length < extCount)
+                {
+                    if (extBuf.Length != 0) extPool.Return(extBuf);
+                    extBuf = extCount == 0 ? [] : extPool.Rent((int)extCount);
+                }
+                if (extCount > 0)
+                {
+                    fixed (VkExtensionProperties* ep = extBuf)
+                        Vk.vkEnumerateDeviceExtensionProperties(d, null, &extCount, ep).ThrowIfFailed();
+                }
+
+                // 2f. Build the picker view and dispatch.
+                ref var props2 = ref *pchain.Head;
+                ref var feats2 = ref *fchain.Head;
+                var info = new PhysicalDeviceInfo(
+                    device:        new PhysicalDevice(d),
+                    properties:    in props2.properties,
+                    features:      in feats2.features,
+                    features11:    in f11,
+                    features12:    in f12,
+                    features13:    in f13,
+                    features14:    in f14,
+                    memory:        in memory.memoryProperties,
+                    queueFamilies: queueViews[..(int)qCount],
+                    extensions:    extBuf.AsSpan(0, (int)extCount),
+                    name:          NameSlice(in props2.properties));
+
+                if (picker(in info))
+                    return new PhysicalDevice(d);
+            }
+        }
+        finally
+        {
+            if (extBuf.Length != 0) extPool.Return(extBuf);
+        }
+
+        throw new VulkanException(VkResult.VK_ERROR_INITIALIZATION_FAILED,
+            "No physical device matched the picker.");
+    }
+
+    private static ReadOnlySpan<byte> NameSlice(in VkPhysicalDeviceProperties props)
+    {
+        // Treat the 256-byte fixed deviceName buffer as a span and slice it
+        // at the first NUL. ref readonly + Unsafe is the friction-free path
+        // to a span over the inline array.
+        ref readonly var first = ref props.deviceName.e0;
+        ReadOnlySpan<sbyte> raw = MemoryMarshal.CreateReadOnlySpan(in first, 256);
+        ReadOnlySpan<byte>  asBytes = MemoryMarshal.Cast<sbyte, byte>(raw);
+        int nul = asBytes.IndexOf((byte)0);
+        return nul < 0 ? asBytes : asBytes[..nul];
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static void ThrowQueueOverflow(uint count) =>
+        throw new VulkanException(VkResult.VK_ERROR_INITIALIZATION_FAILED,
+            $"Physical device reports {count} queue families; wrapper ceiling is 16. " +
+            "File an issue if you see this on real hardware.");
 
     private const uint AllSeverities =
         (uint)VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
