@@ -16,7 +16,7 @@
 
 | Path | Kind | Purpose |
 |---|---|---|
-| `src/Ahjo.Vulkan/Lifecycle/QueueFamilyInfo.cs` | new | Bit-test getters over `VkQueueFlags`. |
+| `src/Ahjo.Vulkan/Lifecycle/QueueFamilyInfo.cs` | new | Bit-test getters over `VkQueueFlagBits`. |
 | `src/Ahjo.Vulkan/Lifecycle/PhysicalDevice.cs` | new | `readonly struct` handle; implements `IVulkanHandle<PhysicalDevice>`. |
 | `src/Ahjo.Vulkan/Lifecycle/KhronosExtensionNames.cs` | new | Public UTF-8 byte literals; ships only `KhrSwapchain` this issue. |
 | `src/Ahjo.Vulkan/Lifecycle/PhysicalDevicePicker.cs` | new | The `delegate bool PhysicalDevicePicker(in PhysicalDeviceInfo info)` declaration. |
@@ -55,7 +55,7 @@ public sealed class QueueFamilyInfoTests
     {
         var info = new QueueFamilyInfo(
             index: 0,
-            flags: VkQueueFlags.VK_QUEUE_GRAPHICS_BIT,
+            flags: VkQueueFlagBits.VK_QUEUE_GRAPHICS_BIT,
             queueCount: 1,
             timestampValidBits: 0,
             minImageTransferGranularity: default);
@@ -80,7 +80,7 @@ public sealed class QueueFamilyInfoTests
     [Fact]
     public void Flags_GraphicsAndCompute_BothBitsRead()
     {
-        var both = VkQueueFlags.VK_QUEUE_GRAPHICS_BIT | VkQueueFlags.VK_QUEUE_COMPUTE_BIT;
+        var both = VkQueueFlagBits.VK_QUEUE_GRAPHICS_BIT | VkQueueFlagBits.VK_QUEUE_COMPUTE_BIT;
         var info = new QueueFamilyInfo(0, both, 1, 0, default);
 
         Assert.True (info.SupportsGraphics);
@@ -121,14 +121,14 @@ namespace Ahjo.Vulkan;
 public readonly struct QueueFamilyInfo
 {
     public readonly uint         Index;
-    public readonly VkQueueFlags Flags;
+    public readonly VkQueueFlagBits Flags;
     public readonly uint         QueueCount;
     public readonly uint         TimestampValidBits;
     public readonly VkExtent3D   MinImageTransferGranularity;
 
     public QueueFamilyInfo(
         uint         index,
-        VkQueueFlags flags,
+        VkQueueFlagBits flags,
         uint         queueCount,
         uint         timestampValidBits,
         VkExtent3D   minImageTransferGranularity)
@@ -140,10 +140,10 @@ public readonly struct QueueFamilyInfo
         MinImageTransferGranularity = minImageTransferGranularity;
     }
 
-    public bool SupportsGraphics      => (Flags & VkQueueFlags.VK_QUEUE_GRAPHICS_BIT)       != 0;
-    public bool SupportsCompute       => (Flags & VkQueueFlags.VK_QUEUE_COMPUTE_BIT)        != 0;
-    public bool SupportsTransfer      => (Flags & VkQueueFlags.VK_QUEUE_TRANSFER_BIT)       != 0;
-    public bool SupportsSparseBinding => (Flags & VkQueueFlags.VK_QUEUE_SPARSE_BINDING_BIT) != 0;
+    public bool SupportsGraphics      => (Flags & VkQueueFlagBits.VK_QUEUE_GRAPHICS_BIT)       != 0;
+    public bool SupportsCompute       => (Flags & VkQueueFlagBits.VK_QUEUE_COMPUTE_BIT)        != 0;
+    public bool SupportsTransfer      => (Flags & VkQueueFlagBits.VK_QUEUE_TRANSFER_BIT)       != 0;
+    public bool SupportsSparseBinding => (Flags & VkQueueFlagBits.VK_QUEUE_SPARSE_BINDING_BIT) != 0;
 }
 ```
 
@@ -645,7 +645,7 @@ Open `src/Ahjo.Vulkan/Lifecycle/Instance.cs`. Add `using System.Buffers;` to the
                     ref var src = ref queueScratch[q].queueFamilyProperties;
                     queueViews[q] = new QueueFamilyInfo(
                         index: (uint)q,
-                        flags: (VkQueueFlags)src.queueFlags,
+                        flags: (VkQueueFlagBits)src.queueFlags,
                         queueCount: src.queueCount,
                         timestampValidBits: src.timestampValidBits,
                         minImageTransferGranularity: src.minImageTransferGranularity);

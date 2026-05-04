@@ -47,15 +47,15 @@ Public, lives in `Lifecycle/`. Populated only with `KhrSwapchain` for #7 (the on
 public readonly struct QueueFamilyInfo
 {
     public readonly uint         Index;       // family index, 0..N-1
-    public readonly VkQueueFlags Flags;
+    public readonly VkQueueFlagBits Flags;
     public readonly uint         QueueCount;
     public readonly uint         TimestampValidBits;
     public readonly VkExtent3D   MinImageTransferGranularity;
 
-    public bool SupportsGraphics       => (Flags & VkQueueFlags.VK_QUEUE_GRAPHICS_BIT)        != 0;
-    public bool SupportsCompute        => (Flags & VkQueueFlags.VK_QUEUE_COMPUTE_BIT)         != 0;
-    public bool SupportsTransfer       => (Flags & VkQueueFlags.VK_QUEUE_TRANSFER_BIT)        != 0;
-    public bool SupportsSparseBinding  => (Flags & VkQueueFlags.VK_QUEUE_SPARSE_BINDING_BIT)  != 0;
+    public bool SupportsGraphics       => (Flags & VkQueueFlagBits.VK_QUEUE_GRAPHICS_BIT)        != 0;
+    public bool SupportsCompute        => (Flags & VkQueueFlagBits.VK_QUEUE_COMPUTE_BIT)         != 0;
+    public bool SupportsTransfer       => (Flags & VkQueueFlagBits.VK_QUEUE_TRANSFER_BIT)        != 0;
+    public bool SupportsSparseBinding  => (Flags & VkQueueFlagBits.VK_QUEUE_SPARSE_BINDING_BIT)  != 0;
 }
 ```
 
