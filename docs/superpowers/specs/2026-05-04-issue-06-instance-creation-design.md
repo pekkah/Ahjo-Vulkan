@@ -28,6 +28,8 @@ public readonly record struct VulkanVersion(uint Packed)
     public uint Major => (Packed >> 22) & 0x7F;
     public uint Minor => (Packed >> 12) & 0x3FF;
     public uint Patch =>  Packed         & 0xFFF;
+
+    public static implicit operator uint(VulkanVersion v) => v.Packed;
 }
 ```
 
@@ -43,19 +45,32 @@ public readonly unsafe struct Utf8Name
     public readonly sbyte* Ptr;
     public Utf8Name(sbyte* ptr) => Ptr = ptr;
 
-    public static Utf8Name From(ReadOnlySpan<byte> utf8Literal)
+    /// <summary>
+    /// Creates a Utf8Name over a UTF-8 string LITERAL (`"…"u8`). Per the C#
+    /// spec, `"…"u8` literals live in the assembly's read-only data segment
+    /// for the lifetime of the process and are followed by a trailing null
+    /// byte (the byte is past `span.Length` — `(sbyte*)&span[0]` is safe to
+    /// pass to a Vulkan API that wants `const char*`).
+    ///
+    /// Callers MUST NOT pass a span over a `byte[]` or `stackalloc` buffer:
+    /// the GC can move a managed array, and a stack buffer is gone the
+    /// moment the frame returns. The resulting pointer would dangle. There
+    /// is no implicit conversion from `ReadOnlySpan&lt;byte&gt;` precisely
+    /// because the compiler cannot enforce this contract at the call site;
+    /// the explicit `FromLiteral` name is the safety announcement.
+    /// </summary>
+    public static Utf8Name FromLiteral(ReadOnlySpan<byte> utf8Literal)
     {
         Debug.Assert(utf8Literal.Length > 0, "Utf8Name requires a non-empty UTF-8 literal.");
         return new Utf8Name(
             (sbyte*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(utf8Literal)));
     }
 
-    public static implicit operator Utf8Name(ReadOnlySpan<byte> s) => From(s);
     public bool IsNull => Ptr == null;
 }
 ```
 
-Call sites read `"VK_KHR_surface"u8` and the implicit conversion produces a `Utf8Name`. Per the C# spec, `"…"u8` literals are emitted into the assembly's read-only data segment with a trailing null byte; the resulting `ReadOnlySpan<byte>` covers the UTF-8 bytes of the content (Length excludes the trailing null), but `(sbyte*)&span[0]` points at storage that *is* null-terminated, so passing it to a Vulkan API that wants `const char*` is safe and the lifetime is the process. We cannot assert null-termination from the span alone (the null is past `Length`); the `Length > 0` assert is the cheapest guard against a `default(ReadOnlySpan<byte>)` slipping through.
+Call sites read `Utf8Name.FromLiteral("VK_KHR_surface"u8)`. The factory name carries the contract that no implicit conversion could enforce. We cannot assert null-termination from the span alone (the null is past `Length`); the `Length > 0` assert is the cheapest guard against a `default(ReadOnlySpan<byte>)` slipping through.
 
 ### `DebugMessage`
 
@@ -146,8 +161,10 @@ When `EnableValidation` is true:
 In priority order:
 
 1. `desc.DebugCallbackRaw` if non-null — used as `pfnUserCallback` directly. `pUserData = null`.
-2. `desc.DebugCallback` if non-null — `pfnUserCallback = &ManagedCallbackThunk`, `pUserData = (void*)GCHandle.ToIntPtr(GCHandle.Alloc(cb))`. The `GCHandle` is freed in `Dispose` and in the finalizer.
+2. `desc.DebugCallback` if non-null — `pfnUserCallback = &ManagedCallbackThunk`, `pUserData = (void*)GCHandle.ToIntPtr(GCHandle.Alloc(cb))`. The `GCHandle` is allocated *before* `vkCreateInstance` (see §3.5 — the chained `pNext` messenger can fire *during* creation, so `pUserData` must already point at a live handle by the time we make the call). It is freed in `Dispose` and in the finalizer.
 3. Otherwise (no caller-supplied callback) — `pfnUserCallback = &DefaultCallback` which writes to `Console.Error` and `Debugger.Break()`s on `ERROR` severity if `Debugger.IsAttached`.
+
+The unmanaged thunk and the default callback **MUST** return `0` (`VK_FALSE`). Per the Vulkan spec, returning `VK_TRUE` from a debug-utils callback aborts the calling Vulkan command; this is a debugging affordance, not the wrapper's job to invoke.
 
 ### 3.4 Disposal order
 
@@ -159,11 +176,24 @@ vkDestroyInstance(Handle, null)                            // if Handle != null
 
 Reverse of construction; idempotent via a `_disposed` guard. The finalizer asserts in `DEBUG` and runs the same path (best-effort) in `RELEASE` so a missed `Dispose` doesn't strand the driver.
 
-### 3.5 Failure handling
+### 3.5 Construction order and failure handling
 
-- `vkCreateInstance` returns non-success → `ThrowIfFailed` raises `VulkanException` (per issue #4 policy). Nothing to clean up; nothing was created.
-- `vkCreateInstance` succeeds, persistent messenger creation fails → call `vkDestroyInstance` and rethrow. Wrapped in try/finally.
-- `GCHandle.Alloc` fails → cannot happen in practice (only fails on OOM, in which case nothing else is going to work either); not specially handled.
+Order of operations inside `Create` (when validation is enabled with a managed callback):
+
+1. Build extension/layer scratch arrays.
+2. Build `VkApplicationInfo` and `VkDebugUtilsMessengerCreateInfoEXT` (selecting callback per §3.3).
+3. **Allocate `GCHandle` for the managed callback (if any) and stash it in `pUserData`.** Wrap everything below in a try/catch that frees the `GCHandle` on any throw.
+4. Build `VkInstanceCreateInfo` via `ChainBuilder.For<VkInstanceCreateInfo>(stackalloc byte[256])`, chaining the messenger CreateInfo into `pNext`.
+5. `vkCreateInstance(...).ThrowIfFailed()`.
+6. Resolve `vkCreateDebugUtilsMessengerEXT` / `vkDestroyDebugUtilsMessengerEXT` via `vkGetInstanceProcAddr` into the `InstanceFunctionTable`.
+7. Create the persistent messenger.
+8. Construct the `Instance` object with handle, messenger, function table, and the `GCHandle`. Return.
+
+Failure modes:
+
+- `vkCreateInstance` returns non-success → throws `VulkanException`. The catch frees the `GCHandle`. Nothing else needed; no Vulkan handle was created.
+- Persistent messenger creation fails (step 7) → call `vkDestroyInstance` to roll back step 5, then rethrow. The catch then frees the `GCHandle`.
+- `GCHandle.Alloc` failing is OOM-only; unhandled (the process won't survive the next allocation either).
 
 ## 4. File layout
 
@@ -200,9 +230,11 @@ Existing test convention: xUnit v3, one class per type, descriptive method names
 
 - `Create_MinimalDescription_Succeeds` — empty description, `ApiVersion = V1_4`. `instance.Handle != null`. Disposes cleanly.
 - `Create_DefaultsApiVersionWhenZero` — passes `default(InstanceDescription)`. Asserts that creation succeeds (i.e. the default fell back to `V1_4`).
-- `Create_WithValidation_DefaultCallback_FiresOnUnknownExtension` — passes `Extensions = ["VK_FAKE_extension_does_not_exist"u8]`. `Create` is expected to throw a `VulkanException` with `VK_ERROR_EXTENSION_NOT_PRESENT`. Validation callback should have fired at least once *before* the throw — the chained `pNext` messenger catches the rejection in the loader. Captures `Console.Error` to verify.
-- `Create_WithValidation_ManagedCallback_RoundTripsMessage` — same trigger, but with `DebugCallback = msg => list.Add(msg)`. Asserts `list.Count >= 1` and that `Severity` includes `ERROR_BIT_EXT`.
+- `Create_WithValidation_DefaultCallback_FiresOnUnknownExtension` — passes `Extensions = [Utf8Name.FromLiteral("VK_FAKE_extension_does_not_exist"u8)]`. `Create` is expected to throw a `VulkanException` with `VK_ERROR_EXTENSION_NOT_PRESENT`. Validation callback should have fired at least once *before* the throw — the chained `pNext` messenger catches the rejection in the loader. Captures `Console.Error` to verify.
+- `Create_WithValidation_ManagedCallback_RoundTripsMessage` — same trigger, but with `DebugCallback = msg => list.Add(msg)`. Asserts `list.Count >= 1` and that `Severity` includes `ERROR_BIT_EXT`. Also exercises the GCHandle-before-`vkCreateInstance` ordering (callback fires from inside the failing call).
 - `Create_WithValidation_RawCallback_IsInvoked` — same trigger, `DebugCallbackRaw = &CountingThunk` (a `[UnmanagedCallersOnly]` static that increments a static counter). Asserts the counter went up.
+- `PersistentMessenger_FiresOnPostCreateValidationViolation` — successfully creates an instance with a managed callback; then calls `Native.Vk.vkEnumeratePhysicalDevices(instance.Handle, null, null)` which violates `VUID-vkEnumeratePhysicalDevices-pPhysicalDeviceCount-parameter`. Asserts the callback list grew by ≥1. Proves the post-create persistent messenger (not just the chained `pNext` one) is wired up correctly.
+- `Create_FailureWithManagedCallback_FreesGCHandleAndAllowsSubsequentCreate` — triggers a `vkCreateInstance` failure with `DebugCallback` set; expects `VulkanException`; then immediately runs a successful create + dispose. Proxy for "the failed-create cleanup path freed the GCHandle correctly" — if it didn't, we'd accumulate handles, but more usefully, this exercises the construction try/catch.
 - `Dispose_TwiceIsIdempotent` — Dispose; Dispose. No throw, no double-free.
 - `Dispose_AfterValidationCreate_DestroysMessengerAndInstance` — proxy: create with validation, dispose, create *again* with validation. If the prior dispose left the messenger or instance dangling we'd see a driver-level error or a layer error on the second create.
 
@@ -238,9 +270,11 @@ Validation messages are not a hot path; this allocation rate is irrelevant.
 - `PhysicalDevice` enumeration — issue #7's whole scope.
 - Multi-callback fanout — YAGNI; callers can wrap two callbacks themselves.
 - A cross-cutting "function table per scope" abstraction — `InstanceFunctionTable` is intentionally instance-scoped; `Device`-level entry points get their own table in issue #8.
+- **Debug-naming `VkInstance` itself.** `VK_OBJECT_TYPE_INSTANCE` is namable via `vkSetDebugUtilsObjectNameEXT`, but `Instance` is a class, not a struct, so it cannot satisfy `IVulkanHandle<TSelf>`'s `unmanaged` constraint. Issue #25 (debug markers / object naming) needs to design a naming abstraction that covers both struct-handle wrappers (`Buffer`, `Image`, …) and class-shaped wrappers (`Instance`, future `Device`). That design is out of scope for this issue.
+- **Vulkan mock ICD / SwiftShader for CI.** Driver-dependent tests use a skip-if-no-driver helper (matching the existing `VulkanLoaderSmokeTests` pattern). Wiring SwiftShader into CI so these tests actually run on hosted runners is a separate workflow change, not part of this issue.
 
 ## 9. Risks
 
-- **No driver in CI.** Mitigated by skip-if-no-driver helper, matching the existing pattern.
+- **No driver in CI.** Mitigated by skip-if-no-driver helper, matching the existing pattern. CI driver provisioning tracked separately (see §8).
 - **Loader name resolution.** `vkGetInstanceProcAddr` for extension functions is well-defined per-spec; the only failure mode is "extension not enabled," which we control.
-- **`GCHandle` leak on construction failure.** Allocate the `GCHandle` only after `vkCreateInstance` succeeds, then place it in a try/finally that frees it if subsequent steps throw.
+- **`GCHandle` ordering.** The chained `pNext` messenger means the callback can fire during `vkCreateInstance` itself (e.g., on extension rejection). The handle must therefore be allocated *before* the call — see §3.5 step 3 — and freed by the construction-path try/catch on any throw.
