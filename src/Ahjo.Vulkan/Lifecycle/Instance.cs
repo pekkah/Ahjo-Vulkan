@@ -9,12 +9,17 @@ public sealed unsafe class Instance : IDisposable
 {
     internal VkInstance_T*               Handle;
     internal VkDebugUtilsMessengerEXT_T* Messenger;
+    private  GCHandle                    _callbackKeepAlive;
     private  bool                        _disposed;
 
-    private Instance(VkInstance_T* handle, VkDebugUtilsMessengerEXT_T* messenger)
+    private Instance(
+        VkInstance_T* handle,
+        VkDebugUtilsMessengerEXT_T* messenger,
+        GCHandle callbackKeepAlive)
     {
         Handle = handle;
         Messenger = messenger;
+        _callbackKeepAlive = callbackKeepAlive;
     }
 
     public static Instance Create(scoped in InstanceDescription desc)
@@ -40,32 +45,63 @@ public sealed unsafe class Instance : IDisposable
             apiVersion = apiVersion,
         };
 
-        Span<byte> chainBuf = stackalloc byte[256];
-        var chain = ChainBuilder.For<VkInstanceCreateInfo>(chainBuf);
-        ref VkInstanceCreateInfo ci = ref chain.Root();
-        ci.pApplicationInfo = &appInfo;
-        ci.enabledLayerCount = (uint)layerCount;
-        ci.ppEnabledLayerNames = layerCount > 0
-            ? (sbyte**)Unsafe.AsPointer(ref MemoryMarshal.GetReference(layerPtrs))
-            : null;
-        ci.enabledExtensionCount = (uint)extCount;
-        ci.ppEnabledExtensionNames = extCount > 0
-            ? (sbyte**)Unsafe.AsPointer(ref MemoryMarshal.GetReference(extPtrs))
-            : null;
-
-        if (desc.EnableValidation)
+        // Allocate GCHandle BEFORE vkCreateInstance: the chained pNext messenger
+        // can fire from inside the call (e.g. on extension rejection), so
+        // pUserData must already point at a live handle.
+        GCHandle keepAlive = default;
+        if (desc.EnableValidation && desc.DebugCallback is not null && desc.DebugCallbackRaw == null)
         {
-            ref VkDebugUtilsMessengerCreateInfoEXT mci = ref chain.Push<VkDebugUtilsMessengerCreateInfoEXT>();
-            mci.messageSeverity = AllSeverities;
-            mci.messageType = AllTypes;
-            mci.pfnUserCallback = &DefaultCallback;
-            mci.pUserData = null;
+            keepAlive = GCHandle.Alloc(desc.DebugCallback);
         }
 
-        VkInstance_T* raw = null;
-        Vk.vkCreateInstance(chain.Head, null, &raw).ThrowIfFailed();
+        try
+        {
+            Span<byte> chainBuf = stackalloc byte[256];
+            var chain = ChainBuilder.For<VkInstanceCreateInfo>(chainBuf);
+            ref VkInstanceCreateInfo ci = ref chain.Root();
+            ci.pApplicationInfo = &appInfo;
+            ci.enabledLayerCount = (uint)layerCount;
+            ci.ppEnabledLayerNames = layerCount > 0
+                ? (sbyte**)Unsafe.AsPointer(ref MemoryMarshal.GetReference(layerPtrs))
+                : null;
+            ci.enabledExtensionCount = (uint)extCount;
+            ci.ppEnabledExtensionNames = extCount > 0
+                ? (sbyte**)Unsafe.AsPointer(ref MemoryMarshal.GetReference(extPtrs))
+                : null;
 
-        return new Instance(raw, null);
+            if (desc.EnableValidation)
+            {
+                ref VkDebugUtilsMessengerCreateInfoEXT mci = ref chain.Push<VkDebugUtilsMessengerCreateInfoEXT>();
+                mci.messageSeverity = AllSeverities;
+                mci.messageType = AllTypes;
+
+                if (desc.DebugCallbackRaw != null)
+                {
+                    mci.pfnUserCallback = desc.DebugCallbackRaw;
+                    mci.pUserData = null;
+                }
+                else if (desc.DebugCallback is not null)
+                {
+                    mci.pfnUserCallback = &ManagedCallbackThunk;
+                    mci.pUserData = (void*)GCHandle.ToIntPtr(keepAlive);
+                }
+                else
+                {
+                    mci.pfnUserCallback = &DefaultCallback;
+                    mci.pUserData = null;
+                }
+            }
+
+            VkInstance_T* raw = null;
+            Vk.vkCreateInstance(chain.Head, null, &raw).ThrowIfFailed();
+
+            return new Instance(raw, null, keepAlive);
+        }
+        catch
+        {
+            if (keepAlive.IsAllocated) keepAlive.Free();
+            throw;
+        }
     }
 
     private const uint AllSeverities =
@@ -127,7 +163,36 @@ public sealed unsafe class Instance : IDisposable
         {
             // Never throw across the unmanaged-to-managed boundary — Vulkan loader UB.
         }
-        return 0; // VK_FALSE — VK_TRUE would abort the calling Vulkan command
+        return 0;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+    private static uint ManagedCallbackThunk(
+        VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+        uint                                   type,
+        VkDebugUtilsMessengerCallbackDataEXT*  data,
+        void*                                  userData)
+    {
+        if (userData == null || data == null) return 0;
+        var handle = GCHandle.FromIntPtr((nint)userData);
+        if (handle.Target is not Action<DebugMessage> cb) return 0;
+
+        try
+        {
+            var msg = new DebugMessage(
+                severity,
+                (VkDebugUtilsMessageTypeFlagBitsEXT)type,
+                Utf8.ToString(data->pMessage) ?? string.Empty,
+                Utf8.ToString(data->pMessageIdName),
+                data->messageIdNumber);
+
+            cb(msg);
+        }
+        catch
+        {
+            // Swallow: never throw across the unmanaged-to-managed boundary.
+        }
+        return 0;
     }
 
     public void Dispose()
@@ -139,6 +204,7 @@ public sealed unsafe class Instance : IDisposable
             // persistent messenger destruction wired in Task 12
         }
         if (Handle != null) Vk.vkDestroyInstance(Handle, null);
+        if (_callbackKeepAlive.IsAllocated) _callbackKeepAlive.Free();
         GC.SuppressFinalize(this);
     }
 
