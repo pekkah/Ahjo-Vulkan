@@ -5,14 +5,6 @@ using Ahjo.Vulkan.Native;
 
 namespace Ahjo.Vulkan;
 
-/// <summary>
-/// Owner of a <c>VkInstance</c>. <c>sealed class</c> rather than the wider
-/// struct-handle convention because <see cref="Instance"/> is created once
-/// per process, never copied, never on a hot path, and benefits from a
-/// finalizer that backstops a missed <c>Dispose</c>. See the design spec at
-/// <c>docs/superpowers/specs/2026-05-04-issue-06-instance-creation-design.md</c>
-/// for the rationale.
-/// </summary>
 public sealed unsafe class Instance : IDisposable
 {
     internal VkInstance_T*               Handle;
@@ -29,6 +21,15 @@ public sealed unsafe class Instance : IDisposable
     {
         uint apiVersion = desc.ApiVersion.Packed != 0 ? desc.ApiVersion.Packed : VulkanVersion.V1_4.Packed;
 
+        // Layers + extensions, with dedupe-aware auto-add when validation is on.
+        Span<nint> layerPtrs = stackalloc nint[desc.Layers.Length + 1];
+        int layerCount = CopyAndMaybeAppend(desc.Layers, layerPtrs,
+            desc.EnableValidation ? InstanceExtensionNames.KhronosValidationLayer : default);
+
+        Span<nint> extPtrs = stackalloc nint[desc.Extensions.Length + 1];
+        int extCount = CopyAndMaybeAppend(desc.Extensions, extPtrs,
+            desc.EnableValidation ? InstanceExtensionNames.DebugUtilsExtension : default);
+
         var appInfo = new VkApplicationInfo
         {
             sType = VkStructureType.VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -39,30 +40,87 @@ public sealed unsafe class Instance : IDisposable
             apiVersion = apiVersion,
         };
 
-        Span<nint> layerPtrs = stackalloc nint[Math.Max(1, desc.Layers.Length)];
-        for (int i = 0; i < desc.Layers.Length; i++) layerPtrs[i] = (nint)desc.Layers[i].Ptr;
+        Span<byte> chainBuf = stackalloc byte[256];
+        var chain = ChainBuilder.For<VkInstanceCreateInfo>(chainBuf);
+        ref VkInstanceCreateInfo ci = ref chain.Root();
+        ci.pApplicationInfo = &appInfo;
+        ci.enabledLayerCount = (uint)layerCount;
+        ci.ppEnabledLayerNames = layerCount > 0
+            ? (sbyte**)Unsafe.AsPointer(ref MemoryMarshal.GetReference(layerPtrs))
+            : null;
+        ci.enabledExtensionCount = (uint)extCount;
+        ci.ppEnabledExtensionNames = extCount > 0
+            ? (sbyte**)Unsafe.AsPointer(ref MemoryMarshal.GetReference(extPtrs))
+            : null;
 
-        Span<nint> extPtrs = stackalloc nint[Math.Max(1, desc.Extensions.Length)];
-        for (int i = 0; i < desc.Extensions.Length; i++) extPtrs[i] = (nint)desc.Extensions[i].Ptr;
-
-        var ci = new VkInstanceCreateInfo
+        if (desc.EnableValidation)
         {
-            sType = VkStructureType.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-            pApplicationInfo = &appInfo,
-            enabledLayerCount = (uint)desc.Layers.Length,
-            ppEnabledLayerNames = desc.Layers.Length > 0
-                ? (sbyte**)Unsafe.AsPointer(ref MemoryMarshal.GetReference(layerPtrs))
-                : null,
-            enabledExtensionCount = (uint)desc.Extensions.Length,
-            ppEnabledExtensionNames = desc.Extensions.Length > 0
-                ? (sbyte**)Unsafe.AsPointer(ref MemoryMarshal.GetReference(extPtrs))
-                : null,
-        };
+            ref VkDebugUtilsMessengerCreateInfoEXT mci = ref chain.Push<VkDebugUtilsMessengerCreateInfoEXT>();
+            mci.messageSeverity = AllSeverities;
+            mci.messageType = AllTypes;
+            mci.pfnUserCallback = &DefaultCallback;
+            mci.pUserData = null;
+        }
 
         VkInstance_T* raw = null;
-        Vk.vkCreateInstance(&ci, null, &raw).ThrowIfFailed();
+        Vk.vkCreateInstance(chain.Head, null, &raw).ThrowIfFailed();
 
         return new Instance(raw, null);
+    }
+
+    private const uint AllSeverities =
+        (uint)VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+        (uint)VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
+        (uint)VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+        (uint)VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+
+    private const uint AllTypes =
+        (uint)VkDebugUtilsMessageTypeFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+        (uint)VkDebugUtilsMessageTypeFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+        (uint)VkDebugUtilsMessageTypeFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+
+    private static int CopyAndMaybeAppend(
+        ReadOnlySpan<Utf8Name> input,
+        Span<nint> dest,
+        ReadOnlySpan<byte> autoAddIfNonEmpty)
+    {
+        int n = 0;
+        for (int i = 0; i < input.Length; i++) dest[n++] = (nint)input[i].Ptr;
+        if (autoAddIfNonEmpty.IsEmpty) return n;
+
+        for (int i = 0; i < input.Length; i++)
+        {
+            if (PointerStringEquals((sbyte*)input[i].Ptr, autoAddIfNonEmpty)) return n;
+        }
+        dest[n++] = (nint)Unsafe.AsPointer(ref MemoryMarshal.GetReference(autoAddIfNonEmpty));
+        return n;
+    }
+
+    private static bool PointerStringEquals(sbyte* p, ReadOnlySpan<byte> target)
+    {
+        if (p == null) return false;
+        for (int i = 0; i < target.Length; i++)
+        {
+            if (p[i] == 0 || (byte)p[i] != target[i]) return false;
+        }
+        return p[target.Length] == 0;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+    private static uint DefaultCallback(
+        VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+        uint                                   type,
+        VkDebugUtilsMessengerCallbackDataEXT*  data,
+        void*                                  userData)
+    {
+        var msg = data != null ? Utf8.ToString(data->pMessage) : null;
+        Console.Error.WriteLine($"[Vulkan {severity}] {msg}");
+        if ((severity & VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0
+            && Debugger.IsAttached)
+        {
+            Debugger.Break();
+        }
+        return 0; // VK_FALSE — VK_TRUE would abort the calling Vulkan command
     }
 
     public void Dispose()
@@ -71,7 +129,7 @@ public sealed unsafe class Instance : IDisposable
         _disposed = true;
         if (Messenger != null)
         {
-            // wired in Task 12
+            // persistent messenger destruction wired in Task 12
         }
         if (Handle != null) Vk.vkDestroyInstance(Handle, null);
         GC.SuppressFinalize(this);
