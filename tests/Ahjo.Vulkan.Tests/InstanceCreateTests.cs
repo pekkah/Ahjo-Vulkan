@@ -104,4 +104,52 @@ public sealed unsafe class InstanceCreateTests
         Assert.Contains(captured, m =>
             (m.Severity & VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0);
     }
+
+    private static int s_rawCallbackHits;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly(
+        CallConvs = [typeof(System.Runtime.CompilerServices.CallConvStdcall)])]
+    private static uint RawCountingCallback(
+        VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+        uint                                   type,
+        VkDebugUtilsMessengerCallbackDataEXT*  data,
+        void*                                  userData)
+    {
+        System.Threading.Interlocked.Increment(ref s_rawCallbackHits);
+        return 0;
+    }
+
+    [Fact]
+    public void Create_WithValidation_RawCallback_IsInvoked()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver,           "No Vulkan driver on host.");
+        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer,  "Validation layer not installed.");
+
+        s_rawCallbackHits = 0;
+
+        // Same try/catch pattern as the other validation tests (CS8175 workaround).
+        VulkanException? ex = null;
+        try
+        {
+            ReadOnlySpan<Utf8Name> bogus = stackalloc Utf8Name[]
+            {
+                Utf8Name.FromLiteral("VK_FAKE_extension_does_not_exist"u8),
+            };
+
+            _ = Instance.Create(new InstanceDescription
+            {
+                ApiVersion = VulkanVersion.V1_4,
+                EnableValidation = true,
+                Extensions = bogus,
+                DebugCallbackRaw = &RawCountingCallback,
+            });
+        }
+        catch (VulkanException e)
+        {
+            ex = e;
+        }
+
+        Assert.NotNull(ex);
+        Assert.True(s_rawCallbackHits > 0, $"Expected raw callback to fire; hits = {s_rawCallbackHits}");
+    }
 }
