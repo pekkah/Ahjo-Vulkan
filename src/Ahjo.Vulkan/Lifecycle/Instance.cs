@@ -9,16 +9,19 @@ public sealed unsafe class Instance : IDisposable
 {
     internal VkInstance_T*               Handle;
     internal VkDebugUtilsMessengerEXT_T* Messenger;
+    internal InstanceFunctionTable       Functions;
     private  GCHandle                    _callbackKeepAlive;
     private  bool                        _disposed;
 
     private Instance(
         VkInstance_T* handle,
         VkDebugUtilsMessengerEXT_T* messenger,
+        InstanceFunctionTable functions,
         GCHandle callbackKeepAlive)
     {
         Handle = handle;
         Messenger = messenger;
+        Functions = functions;
         _callbackKeepAlive = callbackKeepAlive;
     }
 
@@ -26,7 +29,6 @@ public sealed unsafe class Instance : IDisposable
     {
         uint apiVersion = desc.ApiVersion.Packed != 0 ? desc.ApiVersion.Packed : VulkanVersion.V1_4.Packed;
 
-        // Layers + extensions, with dedupe-aware auto-add when validation is on.
         Span<nint> layerPtrs = stackalloc nint[desc.Layers.Length + 1];
         int layerCount = CopyAndMaybeAppend(desc.Layers, layerPtrs,
             desc.EnableValidation ? InstanceExtensionNames.KhronosValidationLayer : default);
@@ -45,9 +47,7 @@ public sealed unsafe class Instance : IDisposable
             apiVersion = apiVersion,
         };
 
-        // Allocate GCHandle BEFORE vkCreateInstance: the chained pNext messenger
-        // can fire from inside the call (e.g. on extension rejection), so
-        // pUserData must already point at a live handle.
+        // GCHandle BEFORE vkCreateInstance — chained pNext messenger may fire during the call.
         GCHandle keepAlive = default;
         if (desc.EnableValidation && desc.DebugCallback is not null && desc.DebugCallbackRaw == null)
         {
@@ -95,7 +95,41 @@ public sealed unsafe class Instance : IDisposable
             VkInstance_T* raw = null;
             Vk.vkCreateInstance(chain.Head, null, &raw).ThrowIfFailed();
 
-            return new Instance(raw, null, keepAlive);
+            var functions = new InstanceFunctionTable(raw);
+
+            VkDebugUtilsMessengerEXT_T* messenger = null;
+            if (desc.EnableValidation && functions.CreateDebugUtilsMessenger != null)
+            {
+                var mci = new VkDebugUtilsMessengerCreateInfoEXT
+                {
+                    sType = VkStructureType.VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+                    messageSeverity = AllSeverities,
+                    messageType = AllTypes,
+                };
+
+                if (desc.DebugCallbackRaw != null)
+                {
+                    mci.pfnUserCallback = desc.DebugCallbackRaw;
+                }
+                else if (desc.DebugCallback is not null)
+                {
+                    mci.pfnUserCallback = &ManagedCallbackThunk;
+                    mci.pUserData = (void*)GCHandle.ToIntPtr(keepAlive);
+                }
+                else
+                {
+                    mci.pfnUserCallback = &DefaultCallback;
+                }
+
+                var r = functions.CreateDebugUtilsMessenger(raw, &mci, null, &messenger);
+                if (r != VkResult.VK_SUCCESS)
+                {
+                    Vk.vkDestroyInstance(raw, null);
+                    r.ThrowIfFailed();
+                }
+            }
+
+            return new Instance(raw, messenger, functions, keepAlive);
         }
         catch
         {
@@ -199,9 +233,10 @@ public sealed unsafe class Instance : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        if (Messenger != null)
+        if (Messenger != null && Functions.DestroyDebugUtilsMessenger != null)
         {
-            // persistent messenger destruction wired in Task 12
+            Functions.DestroyDebugUtilsMessenger(Handle, Messenger, null);
+            Messenger = null;
         }
         if (Handle != null) Vk.vkDestroyInstance(Handle, null);
         if (_callbackKeepAlive.IsAllocated) _callbackKeepAlive.Free();

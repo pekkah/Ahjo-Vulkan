@@ -152,4 +152,28 @@ public sealed unsafe class InstanceCreateTests
         Assert.NotNull(ex);
         Assert.True(s_rawCallbackHits > 0, $"Expected raw callback to fire; hits = {s_rawCallbackHits}");
     }
+
+    [Fact]
+    public void PersistentMessenger_FiresOnPostCreateValidationViolation()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver,           "No Vulkan driver on host.");
+        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer,  "Validation layer not installed.");
+
+        var captured = new List<DebugMessage>();
+        using var instance = Instance.Create(new InstanceDescription
+        {
+            ApiVersion = VulkanVersion.V1_4,
+            EnableValidation = true,
+            DebugCallback = m => { lock (captured) captured.Add(m); },
+        });
+
+        captured.Clear();
+
+        // Intentional VUID violation: vkEnumeratePhysicalDevices requires a
+        // non-null pPhysicalDeviceCount per VUID-vkEnumeratePhysicalDevices-
+        // pPhysicalDeviceCount-parameter. The persistent messenger must fire.
+        Native.Vk.vkEnumeratePhysicalDevices(instance.Handle, null, null);
+
+        Assert.NotEmpty(captured);
+    }
 }
