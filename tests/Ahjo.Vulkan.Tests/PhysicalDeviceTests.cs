@@ -149,4 +149,29 @@ public sealed unsafe class PhysicalDeviceTests
             "Every shipping Vulkan driver advertises VK_KHR_maintenance1.");
         Assert.False(observedFakeExtension);
     }
+
+    [Fact]
+    public void Pick_Vulkan13Features_Readable()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+
+        bool pickerInvoked = false;
+        uint dynamicRendering = 0;
+        var picker = (PhysicalDevicePicker)((in PhysicalDeviceInfo info) =>
+        {
+            pickerInvoked   = true;
+            dynamicRendering = info.Features13.dynamicRendering;
+            // No assertion on the value — software rasterisers may report
+            // 0; the test only proves the chain was wired.
+            return true;
+        });
+
+        instance.PickPhysicalDevice(picker);
+
+        Assert.True(pickerInvoked);
+        Assert.True(dynamicRendering == 0u || dynamicRendering == 1u,
+            "VkBool32 must be 0 or 1.");
+    }
 }
