@@ -497,7 +497,7 @@ public readonly ref struct PhysicalDeviceInfo
 }
 ```
 
-> The constructor parameter names use PascalCase to match the field names — the C# compiler permits `this.Properties = ref Properties;` because the right-hand side is the parameter and the left-hand side is the field. This avoids a separate `parameter` / `field` rename.
+> Constructor parameter names are camelCase (`device`, `properties`, `features11` …) — the field names stay PascalCase. C# is fine with assigning across the case difference inside the body; the spec §3 named-arg call sites use the camelCase form, so this is the canonical spelling and matches the rest of the codebase (`QueueFamilyInfo`'s ctor follows the same convention).
 
 - [ ] **Step 4: Run the tests — expect 4 passing in `PhysicalDeviceInfoTests`.**
 
@@ -669,17 +669,17 @@ Open `src/Ahjo.Vulkan/Lifecycle/Instance.cs`. Add `using System.Buffers;` to the
                 ref var props2 = ref *pchain.Head;
                 ref var feats2 = ref *fchain.Head;
                 var info = new PhysicalDeviceInfo(
-                    Device:        new PhysicalDevice(d),
-                    Properties:    in props2.properties,
-                    Features:      in feats2.features,
-                    Features11:    in f11,
-                    Features12:    in f12,
-                    Features13:    in f13,
-                    Features14:    in f14,
-                    Memory:        in memory.memoryProperties,
-                    QueueFamilies: queueViews[..(int)qCount],
-                    Extensions:    extBuf.AsSpan(0, (int)extCount),
-                    Name:          NameSlice(in props2.properties));
+                    device:        new PhysicalDevice(d),
+                    properties:    in props2.properties,
+                    features:      in feats2.features,
+                    features11:    in f11,
+                    features12:    in f12,
+                    features13:    in f13,
+                    features14:    in f14,
+                    memory:        in memory.memoryProperties,
+                    queueFamilies: queueViews[..(int)qCount],
+                    extensions:    extBuf.AsSpan(0, (int)extCount),
+                    name:          NameSlice(in props2.properties));
 
                 if (picker(in info))
                     return new PhysicalDevice(d);
