@@ -12,12 +12,17 @@ namespace Ahjo.Vulkan;
 /// </summary>
 internal static class ResultExtensions
 {
-    // Catastrophic codes are pre-allocated. Re-throwing a cached exception
-    // gets a fresh stack trace per throw via the runtime's dispatch info,
-    // and the Function field is generic ("vulkan call") since the call
-    // site is recoverable from the stack — losing the per-call name is
-    // a fair trade for zero allocation on OOM / device-lost paths where
-    // allocation might itself fail.
+    // Catastrophic codes are pre-allocated so the failure path is also
+    // zero-alloc — important when the failure is OOM and a fresh
+    // allocation could itself fail. Re-throwing a cached exception gets
+    // a fresh stack trace per throw via the runtime's dispatch info, so
+    // the call site is still recoverable from the stack. The trade-off:
+    // the Function field on cached instances is the generic literal
+    // "vulkan call", not the [CallerMemberName] of the throwing site.
+    // Callers that need the originating call site read it from the
+    // stack trace; callers that just want the failure code read .Result.
+    // Non-cached failure codes (everything except OOM_HOST/OOM_DEVICE/
+    // DEVICE_LOST) allocate per call and carry the [CallerMemberName].
     private static readonly VulkanException OutOfHostMemory =
         new(VkResult.VK_ERROR_OUT_OF_HOST_MEMORY, "vulkan call");
 

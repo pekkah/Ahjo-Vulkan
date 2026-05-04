@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Ahjo.Vulkan.Tests" />
+    <InternalsVisibleTo Include="Ahjo.Vulkan.Benchmarks" />
   </ItemGroup>
 
 </Project>

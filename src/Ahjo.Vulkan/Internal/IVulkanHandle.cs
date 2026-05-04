@@ -31,7 +31,7 @@ namespace Ahjo.Vulkan;
 /// helpers like debug-naming or pool keys can construct a handle from a
 /// raw value through constrained generics — calls devirtualize via the JIT.</para>
 /// </remarks>
-internal interface IVulkanHandle<TSelf>
+public interface IVulkanHandle<TSelf>
     where TSelf : unmanaged, IVulkanHandle<TSelf>
 {
     static abstract VkObjectType ObjectType { get; }

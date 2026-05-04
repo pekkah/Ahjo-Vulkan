@@ -31,8 +31,8 @@
     <PackageVersion Include="SDL3-CS.Native" Version="3.4.2" />
   </ItemGroup>
 
-  <!-- On-demand allocation + latency benchmarks (tests/Ahjo.Vulkan.Benchmarks).
-       Not referenced from CI; runs require a GPU. -->
+  <!-- On-demand allocation + latency benchmarks. See
+       tests/Ahjo.Vulkan.Benchmarks/ for usage. -->
   <ItemGroup>
     <PackageVersion Include="BenchmarkDotNet" Version="0.14.0" />
   </ItemGroup>
