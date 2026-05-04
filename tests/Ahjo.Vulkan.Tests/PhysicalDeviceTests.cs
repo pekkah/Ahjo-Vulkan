@@ -124,4 +124,29 @@ public sealed unsafe class PhysicalDeviceTests
         Assert.False(gpu.IsNull);
         Assert.True(observedGraphicsFamily);
     }
+
+    [Fact]
+    public void Pick_ExtensionsContainsCommon()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+
+        bool observedMaintenance1 = false;
+        bool observedFakeExtension = false;
+        var picker = (PhysicalDevicePicker)((in PhysicalDeviceInfo info) =>
+        {
+            // VK_KHR_maintenance1 promoted to core in 1.1 but still
+            // reported as a device extension on every shipping driver.
+            observedMaintenance1  = info.SupportsExtension("VK_KHR_maintenance1"u8);
+            observedFakeExtension = info.SupportsExtension("VK_FAKE_does_not_exist"u8);
+            return true;
+        });
+
+        instance.PickPhysicalDevice(picker);
+
+        Assert.True (observedMaintenance1,
+            "Every shipping Vulkan driver advertises VK_KHR_maintenance1.");
+        Assert.False(observedFakeExtension);
+    }
 }
