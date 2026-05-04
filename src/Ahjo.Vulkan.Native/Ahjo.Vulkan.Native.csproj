@@ -88,6 +88,11 @@
     <ItemGroup>
       <_HeaderFiles Include="$(_VulkanHeadersExtractDir)include\vulkan\**\*.h" />
       <_VkVideoFiles Include="$(_VulkanHeadersExtractDir)include\vk_video\**\*.h" />
+      <!-- vk.xml drives downstream generators (issue 29 — type-encoded
+           pNext chain contract). Staged alongside the headers under a
+           stable path so version bumps don't change the generator's
+           input path. -->
+      <_VkXmlFiles Include="$(_VulkanHeadersExtractDir)registry\vk.xml" />
     </ItemGroup>
 
     <Copy
@@ -100,6 +105,11 @@
       DestinationFiles="@(_VkVideoFiles->'$(_VulkanIncludeStaging)vk_video\%(RecursiveDir)%(Filename)%(Extension)')"
       SkipUnchangedFiles="true" />
 
+    <Copy
+      SourceFiles="@(_VkXmlFiles)"
+      DestinationFolder="$(_VulkanIncludeStaging)vulkan\"
+      SkipUnchangedFiles="true" />
+
     <Message Importance="high" Text="Fetched Vulkan-Headers $(VulkanHeadersVersion) to $(_VulkanIncludeStaging)" />
   </Target>
 
@@ -109,6 +119,39 @@
       Command="dotnet tool run ClangSharpPInvokeGenerator @&quot;$(GeneratorResponseFile)&quot;"
       WorkingDirectory="$(RepositoryRoot)" />
     <Message Importance="high" Text="Generated bindings written to $(GeneratedDir)" />
+  </Target>
+
+  <!--
+    RegenerateChains: parses vk.xml's structextends attributes and emits
+    one partial-struct file per chainable type (IChainable<TRoot>) plus
+    one per chain head (IChainRoot). Output lands in Generated/Chains/
+    and is committed alongside the rest of the bindings.
+
+    Not wired into Build — same policy as Regenerate. Run after a
+    Vulkan-Headers bump or a wrapper-side change to the chain contracts.
+
+    Usage: dotnet build src/Ahjo.Vulkan.Native /t:RegenerateChains
+  -->
+  <Target Name="RegenerateChains" DependsOnTargets="CopyGeneratedHeaders;RunClangSharpGenerator">
+    <PropertyGroup>
+      <_StructExtendsGenProj>$(ToolsDir)Ahjo.Vulkan.StructExtendsGen\Ahjo.Vulkan.StructExtendsGen.csproj</_StructExtendsGenProj>
+      <_VkXmlPath>$(_VulkanIncludeStaging)vulkan\vk.xml</_VkXmlPath>
+      <_VkStructureTypePath>$(GeneratedDir)VkStructureType.cs</_VkStructureTypePath>
+      <_ChainsOutputDir>$(GeneratedDir)Chains</_ChainsOutputDir>
+    </PropertyGroup>
+
+    <Error
+      Condition="!Exists('$(_VkXmlPath)')"
+      Text="vk.xml not staged at $(_VkXmlPath); run CopyGeneratedHeaders first." />
+    <Error
+      Condition="!Exists('$(_VkStructureTypePath)')"
+      Text="VkStructureType.cs not generated yet at $(_VkStructureTypePath); run RunClangSharpGenerator first." />
+
+    <Exec
+      Command="dotnet run --project &quot;$(_StructExtendsGenProj)&quot; -c Release -- &quot;$(_VkXmlPath)&quot; &quot;$(_VkStructureTypePath)&quot; &quot;$(_ChainsOutputDir)&quot;"
+      WorkingDirectory="$(RepositoryRoot)" />
+
+    <Message Importance="high" Text="Generated chain partials written to $(_ChainsOutputDir)" />
   </Target>
 
 </Project>

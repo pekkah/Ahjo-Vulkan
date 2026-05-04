@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Ahjo.Vulkan.StructExtendsGen</RootNamespace>
+    <AssemblyName>Ahjo.Vulkan.StructExtendsGen</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <!-- Off-tree generator; not part of the solution graph. Built and run
+         on demand by the RegenerateChains target in Ahjo.Vulkan.Native. -->
+  </PropertyGroup>
+
+</Project>

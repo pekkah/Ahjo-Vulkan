@@ -5,9 +5,13 @@ using Xunit;
 namespace Ahjo.Vulkan.Tests;
 
 /// <summary>
-/// Locks down <see cref="ChainBuilder"/>: round-trip a 3-node chain through
-/// the canonical pNext walker, confirm sType + payload survive, and verify
-/// the success path is zero-allocation.
+/// Locks down <see cref="ChainBuilder{TRoot}"/>: round-trip a 3-node chain
+/// through the canonical pNext walker, confirm sType + payload survive,
+/// and verify the success path is zero-allocation. The structural validity
+/// of the chain (<c>VkPhysicalDeviceVulkan13Features</c> can extend
+/// <c>VkPhysicalDeviceFeatures2</c>) is enforced at compile time by the
+/// <see cref="IChainable{TRoot}"/> generic constraint — these tests don't
+/// need to exercise it; the build itself does.
 /// </summary>
 public sealed unsafe class ChainBuilderTests
 {
@@ -15,27 +19,23 @@ public sealed unsafe class ChainBuilderTests
     public void RoundTrip_ThreeNodes_PNextWalkVisitsInOrder()
     {
         Span<byte> scratch = stackalloc byte[1024];
-        var chain = ChainBuilder.From(scratch);
+        var chain = ChainBuilder.For<VkPhysicalDeviceFeatures2>(scratch);
 
-        ref var head = ref chain.Root<VkPhysicalDeviceFeatures2>(
-            VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
+        ref var head = ref chain.Root();
         head.features.geometryShader = 1;
 
-        ref var v13 = ref chain.Push<VkPhysicalDeviceVulkan13Features>(
-            VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES);
+        ref var v13 = ref chain.Push<VkPhysicalDeviceVulkan13Features>();
         v13.synchronization2 = 1;
         v13.dynamicRendering = 1;
 
-        ref var v12 = ref chain.Push<VkPhysicalDeviceVulkan12Features>(
-            VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES);
+        ref var v12 = ref chain.Push<VkPhysicalDeviceVulkan12Features>();
         v12.timelineSemaphore = 1;
 
-        var headPtr = chain.IntoNative<VkPhysicalDeviceFeatures2>();
+        var headPtr = chain.Head;
         Assert.True(headPtr != null);
         Assert.Equal(VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, headPtr->sType);
         Assert.Equal(1u, headPtr->features.geometryShader);
 
-        // Walk the chain through the canonical VkBaseOutStructure cursor.
         var cursor = (VkBaseOutStructure*)headPtr;
         Span<VkStructureType> visited = stackalloc VkStructureType[4];
         var count = 0;
@@ -50,7 +50,6 @@ public sealed unsafe class ChainBuilderTests
         Assert.Equal(VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, visited[1]);
         Assert.Equal(VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, visited[2]);
 
-        // Confirm the payloads we wrote are still there at the linked-to addresses.
         var node2 = (VkPhysicalDeviceVulkan13Features*)((VkBaseOutStructure*)headPtr)->pNext;
         Assert.Equal(1u, node2->synchronization2);
         Assert.Equal(1u, node2->dynamicRendering);
@@ -60,12 +59,11 @@ public sealed unsafe class ChainBuilderTests
     }
 
     [Fact]
-    public void IntoNative_BeforeRoot_ReturnsNull()
+    public void Head_BeforeRoot_ReturnsNull()
     {
         Span<byte> scratch = stackalloc byte[64];
-        var chain = ChainBuilder.From(scratch);
-        Assert.True(chain.IntoNative<VkPhysicalDeviceFeatures2>() == null);
-        Assert.True(chain.IntoNative() == null);
+        var chain = ChainBuilder.For<VkPhysicalDeviceFeatures2>(scratch);
+        Assert.True(chain.Head == null);
     }
 
     [Fact]
@@ -73,10 +71,9 @@ public sealed unsafe class ChainBuilderTests
     {
         Assert.Throws<InvalidOperationException>(() =>
         {
-            Span<byte> scratch = stackalloc byte[128];
-            var chain = ChainBuilder.From(scratch);
-            chain.Push<VkPhysicalDeviceVulkan13Features>(
-                VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES);
+            Span<byte> scratch = stackalloc byte[1024];
+            var chain = ChainBuilder.For<VkPhysicalDeviceFeatures2>(scratch);
+            chain.Push<VkPhysicalDeviceVulkan13Features>();
         });
     }
 
@@ -85,10 +82,10 @@ public sealed unsafe class ChainBuilderTests
     {
         Assert.Throws<InvalidOperationException>(() =>
         {
-            Span<byte> scratch = stackalloc byte[256];
-            var chain = ChainBuilder.From(scratch);
-            chain.Root<VkPhysicalDeviceFeatures2>(VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
-            chain.Root<VkPhysicalDeviceFeatures2>(VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
+            Span<byte> scratch = stackalloc byte[512];
+            var chain = ChainBuilder.For<VkPhysicalDeviceFeatures2>(scratch);
+            chain.Root();
+            chain.Root();
         });
     }
 
@@ -97,12 +94,10 @@ public sealed unsafe class ChainBuilderTests
     {
         Assert.Throws<ArgumentException>(() =>
         {
-            // 32 bytes is far smaller than VkPhysicalDeviceFeatures2 (which
-            // contains a fully-populated VkPhysicalDeviceFeatures payload).
+            // 32 bytes is far smaller than VkPhysicalDeviceFeatures2.
             Span<byte> tiny = stackalloc byte[32];
-            var chain = ChainBuilder.From(tiny);
-            chain.Root<VkPhysicalDeviceFeatures2>(
-                VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
+            var chain = ChainBuilder.For<VkPhysicalDeviceFeatures2>(tiny);
+            chain.Root();
         });
     }
 
@@ -110,14 +105,11 @@ public sealed unsafe class ChainBuilderTests
     public void EachNode_AlignedToPointerSize()
     {
         Span<byte> scratch = stackalloc byte[1024];
-        var chain = ChainBuilder.From(scratch);
+        var chain = ChainBuilder.For<VkPhysicalDeviceFeatures2>(scratch);
 
-        ref var head = ref chain.Root<VkPhysicalDeviceFeatures2>(
-            VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
-        ref var node2 = ref chain.Push<VkPhysicalDeviceVulkan13Features>(
-            VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES);
-        ref var node3 = ref chain.Push<VkPhysicalDeviceVulkan12Features>(
-            VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES);
+        ref var head = ref chain.Root();
+        ref var node2 = ref chain.Push<VkPhysicalDeviceVulkan13Features>();
+        ref var node3 = ref chain.Push<VkPhysicalDeviceVulkan12Features>();
 
         var basePtr = (nint)Unsafe.AsPointer(ref head);
         var node2Ptr = (nint)Unsafe.AsPointer(ref node2);
@@ -130,7 +122,6 @@ public sealed unsafe class ChainBuilderTests
     [Fact]
     public void RoundTrip_IsZeroAllocation()
     {
-        // Warm up
         for (var i = 0; i < 1_000; i++)
         {
             BuildSampleChain();
@@ -146,17 +137,27 @@ public sealed unsafe class ChainBuilderTests
         Assert.Equal(0, after - before);
     }
 
+    [Fact]
+    public void STypeAndRootSType_AreStaticConstants()
+    {
+        // Static abstract members on partial structs — confirms the
+        // generated chain partials wired the right constants.
+        Assert.Equal(
+            VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+            VkPhysicalDeviceFeatures2.RootSType);
+        Assert.Equal(
+            VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+            VkPhysicalDeviceVulkan13Features.SType);
+    }
+
     [SkipLocalsInit]
     private static int BuildSampleChain()
     {
         Span<byte> scratch = stackalloc byte[1024];
-        var chain = ChainBuilder.From(scratch);
-        chain.Root<VkPhysicalDeviceFeatures2>(
-            VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
-        chain.Push<VkPhysicalDeviceVulkan13Features>(
-            VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES);
-        chain.Push<VkPhysicalDeviceVulkan12Features>(
-            VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES);
+        var chain = ChainBuilder.For<VkPhysicalDeviceFeatures2>(scratch);
+        chain.Root();
+        chain.Push<VkPhysicalDeviceVulkan13Features>();
+        chain.Push<VkPhysicalDeviceVulkan12Features>();
         return chain.Length;
     }
 }

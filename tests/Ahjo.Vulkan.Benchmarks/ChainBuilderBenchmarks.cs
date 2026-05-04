@@ -8,7 +8,8 @@ namespace Ahjo.Vulkan.Benchmarks;
 /// Backs acceptance criterion #4 of issue 03: BenchmarkDotNet harness shows
 /// zero allocations in the round-trip path. Three nodes — features2 →
 /// vulkan13 → vulkan12 — matches the typical "device features pNext chain"
-/// shape on a modern engine.
+/// shape on a modern engine. Validity is enforced at compile time via
+/// <see cref="IChainable{TRoot}"/> (issue 29); no runtime check.
 /// </summary>
 [MemoryDiagnoser]
 public class ChainBuilderBenchmarks
@@ -18,13 +19,10 @@ public class ChainBuilderBenchmarks
     public int BuildThreeNodeChain()
     {
         Span<byte> scratch = stackalloc byte[1024];
-        var chain = ChainBuilder.From(scratch);
-        chain.Root<VkPhysicalDeviceFeatures2>(
-            VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
-        chain.Push<VkPhysicalDeviceVulkan13Features>(
-            VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES);
-        chain.Push<VkPhysicalDeviceVulkan12Features>(
-            VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES);
+        var chain = ChainBuilder.For<VkPhysicalDeviceFeatures2>(scratch);
+        chain.Root();
+        chain.Push<VkPhysicalDeviceVulkan13Features>();
+        chain.Push<VkPhysicalDeviceVulkan12Features>();
         return chain.Length;
     }
 }
