@@ -5,11 +5,26 @@ using Ahjo.Vulkan.Native;
 
 namespace Ahjo.Vulkan;
 
+/// <summary>
+/// Owner of a <c>VkInstance</c>. <c>sealed class</c> rather than the wider
+/// struct-handle convention because <see cref="Instance"/> is created once
+/// per process, never copied, never on a hot path, and benefits from a
+/// finalizer that backstops a missed <c>Dispose</c>. See the design spec at
+/// <c>docs/superpowers/specs/2026-05-04-issue-06-instance-creation-design.md</c>
+/// for the rationale.
+/// </summary>
+/// <remarks>
+/// <para><b>Thread safety.</b> An <see cref="Instance"/> is not thread-safe
+/// for disposal — do not call <see cref="Dispose"/> concurrently from
+/// multiple threads. Vulkan calls made through the wrapped handle are
+/// thread-safe per the Vulkan spec (the underlying <c>VkInstance</c> is
+/// externally synchronizable).</para>
+/// </remarks>
 public sealed unsafe class Instance : IDisposable
 {
-    internal VkInstance_T*               Handle;
-    internal VkDebugUtilsMessengerEXT_T* Messenger;
-    internal InstanceFunctionTable       Functions;
+    internal readonly VkInstance_T*               Handle;
+    internal          VkDebugUtilsMessengerEXT_T* Messenger;     // mutated by Dispose
+    internal readonly InstanceFunctionTable       Functions;
     private  GCHandle                    _callbackKeepAlive;
     private  bool                        _disposed;
 
