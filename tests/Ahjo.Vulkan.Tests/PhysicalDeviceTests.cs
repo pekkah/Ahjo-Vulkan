@@ -77,4 +77,51 @@ public sealed unsafe class PhysicalDeviceTests
         for (int i = 0; i < nulOffset; i++)
             Assert.Equal((byte)props.deviceName[i], capturedName[i]);
     }
+
+    [Fact]
+    public void Pick_QueueFamiliesNeverEmpty()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+
+        int observedFamilyCount = -1;
+        var picker = (PhysicalDevicePicker)((in PhysicalDeviceInfo info) =>
+        {
+            observedFamilyCount = info.QueueFamilies.Length;
+            return true;
+        });
+
+        instance.PickPhysicalDevice(picker);
+
+        Assert.True(observedFamilyCount >= 1,
+            $"Vulkan spec guarantees ≥1 queue family per device; saw {observedFamilyCount}.");
+    }
+
+    [Fact]
+    public void Pick_PicksDeviceWithGraphicsQueue()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+
+        bool observedGraphicsFamily = false;
+        var picker = (PhysicalDevicePicker)((in PhysicalDeviceInfo info) =>
+        {
+            for (int i = 0; i < info.QueueFamilies.Length; i++)
+            {
+                if (info.QueueFamilies[i].SupportsGraphics)
+                {
+                    observedGraphicsFamily = true;
+                    return true;
+                }
+            }
+            return false;
+        });
+
+        PhysicalDevice gpu = instance.PickPhysicalDevice(picker);
+
+        Assert.False(gpu.IsNull);
+        Assert.True(observedGraphicsFamily);
+    }
 }
