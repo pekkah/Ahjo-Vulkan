@@ -113,12 +113,19 @@ public sealed unsafe class Instance : IDisposable
         VkDebugUtilsMessengerCallbackDataEXT*  data,
         void*                                  userData)
     {
-        var msg = data != null ? Utf8.ToString(data->pMessage) : null;
-        Console.Error.WriteLine($"[Vulkan {severity}] {msg}");
-        if ((severity & VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0
-            && Debugger.IsAttached)
+        try
         {
-            Debugger.Break();
+            var msg = data != null ? Utf8.ToString(data->pMessage) : null;
+            Console.Error.WriteLine($"[Vulkan {severity}] {msg}");
+            if ((severity & VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0
+                && Debugger.IsAttached)
+            {
+                Debugger.Break();
+            }
+        }
+        catch
+        {
+            // Never throw across the unmanaged-to-managed boundary — Vulkan loader UB.
         }
         return 0; // VK_FALSE — VK_TRUE would abort the calling Vulkan command
     }
