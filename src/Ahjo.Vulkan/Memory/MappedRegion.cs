@@ -1,4 +1,4 @@
-namespace Ahjo.Vulkan.Vma;
+namespace Ahjo.Vulkan;
 
 /// <summary>
 /// Scoped <c>vmaMapMemory</c> / <c>vmaUnmapMemory</c> pair. Living as a

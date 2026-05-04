@@ -24,7 +24,7 @@ on:
         required: false
         type: string
       include_vma:
-        description: "Pack Ahjo.Vulkan.Vma + Ahjo.Vulkan.Vma.Native too."
+        description: "Pack Ahjo.Vulkan.Vma.Native too."
         required: false
         type: boolean
         default: false
@@ -96,8 +96,11 @@ jobs:
           done
 
       # ---- Core packages (Ahjo.Vulkan + Ahjo.Vulkan.Native) ----
-      # Always packed. src/Ahjo.Vulkan references src/Ahjo.Vulkan.Native, so
-      # restoring + building the wrapper pulls the Native project in.
+      # Always packed. src/Ahjo.Vulkan references both Ahjo.Vulkan.Native and
+      # Ahjo.Vulkan.Vma.Native, so restoring + building the wrapper pulls
+      # both transitive projects in. SkipVmaNativeBuild keeps the host-RID
+      # cmake invocation off the build path; the per-RID binaries from
+      # build-vma-native.yml (when present) are wired in by Pack (VMA) below.
       - name: Restore (core)
         run: dotnet restore src/Ahjo.Vulkan/Ahjo.Vulkan.csproj
 
@@ -108,6 +111,7 @@ jobs:
           dotnet build src/Ahjo.Vulkan/Ahjo.Vulkan.csproj
           -c Release
           --no-restore
+          -p:SkipVmaNativeBuild=true
 
       - name: Pack (core)
         env:
@@ -116,39 +120,23 @@ jobs:
           dotnet pack src/Ahjo.Vulkan/Ahjo.Vulkan.csproj \
             -c Release \
             --no-build \
+            -p:SkipVmaNativeBuild=true \
             -o "${{ github.workspace }}/artifacts"
           dotnet pack src/Ahjo.Vulkan.Native/Ahjo.Vulkan.Native.csproj \
             -c Release \
             --no-build \
             -o "${{ github.workspace }}/artifacts"
 
-      # ---- VMA packages (only on vma-v* tags / include_vma) ----
+      # ---- VMA native package (only on vma-v* tags / include_vma) ----
       # Pack with SkipVmaNativeBuild=true: the binaries already exist
       # (downloaded above), don't ask MSBuild to rebuild the host RID.
-      - name: Restore (VMA)
-        if: needs.build-vma.result == 'success'
-        run: dotnet restore src/Ahjo.Vulkan.Vma/Ahjo.Vulkan.Vma.csproj
-
-      - name: Build (VMA, Release)
-        if: needs.build-vma.result == 'success'
-        env:
-          MinVerVersionOverride: ${{ inputs.version }}
-        run: >-
-          dotnet build src/Ahjo.Vulkan.Vma/Ahjo.Vulkan.Vma.csproj
-          -c Release
-          --no-restore
-          -p:SkipVmaNativeBuild=true
-
-      - name: Pack (VMA)
+      # The wrapper used to live in src/Ahjo.Vulkan.Vma but has been merged
+      # into Ahjo.Vulkan; only the .Native package ships separately now.
+      - name: Pack (VMA native)
         if: needs.build-vma.result == 'success'
         env:
           MinVerVersionOverride: ${{ inputs.version }}
         run: |
-          dotnet pack src/Ahjo.Vulkan.Vma/Ahjo.Vulkan.Vma.csproj \
-            -c Release \
-            --no-build \
-            -p:SkipVmaNativeBuild=true \
-            -o "${{ github.workspace }}/artifacts"
           dotnet pack src/Ahjo.Vulkan.Vma.Native/Ahjo.Vulkan.Vma.Native.csproj \
             -c Release \
             --no-build \

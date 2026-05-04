@@ -1,6 +1,6 @@
 using Ahjo.Vulkan.Native;
 
-namespace Ahjo.Vulkan.Vma;
+namespace Ahjo.Vulkan;
 
 /// <summary>
 /// A <c>VkImage</c> handle backed by a VMA <see cref="Allocation"/>.

@@ -2,24 +2,26 @@
 
 .NET bindings and a low-allocation C# wrapper for [Vulkan](https://www.vulkan.org/),
 part of the [Ahjo](https://github.com/pekkah) game engine. Published on
-NuGet as two packages:
+NuGet as three packages:
 
 - [**Ahjo.Vulkan**](https://www.nuget.org/packages/Ahjo.Vulkan) — the idiomatic
-  C# wrapper. What most callers want.
+  C# wrapper. What most callers want. Vulkan + integrated
+  [AMD VulkanMemoryAllocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
+  are coupled in one wrapper surface (`Allocator`, `AllocatedBuffer`,
+  `AllocatedImage`, `MappedRegion` live here).
 - [**Ahjo.Vulkan.Native**](https://www.nuget.org/packages/Ahjo.Vulkan.Native)
   — raw P/Invoke bindings against `vulkan.h`. Pulled in transitively by
   `Ahjo.Vulkan`; referenced directly only if you want to bypass the
   wrapper. The Vulkan loader is platform-supplied (Vulkan SDK / VulkanRT
   on Windows, `libvulkan1` on Linux) — no native binary ships in the
   nupkg.
-- [**Ahjo.Vulkan.Vma**](https://www.nuget.org/packages/Ahjo.Vulkan.Vma) +
-  [**Ahjo.Vulkan.Vma.Native**](https://www.nuget.org/packages/Ahjo.Vulkan.Vma.Native)
-  — optional integration of [AMD VulkanMemoryAllocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator).
-  VMA is C++ header-only, so the `.Native` package ships a prebuilt
+- [**Ahjo.Vulkan.Vma.Native**](https://www.nuget.org/packages/Ahjo.Vulkan.Vma.Native)
+  — raw P/Invoke bindings against `vk_mem_alloc.h`, plus prebuilt VMA
   SHARED library (`vma.{dll,so}`) for Windows + Linux (x64, arm64) under
-  `runtimes/<rid>/native/`. Versioned independently from core via the
-  `vma-v*` tag prefix. macOS RIDs aren't shipped today; the MoltenVK
-  runtime path needs validation before adding them.
+  `runtimes/<rid>/native/`. Pulled in transitively by `Ahjo.Vulkan`.
+  Versioned independently from core via the `vma-v*` tag prefix. macOS
+  RIDs aren't shipped today; the MoltenVK runtime path needs validation
+  before adding them.
 
 Project folders, csproj filenames, `AssemblyName`, `RootNamespace`, and
 NuGet `PackageId` all use the dotted `Ahjo.Vulkan*` form — one canonical
@@ -33,9 +35,8 @@ version derivation, GitHub Actions for CI + tag-driven NuGet publish.
 ## Layout
 
 - `src/Ahjo.Vulkan.Native` — ClangSharp-generated P/Invokes against `vulkan.h`. Regenerated via `dotnet build -t:Regenerate`. Ships as `Ahjo.Vulkan.Native`.
-- `src/Ahjo.Vulkan` — idiomatic wrapper. Ships as `Ahjo.Vulkan`.
-- `src/Ahjo.Vulkan.Vma.Native` — ClangSharp-generated P/Invokes against `vk_mem_alloc.h`. Builds + ships `vma.{dll,so,dylib}` for every RID. Ships as `Ahjo.Vulkan.Vma.Native`.
-- `src/Ahjo.Vulkan.Vma` — idiomatic VMA wrapper (`Allocator`, `Allocation`, `AllocatedBuffer`, `MappedRegion`). Ships as `Ahjo.Vulkan.Vma`.
+- `src/Ahjo.Vulkan.Vma.Native` — ClangSharp-generated P/Invokes against `vk_mem_alloc.h`. Builds + ships `vma.{dll,so}` for every RID. Ships as `Ahjo.Vulkan.Vma.Native`.
+- `src/Ahjo.Vulkan` — idiomatic wrapper covering both Vulkan and VMA (`Memory/Allocator.cs`, `Memory/AllocatedBuffer.cs`, …). Ships as `Ahjo.Vulkan`.
 - `src/Ahjo.Vulkan.Utilities` — dep-free helpers usable from samples and tests. Not published.
 - `native/vma/` — VMA impl translation unit (`src/vma.cpp`) + `CMakeLists.txt`. Source for the SHARED library packaged in `Ahjo.Vulkan.Vma.Native`.
 - `tests/Ahjo.Vulkan.Native.Tests` — xUnit smoke suite over the raw bindings.
@@ -66,7 +67,7 @@ to skip that step (e.g. when consuming a pre-staged binary in CI).
 | Package set                                       | Tag prefix |
 |---------------------------------------------------|------------|
 | `Ahjo.Vulkan` + `Ahjo.Vulkan.Native`              | `v*`       |
-| `Ahjo.Vulkan.Vma` + `Ahjo.Vulkan.Vma.Native`      | `vma-v*`   |
+| `Ahjo.Vulkan.Vma.Native`                          | `vma-v*`   |
 
 VMA is versioned independently because its release cadence and ABI
 churn don't align with Vulkan-Headers'.

@@ -1,8 +1,11 @@
 # Ahjo.Vulkan
 
-Idiomatic C# wrapper over [Vulkan](https://www.vulkan.org/). Built for
-games: `ref struct` command-buffer recorders, `readonly struct` resource
-handles, zero heap allocations on per-frame paths.
+Idiomatic C# wrapper over [Vulkan](https://www.vulkan.org/) with
+integrated [AMD VulkanMemoryAllocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator).
+Built for games: `ref struct` command-buffer recorders, `readonly struct`
+resource handles, zero heap allocations on per-frame paths. Buffer/image
+creation pairs `VkBuffer`/`VkImage` with a VMA `Allocation` in a single
+type so you never juggle the two halves manually.
 
 > **Status: pre-1.0.** The public surface may shift between 0.x releases
 > as the wrapper fills in remaining Vulkan coverage. Tag your
@@ -17,7 +20,9 @@ dotnet add package Ahjo.Vulkan
 The Vulkan loader is platform-supplied — see
 [`Ahjo.Vulkan.Native`](https://www.nuget.org/packages/Ahjo.Vulkan.Native)
 for runtime requirements (Windows GPU drivers / `libvulkan1` on Linux /
-MoltenVK on macOS).
+MoltenVK on macOS). The VMA shared library ships with the transitive
+[`Ahjo.Vulkan.Vma.Native`](https://www.nuget.org/packages/Ahjo.Vulkan.Vma.Native)
+dependency — no extra setup.
 
 ## Platforms
 

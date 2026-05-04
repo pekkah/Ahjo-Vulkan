@@ -1,4 +1,4 @@
-namespace Ahjo.Vulkan.Vma;
+namespace Ahjo.Vulkan;
 
 /// <summary>
 /// One VMA-managed memory allocation. Returned alongside a <c>VkBuffer</c>

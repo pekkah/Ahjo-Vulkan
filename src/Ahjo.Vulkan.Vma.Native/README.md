@@ -9,11 +9,13 @@ library compiled from a single `VMA_IMPLEMENTATION` translation unit, for
 every supported RID under `runtimes/<rid>/native/`. No separate per-platform
 package to reference, no compile step on the consumer side.
 
-## Most people want `Ahjo.Vulkan.Vma` instead
+## Most people want `Ahjo.Vulkan` instead
 
 This package exposes the raw C ABI. If you want ergonomics — `Allocator`,
 `AllocatedBuffer`, `MappedRegion` — install
-[`Ahjo.Vulkan.Vma`](https://www.nuget.org/packages/Ahjo.Vulkan.Vma).
+[`Ahjo.Vulkan`](https://www.nuget.org/packages/Ahjo.Vulkan), which pulls
+this package in transitively and layers a `ref struct`-based wrapper on
+top.
 
 ## Install
 

@@ -9,13 +9,14 @@
     <IsPackable>true</IsPackable>
     <PackageId>Ahjo.Vulkan</PackageId>
     <Title>Ahjo.Vulkan</Title>
-    <Description>Idiomatic C# wrapper over Vulkan: ref-struct command buffers, struct handles, zero-per-frame allocations.</Description>
+    <Description>Idiomatic C# wrapper over Vulkan with integrated VulkanMemoryAllocator (VMA): ref-struct command buffers, struct handles, zero-per-frame allocations.</Description>
     <MinVerTagPrefix>v</MinVerTagPrefix>
     <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Ahjo.Vulkan.Native\Ahjo.Vulkan.Native.csproj" />
+    <ProjectReference Include="..\Ahjo.Vulkan.Vma.Native\Ahjo.Vulkan.Vma.Native.csproj" />
     <PackageReference Include="MinVer" PrivateAssets="all" />
     <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>

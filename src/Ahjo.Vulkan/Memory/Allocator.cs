@@ -1,4 +1,4 @@
-namespace Ahjo.Vulkan.Vma;
+namespace Ahjo.Vulkan;
 
 /// <summary>
 /// Top-level VMA context. One per <c>VkDevice</c>. Owns memory pools,
@@ -26,6 +26,6 @@ public readonly struct Allocator : IDisposable
 
     public void Dispose()
     {
-        // TODO: call Vma.vmaDestroyAllocator(Handle) once bindings are generated.
+        // TODO: call Vma.vmaDestroyAllocator(Handle) once bindings are wired.
     }
 }
