@@ -214,4 +214,46 @@ public sealed unsafe class InstanceCreateTests
 
         Assert.True(second.Handle != null);
     }
+
+    [Fact]
+    public void Create_FailureWithManagedCallback_FreesGCHandleAndAllowsSubsequentCreate()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver,           "No Vulkan driver on host.");
+        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer,  "Validation layer not installed.");
+
+        // Same try/catch CS8175 workaround pattern used by the other validation tests.
+        VulkanException? ex = null;
+        try
+        {
+            ReadOnlySpan<Utf8Name> bogus = stackalloc Utf8Name[]
+            {
+                Utf8Name.FromLiteral("VK_FAKE_extension_does_not_exist"u8),
+            };
+
+            _ = Instance.Create(new InstanceDescription
+            {
+                ApiVersion = VulkanVersion.V1_4,
+                EnableValidation = true,
+                Extensions = bogus,
+                DebugCallback = _ => { },
+            });
+        }
+        catch (VulkanException e)
+        {
+            ex = e;
+        }
+
+        Assert.NotNull(ex);
+
+        // Subsequent successful create must work — proves the failed-create
+        // cleanup path freed its GCHandle and didn't leak driver state.
+        using var ok = Instance.Create(new InstanceDescription
+        {
+            ApiVersion = VulkanVersion.V1_4,
+            EnableValidation = true,
+            DebugCallback = _ => { },
+        });
+
+        Assert.True(ok.Handle != null);
+    }
 }
