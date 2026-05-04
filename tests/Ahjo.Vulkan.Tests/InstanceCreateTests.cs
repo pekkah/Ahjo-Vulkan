@@ -169,6 +169,10 @@ public sealed unsafe class InstanceCreateTests
 
         captured.Clear();
 
+        // Validation-layer callbacks are invoked synchronously on the calling
+        // thread before the Vulkan API returns. There is no race between the
+        // call below and the captured.Clear() above.
+
         // Intentional VUID violation: vkEnumeratePhysicalDevices requires a
         // non-null pPhysicalDeviceCount per VUID-vkEnumeratePhysicalDevices-
         // pPhysicalDeviceCount-parameter. The persistent messenger must fire.

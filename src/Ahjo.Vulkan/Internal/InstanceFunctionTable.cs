@@ -8,22 +8,22 @@ namespace Ahjo.Vulkan;
 /// functions through <c>vulkan-1.dll</c>; the only legal way to call them
 /// is via the function pointer the loader hands back at runtime.
 /// </summary>
-internal unsafe struct InstanceFunctionTable
+internal readonly unsafe struct InstanceFunctionTable
 {
-    public delegate* unmanaged[Stdcall]<
+    public readonly delegate* unmanaged[Stdcall]<
         VkInstance_T*,
         VkDebugUtilsMessengerCreateInfoEXT*,
         VkAllocationCallbacks*,
         VkDebugUtilsMessengerEXT_T**,
         VkResult> CreateDebugUtilsMessenger;
 
-    public delegate* unmanaged[Stdcall]<
+    public readonly delegate* unmanaged[Stdcall]<
         VkInstance_T*,
         VkDebugUtilsMessengerEXT_T*,
         VkAllocationCallbacks*,
         void> DestroyDebugUtilsMessenger;
 
-    private VkInstance_T* _instance;
+    private readonly VkInstance_T* _instance;
 
     public InstanceFunctionTable(VkInstance_T* instance)
     {
