@@ -139,13 +139,10 @@ public readonly unsafe struct Allocator : IDisposable
         VkImage_T*       rawImage = null;
         VmaAllocation_T* rawAlloc = null;
         VmaApi.vmaCreateImage(Handle, &ici, &aci, &rawImage, &rawAlloc, null).ThrowIfFailed();
-        return new Image(rawImage, new Allocation((nint)rawAlloc));
-    }
-
-    /// <summary>Frees the image and its backing allocation.</summary>
-    public void DestroyImage(in Image image)
-    {
-        VmaApi.vmaDestroyImage(Handle, image.Raw, (VmaAllocation_T*)image.Allocation.Handle);
+        return new Image(
+            rawImage, rawAlloc, this,
+            image.Format, image.Width, image.Height, image.Depth,
+            image.MipLevels, image.ArrayLayers, image.Usage);
     }
 
     public void Dispose()
