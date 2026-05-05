@@ -1,0 +1,158 @@
+using Xunit;
+
+namespace Ahjo.Vulkan.Tests;
+
+public sealed class SyncPoolTests
+{
+    [Fact]
+    public void FencePool_Acquire_InitiallySignaled_IsSignaledTrue()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+        using var pool     = new FencePool(device);
+
+        var fence = pool.Acquire(initiallySignaled: true);
+        try
+        {
+            Assert.True(fence.IsSignaled);
+            Assert.Equal(WaitState.Signaled, fence.Wait(TimeSpan.Zero));
+        }
+        finally { pool.Release(fence); }
+    }
+
+    [Fact]
+    public void FencePool_Unsignaled_Wait_ReturnsTimeout()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+        using var pool     = new FencePool(device);
+
+        var fence = pool.Acquire(initiallySignaled: false);
+        try
+        {
+            Assert.False(fence.IsSignaled);
+            Assert.Equal(WaitState.Timeout, fence.Wait(TimeSpan.FromMilliseconds(1)));
+        }
+        finally { pool.Release(fence); }
+    }
+
+    [Fact]
+    public void FencePool_AcquireRelease_RecyclesHandle()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+        using var pool     = new FencePool(device);
+
+        var first = pool.Acquire();
+        pool.Release(first);
+        var second = pool.Acquire();
+
+        unsafe { Assert.True(first.Handle == second.Handle); }
+        Assert.Equal(1, pool.AllocatedCount);
+    }
+
+    [Fact]
+    public void SemaphorePool_BinaryAndTimeline_AreSeparateFreeLists()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+        using var pool     = new SemaphorePool(device);
+
+        var bin  = pool.AcquireBinary();
+        var time = pool.AcquireTimeline();
+
+        Assert.False(bin.IsNull);
+        Assert.False(time.IsNull);
+        Assert.Equal(2, pool.AllocatedCount);
+
+        pool.Release(bin);
+        pool.Release(time);
+        Assert.Equal(1, pool.IdleBinaryCount);
+        Assert.Equal(1, pool.IdleTimelineCount);
+
+        // AcquireBinary must hit the binary free-list, not steal a timeline.
+        var bin2 = pool.AcquireBinary();
+        unsafe { Assert.True(bin.Handle == bin2.Handle); }
+    }
+
+    [Fact]
+    public void TimelineSemaphore_Signal_AdvancesValue()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+        using var pool     = new SemaphorePool(device);
+
+        var sem = pool.AcquireTimeline(initialValue: 0);
+        try
+        {
+            Assert.Equal(0UL, sem.Value);
+            sem.Signal(7);
+            Assert.Equal(7UL, sem.Value);
+            Assert.Equal(WaitState.Signaled, sem.WaitFor(7, TimeSpan.Zero));
+        }
+        finally { pool.Release(sem); }
+    }
+
+    [Fact]
+    public void TimelineSemaphore_WaitFor_NeverSignaled_Times_Out()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+        using var pool     = new SemaphorePool(device);
+
+        var sem = pool.AcquireTimeline(initialValue: 0);
+        try
+        {
+            Assert.Equal(WaitState.Timeout, sem.WaitFor(value: 999, TimeSpan.FromMilliseconds(1)));
+        }
+        finally { pool.Release(sem); }
+    }
+
+    [Fact]
+    public void DefaultHandles_AreNull()
+    {
+        Fence f = default;
+        Assert.True(f.IsNull);
+        Assert.True(f.IsSignaled); // default is "nothing to wait on" → signaled.
+        Assert.Equal(WaitState.Signaled, f.Wait(TimeSpan.Zero));
+
+        BinarySemaphore b = default;
+        Assert.True(b.IsNull);
+
+        TimelineSemaphore t = default;
+        Assert.True(t.IsNull);
+    }
+
+    private static Device CreateGraphicsDevice(Instance instance)
+    {
+        uint family = uint.MaxValue;
+        var gpu = instance.PickPhysicalDevice((in PhysicalDeviceInfo info) =>
+        {
+            for (int i = 0; i < info.QueueFamilies.Length; i++)
+            {
+                if (info.QueueFamilies[i].SupportsGraphics)
+                {
+                    family = info.QueueFamilies[i].Index;
+                    return true;
+                }
+            }
+            return false;
+        });
+        return gpu.CreateDevice(new DeviceDescription
+        {
+            Queues = [new QueueRequest(family, count: 1, priority: 1.0f)],
+        });
+    }
+}

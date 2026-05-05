@@ -1,0 +1,79 @@
+using Ahjo.Vulkan.Native;
+
+namespace Ahjo.Vulkan;
+
+/// <summary>
+/// CPU/GPU sync primitive over a <c>VkFence</c>. <c>readonly struct</c> —
+/// copy-by-value, two pointers (the fence handle + the device handle that
+/// owns it). Lifetime is owned by <see cref="FencePool"/>; do not call
+/// <c>vkDestroyFence</c> directly. Pass back through
+/// <see cref="FencePool.Release"/> when the wait/reset cycle is done.
+/// </summary>
+/// <remarks>
+/// <c>default(Fence)</c> is a legal null handle: <see cref="IsNull"/> is
+/// <see langword="true"/>, every method is a no-op or returns
+/// <see cref="WaitState.Signaled"/> (treating "no fence" as
+/// "nothing to wait for"). Double-release is undefined behavior — the
+/// pool relies on every fence appearing in its free-list at most once.
+/// </remarks>
+public readonly unsafe struct Fence : IVulkanHandle<Fence>
+{
+    public readonly VkFence_T*  Handle;
+    internal readonly VkDevice_T* DeviceHandle;
+
+    internal Fence(VkFence_T* handle, VkDevice_T* device)
+    {
+        Handle       = handle;
+        DeviceHandle = device;
+    }
+
+    public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_FENCE;
+    public static Fence FromRaw(nint handle) => new((VkFence_T*)handle, null);
+    public ulong RawHandle => (ulong)Handle;
+    public bool IsNull => Handle == null;
+
+    /// <summary>
+    /// Cheap, non-blocking signaled check. Wraps <c>vkGetFenceStatus</c>;
+    /// returns <see langword="true"/> on <c>VK_SUCCESS</c> and
+    /// <see langword="false"/> on <c>VK_NOT_READY</c>. Any other code
+    /// throws.
+    /// </summary>
+    public bool IsSignaled
+    {
+        get
+        {
+            if (Handle == null) return true;
+            VkResult r = Vk.vkGetFenceStatus(DeviceHandle, Handle);
+            return r switch
+            {
+                VkResult.VK_SUCCESS   => true,
+                VkResult.VK_NOT_READY => false,
+                _                     => throw new VulkanException(r, "vkGetFenceStatus"),
+            };
+        }
+    }
+
+    /// <summary>
+    /// Blocks until the fence is signaled or <paramref name="timeout"/>
+    /// elapses. Pass <see cref="Timeout.InfiniteTimeSpan"/> (or any
+    /// negative span) to wait forever.
+    /// </summary>
+    public WaitState Wait(TimeSpan timeout)
+    {
+        if (Handle == null) return WaitState.Signaled;
+        VkFence_T* h = Handle;
+        return Vk.vkWaitForFences(DeviceHandle, 1, &h, waitAll: 1, timeout.ToVulkanTimeout()).ToWaitState();
+    }
+
+    /// <summary>
+    /// Resets the fence back to the unsignaled state. Caller's responsibility
+    /// to ensure no GPU work is currently waiting on this fence's signal —
+    /// resetting a fence with pending submits is a validation error.
+    /// </summary>
+    public void Reset()
+    {
+        if (Handle == null) return;
+        VkFence_T* h = Handle;
+        Vk.vkResetFences(DeviceHandle, 1, &h).ThrowIfFailed();
+    }
+}
