@@ -10,6 +10,12 @@ namespace Ahjo.Vulkan;
 /// </summary>
 public readonly ref struct PhysicalDeviceInfo
 {
+    /// <summary>
+    /// The physical device this view describes. <see cref="PhysicalDevice"/>
+    /// is a class; <see cref="Instance"/> caches one instance per native
+    /// handle, so this reference is the same one other callers see for the
+    /// same GPU.
+    /// </summary>
     public readonly PhysicalDevice                                 Device;
     public readonly ref readonly VkPhysicalDeviceProperties        Properties;
     public readonly ref readonly VkPhysicalDeviceFeatures          Features;

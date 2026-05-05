@@ -39,7 +39,7 @@ public sealed unsafe class PhysicalDeviceInfoTests
         Span<QueueFamilyInfo>       qfs   = [];
 
         var info = new PhysicalDeviceInfo(
-            device: default, properties: in props, features: in feats,
+            device: null!, properties: in props, features: in feats,
             features11: in f11, features12: in f12, features13: in f13, features14: in f14,
             memory: in mem, queueFamilies: qfs, extensions: exts, name: default);
 
@@ -65,7 +65,7 @@ public sealed unsafe class PhysicalDeviceInfoTests
         var mem   = default(VkPhysicalDeviceMemoryProperties);
 
         var info = new PhysicalDeviceInfo(
-            device: default, properties: in props, features: in feats,
+            device: null!, properties: in props, features: in feats,
             features11: in f11, features12: in f12, features13: in f13, features14: in f14,
             memory: in mem, queueFamilies: qfs, extensions: exts, name: default);
 

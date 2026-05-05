@@ -28,6 +28,7 @@ public sealed unsafe class Instance : IDisposable
     internal readonly InstanceFunctionTable       Functions;
     private  GCHandle                    _callbackKeepAlive;
     private  bool                        _disposed;
+    private  PhysicalDevice[]?           _physicalDeviceCache;
 
     private Instance(
         VkInstance_T* handle,
@@ -257,8 +258,9 @@ public sealed unsafe class Instance : IDisposable
                 // 2f. Build the picker view and dispatch.
                 ref var props2 = ref *pchain.Head;
                 ref var feats2 = ref *fchain.Head;
+                var gpu = GetOrCreatePhysicalDevice(d);
                 var info = new PhysicalDeviceInfo(
-                    device:        new PhysicalDevice(d),
+                    device:        gpu,
                     properties:    in props2.properties,
                     features:      in feats2.features,
                     features11:    in f11,
@@ -271,7 +273,7 @@ public sealed unsafe class Instance : IDisposable
                     name:          NameSlice(in props2.properties));
 
                 if (picker(in info))
-                    return new PhysicalDevice(d);
+                    return gpu;
             }
         }
         finally
@@ -281,6 +283,55 @@ public sealed unsafe class Instance : IDisposable
 
         throw new VulkanException(VkResult.VK_ERROR_INITIALIZATION_FAILED,
             "No physical device matched the picker.");
+    }
+
+    /// <summary>
+    /// Returns the wrapped <see cref="PhysicalDevice"/> for a raw native
+    /// handle, materialising and caching one if the handle has not been
+    /// seen before. Called by <see cref="PickPhysicalDevice"/> so identity
+    /// (reference equality) matches "same GPU."
+    /// </summary>
+    internal PhysicalDevice GetOrCreatePhysicalDevice(VkPhysicalDevice_T* handle)
+    {
+        var cache = _physicalDeviceCache;
+        if (cache != null)
+        {
+            for (int i = 0; i < cache.Length; i++)
+                if (cache[i].Handle == handle)
+                    return cache[i];
+        }
+        return PopulateCacheAndFind(handle);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private PhysicalDevice PopulateCacheAndFind(VkPhysicalDevice_T* handle)
+    {
+        uint count = 0;
+        Vk.vkEnumeratePhysicalDevices(Handle, &count, null).ThrowIfFailed();
+
+        var fresh = new PhysicalDevice[count];
+        if (count > 0)
+        {
+            Span<nint> raw = count <= 16
+                ? stackalloc nint[(int)count]
+                : new nint[count];
+            fixed (nint* p = raw)
+                Vk.vkEnumeratePhysicalDevices(Handle, &count, (VkPhysicalDevice_T**)p).ThrowIfFailed();
+
+            for (int i = 0; i < (int)count; i++)
+                fresh[i] = new PhysicalDevice(this, (VkPhysicalDevice_T*)raw[i]);
+        }
+        _physicalDeviceCache = fresh;
+
+        for (int i = 0; i < fresh.Length; i++)
+            if (fresh[i].Handle == handle)
+                return fresh[i];
+
+        // Unreachable on a well-behaved driver: caller observed `handle` from
+        // vkEnumeratePhysicalDevices, and the spec doesn't allow the set to
+        // shrink mid-frame.
+        throw new VulkanException(VkResult.VK_ERROR_INITIALIZATION_FAILED,
+            "PhysicalDevice handle was not in the freshly-enumerated set.");
     }
 
     private static ReadOnlySpan<byte> NameSlice(in VkPhysicalDeviceProperties props)

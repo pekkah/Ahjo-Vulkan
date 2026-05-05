@@ -200,4 +200,17 @@ public sealed unsafe class PhysicalDeviceTests
 
         Assert.False(gpu.IsNull);
     }
+
+    [Fact]
+    public void Pick_TwoCalls_ReturnSameInstance()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+
+        PhysicalDevice a = instance.PickPhysicalDevice(static (in PhysicalDeviceInfo _) => true);
+        PhysicalDevice b = instance.PickPhysicalDevice(static (in PhysicalDeviceInfo _) => true);
+
+        Assert.Same(a, b);
+    }
 }
