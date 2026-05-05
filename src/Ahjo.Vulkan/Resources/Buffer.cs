@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Ahjo.Vulkan.Native;
 using Ahjo.Vulkan.Vma.Native;
 using VmaApi = Ahjo.Vulkan.Vma.Native.Vma;
@@ -32,13 +33,22 @@ public readonly unsafe struct Buffer : IVulkanHandle<Buffer>, IDisposable
     public readonly BufferUsage      Usage;
     public readonly bool             IsHostVisible;
 
+    /// <summary>
+    /// Persistent mapped pointer when the buffer was allocated with
+    /// <see cref="AllocationFlags.Mapped"/>; <see langword="null"/> otherwise.
+    /// Lets <see cref="AsSpan{T}"/> and <see cref="Map{T}"/> skip the
+    /// <c>vmaMapMemory</c>/<c>vmaUnmapMemory</c> dance for persistent maps.
+    /// </summary>
+    internal readonly void* PersistentMapped;
+
     internal Buffer(
         VkBuffer_T*      handle,
         VmaAllocation_T* allocation,
         Allocator        owner,
         ulong            size,
         BufferUsage      usage,
-        bool             isHostVisible)
+        bool             isHostVisible,
+        void*            persistentMapped)
     {
         Handle           = handle;
         AllocationHandle = allocation;
@@ -46,12 +56,13 @@ public readonly unsafe struct Buffer : IVulkanHandle<Buffer>, IDisposable
         Size             = size;
         Usage            = usage;
         IsHostVisible    = isHostVisible;
+        PersistentMapped = persistentMapped;
     }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_BUFFER;
 
     public static Buffer FromRaw(nint handle) =>
-        new((VkBuffer_T*)handle, null, default, 0, BufferUsage.None, false);
+        new((VkBuffer_T*)handle, null, default, 0, BufferUsage.None, false, null);
 
     public ulong RawHandle => (ulong)Handle;
 
@@ -69,6 +80,46 @@ public readonly unsafe struct Buffer : IVulkanHandle<Buffer>, IDisposable
             buffer = Handle,
         };
         return Vk.vkGetBufferDeviceAddress(device.Handle, &info);
+    }
+
+    /// <summary>
+    /// Allocation-free view of a persistent-mapped buffer as a
+    /// <see cref="Span{T}"/>. Throws on a non-persistent or non-host-visible
+    /// buffer; use <see cref="Map{T}"/> if you need the
+    /// <c>vmaMapMemory</c>-on-demand path.
+    /// </summary>
+    public Span<T> AsSpan<T>() where T : unmanaged
+    {
+        if (PersistentMapped == null)
+            throw new InvalidOperationException(
+                "Buffer.AsSpan<T>() requires AllocationFlags.Mapped at create time. " +
+                "Use Buffer.Map<T>() for non-persistent host-visible buffers.");
+        return MemoryMarshal.Cast<byte, T>(new Span<byte>(PersistentMapped, checked((int)Size)));
+    }
+
+    /// <summary>Read-only counterpart of <see cref="AsSpan{T}"/>.</summary>
+    public ReadOnlySpan<T> AsReadOnlySpan<T>() where T : unmanaged => AsSpan<T>();
+
+    /// <summary>
+    /// Maps the buffer's host-visible memory and returns a
+    /// <see cref="MappedRegion{T}"/>. For persistent-mapped buffers the
+    /// VMA pointer is reused without an additional <c>vmaMapMemory</c>
+    /// call, and disposal is a no-op.
+    /// </summary>
+    public MappedRegion<T> Map<T>() where T : unmanaged
+    {
+        if (!IsHostVisible)
+            throw new InvalidOperationException(
+                "Buffer.Map<T>() requires a host-visible allocation (AutoPreferHost or HostAccess* flags).");
+
+        int length = checked((int)(Size / (uint)sizeof(T)));
+
+        if (PersistentMapped != null)
+            return new MappedRegion<T>(Owner.Handle, AllocationHandle, PersistentMapped, length, persistent: true);
+
+        void* data = null;
+        VmaApi.vmaMapMemory(Owner.Handle, AllocationHandle, &data).ThrowIfFailed();
+        return new MappedRegion<T>(Owner.Handle, AllocationHandle, data, length, persistent: false);
     }
 
     public void Dispose()

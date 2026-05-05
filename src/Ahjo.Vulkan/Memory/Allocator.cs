@@ -94,15 +94,21 @@ public readonly unsafe struct Allocator : IDisposable
             flags = (uint)allocation.Flags,
         };
 
-        VkBuffer_T*      rawBuffer = null;
-        VmaAllocation_T* rawAlloc  = null;
-        VmaApi.vmaCreateBuffer(Handle, &bci, &aci, &rawBuffer, &rawAlloc, null).ThrowIfFailed();
+        VkBuffer_T*       rawBuffer = null;
+        VmaAllocation_T*  rawAlloc  = null;
+        VmaAllocationInfo info      = default;
+        VmaApi.vmaCreateBuffer(Handle, &bci, &aci, &rawBuffer, &rawAlloc, &info).ThrowIfFailed();
 
         uint memProps = 0;
         VmaApi.vmaGetAllocationMemoryProperties(Handle, rawAlloc, &memProps);
         bool hostVisible = (memProps & (uint)VkMemoryPropertyFlagBits.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0;
 
-        return new Buffer(rawBuffer, rawAlloc, this, buffer.Size, buffer.Usage, hostVisible);
+        // VMA returns pMappedData != null when the allocation was created
+        // with VMA_ALLOCATION_CREATE_MAPPED_BIT (our AllocationFlags.Mapped),
+        // even for AUTO_PREFER_DEVICE allocations that landed on a non-host
+        // memory type (in which case it stays null). The buffer caches it
+        // so AsSpan/Map can skip vmaMapMemory in the persistent-mapped case.
+        return new Buffer(rawBuffer, rawAlloc, this, buffer.Size, buffer.Usage, hostVisible, info.pMappedData);
     }
 
     /// <summary>

@@ -1,37 +1,68 @@
+using System.Buffers;
+using Ahjo.Vulkan.Vma.Native;
+using VmaApi = Ahjo.Vulkan.Vma.Native.Vma;
+
 namespace Ahjo.Vulkan;
 
 /// <summary>
-/// Scoped <c>vmaMapMemory</c> / <c>vmaUnmapMemory</c> pair. Living as a
-/// <c>ref struct</c> forces stack allocation, so the unmap can't outlive
-/// the scope and the mapped pointer can't escape into a heap object.
+/// VMA-mapped region surfaced as a first-class <see cref="MemoryManager{T}"/>
+/// so callers can pass mapped GPU memory to APIs that take
+/// <see cref="Memory{T}"/> (async pipelines, <c>System.IO.Pipelines</c>,
+/// SIMD libraries) without losing the lifetime story to a stack-only
+/// <c>Span&lt;T&gt;</c>. Returned by <see cref="Buffer.Map{T}"/>;
+/// <see cref="MemoryManager{T}.Dispose()"/> calls <c>vmaUnmapMemory</c>.
 /// </summary>
-public ref struct MappedRegion : IDisposable
+/// <remarks>
+/// <para>The mapped pointer is valid for the lifetime of the wrapping
+/// <see cref="Buffer"/> — VMA does not move host-visible allocations.
+/// <see cref="Pin"/> therefore returns a <see cref="MemoryHandle"/> over
+/// the existing pointer rather than registering a new GC pin; <see cref="Unpin"/>
+/// is a no-op.</para>
+/// <para><b>Persistent mapping.</b> When the buffer was created with
+/// <see cref="AllocationFlags.Mapped"/>, VMA hands the host pointer back
+/// at allocation time and the wrapper skips the
+/// <c>vmaMapMemory</c>/<c>vmaUnmapMemory</c> calls entirely — the dispose
+/// path is a no-op in that mode.</para>
+/// </remarks>
+public sealed unsafe class MappedRegion<T> : MemoryManager<T>
+    where T : unmanaged
 {
-    private readonly Allocator _allocator;
-    private readonly Allocation _allocation;
-    private nint _data;
+    private readonly VmaAllocator_T*  _allocator;
+    private readonly VmaAllocation_T* _allocation;
+    private readonly bool             _persistent;
+    private          void*            _data;
+    private readonly int              _length;
 
-    internal MappedRegion(Allocator allocator, Allocation allocation, nint data)
+    internal MappedRegion(
+        VmaAllocator_T*  allocator,
+        VmaAllocation_T* allocation,
+        void*            data,
+        int              length,
+        bool             persistent)
     {
-        _allocator = allocator;
+        _allocator  = allocator;
         _allocation = allocation;
-        _data = data;
+        _data       = data;
+        _length     = length;
+        _persistent = persistent;
     }
 
-    public unsafe Span<byte> AsSpan(int length) => new((void*)_data, length);
+    public override Span<T> GetSpan() => new(_data, _length);
 
-    public unsafe Span<T> AsSpan<T>(int count) where T : unmanaged
-        => new((void*)_data, count);
-
-    public nint Pointer => _data;
-
-    public void Dispose()
+    public override MemoryHandle Pin(int elementIndex = 0)
     {
-        if (_data == 0)
-        {
-            return;
-        }
-        // TODO: Vma.vmaUnmapMemory(_allocator.Handle, _allocation.Handle);
-        _data = 0;
+        if ((uint)elementIndex > (uint)_length)
+            throw new ArgumentOutOfRangeException(nameof(elementIndex));
+        return new MemoryHandle((T*)_data + elementIndex, default, this);
+    }
+
+    public override void Unpin() { /* VMA pin is permanent for the buffer's lifetime. */ }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (_data == null) return;
+        if (!_persistent)
+            VmaApi.vmaUnmapMemory(_allocator, _allocation);
+        _data = null;
     }
 }
