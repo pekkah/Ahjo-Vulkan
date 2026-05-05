@@ -33,4 +33,33 @@ public sealed unsafe class Queue
     public ulong RawHandle => (ulong)(nint)Handle;
     public bool  IsNull    => Handle == null;
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_QUEUE;
+
+    /// <summary>
+    /// Submits a single command buffer via <c>vkQueueSubmit2</c>. Calls
+    /// <see cref="CommandRecorder.End"/> first if the recorder is still
+    /// open. Pass <c>default(Fence)</c> for fire-and-forget; otherwise
+    /// the fence is signaled when GPU execution completes.
+    /// </summary>
+    /// <remarks>
+    /// Single-buffer / no-semaphore overload to start. Multi-submit and
+    /// wait/signal semaphore variants land alongside the FrameContext
+    /// (#16 — issue 15) where they're actually used.
+    /// </remarks>
+    public void Submit2(ref CommandRecorder recorder, in Fence fence)
+    {
+        recorder.End();
+        VkCommandBuffer_T* cb = recorder.Handle;
+        var cbInfo = new VkCommandBufferSubmitInfo
+        {
+            sType         = VkStructureType.VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+            commandBuffer = cb,
+        };
+        var submit = new VkSubmitInfo2
+        {
+            sType                  = VkStructureType.VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+            commandBufferInfoCount = 1,
+            pCommandBufferInfos    = &cbInfo,
+        };
+        Vk.vkQueueSubmit2(Handle, 1, &submit, fence.Handle).ThrowIfFailed();
+    }
 }
