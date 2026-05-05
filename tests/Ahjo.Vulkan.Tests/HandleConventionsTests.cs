@@ -40,6 +40,18 @@ public sealed class HandleConventionsTests
         Assert.Equal(VkObjectType.VK_OBJECT_TYPE_PHYSICAL_DEVICE, PhysicalDevice.ObjectType);
     }
 
+    [Fact]
+    public void Device_ObjectType_IsDevice()
+    {
+        Assert.Equal(VkObjectType.VK_OBJECT_TYPE_DEVICE, Device.ObjectType);
+    }
+
+    [Fact]
+    public void Queue_ObjectType_IsQueue()
+    {
+        Assert.Equal(VkObjectType.VK_OBJECT_TYPE_QUEUE, Queue.ObjectType);
+    }
+
     private static T MakeFromRaw<T>(nint raw) where T : unmanaged, IVulkanHandle<T>
         => T.FromRaw(raw);
 
