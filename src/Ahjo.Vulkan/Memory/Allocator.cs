@@ -59,6 +59,11 @@ public readonly unsafe struct Allocator : IDisposable
 
         var ci = new VmaAllocatorCreateInfo
         {
+            // bufferDeviceAddress is on by default in the wrapper's 1.4 device
+            // feature chain (PhysicalDevice.CreateDevice). VMA needs this flag
+            // to allocate buffers carrying VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+            // without it, vmaCreateBuffer returns VK_ERROR_INITIALIZATION_FAILED.
+            flags            = (uint)VmaAllocatorCreateFlagBits.VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
             physicalDevice   = device.PhysicalDevice.Handle,
             device           = device.Handle,
             instance         = device.PhysicalDevice.Instance.Handle,
@@ -92,7 +97,12 @@ public readonly unsafe struct Allocator : IDisposable
         VkBuffer_T*      rawBuffer = null;
         VmaAllocation_T* rawAlloc  = null;
         VmaApi.vmaCreateBuffer(Handle, &bci, &aci, &rawBuffer, &rawAlloc, null).ThrowIfFailed();
-        return new Buffer(rawBuffer, new Allocation((nint)rawAlloc));
+
+        uint memProps = 0;
+        VmaApi.vmaGetAllocationMemoryProperties(Handle, rawAlloc, &memProps);
+        bool hostVisible = (memProps & (uint)VkMemoryPropertyFlagBits.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0;
+
+        return new Buffer(rawBuffer, rawAlloc, this, buffer.Size, buffer.Usage, hostVisible);
     }
 
     /// <summary>
@@ -124,12 +134,6 @@ public readonly unsafe struct Allocator : IDisposable
         VmaAllocation_T* rawAlloc = null;
         VmaApi.vmaCreateImage(Handle, &ici, &aci, &rawImage, &rawAlloc, null).ThrowIfFailed();
         return new Image(rawImage, new Allocation((nint)rawAlloc));
-    }
-
-    /// <summary>Frees the buffer and its backing allocation.</summary>
-    public void DestroyBuffer(in Buffer buffer)
-    {
-        VmaApi.vmaDestroyBuffer(Handle, buffer.Raw, (VmaAllocation_T*)buffer.Allocation.Handle);
     }
 
     /// <summary>Frees the image and its backing allocation.</summary>

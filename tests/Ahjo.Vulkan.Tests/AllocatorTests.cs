@@ -34,9 +34,9 @@ public sealed class AllocatorTests
             });
 
         Assert.False(buffer.IsNull);
-        Assert.NotEqual(0, buffer.Allocation.Handle);
+        unsafe { Assert.True(buffer.AllocationHandle != null); }
 
-        allocator.DestroyBuffer(buffer);
+        buffer.Dispose();
     }
 
     [Fact]
