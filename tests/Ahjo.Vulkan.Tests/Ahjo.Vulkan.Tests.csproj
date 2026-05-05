@@ -18,4 +18,29 @@
     <ProjectReference Include="..\..\src\Ahjo.Vulkan.Utilities\Ahjo.Vulkan.Utilities.csproj" />
   </ItemGroup>
 
+  <!--
+    Compile every .vert/.frag/.comp shader in Shaders/ to .spv via glslc
+    before the build copies test content. The output lands next to the
+    test DLL as "Shaders/<name>.spv" so SpirvBlob.Load(path) can find it
+    relative to the binary directory.
+
+    Skipped (with a build message) when glslc isn't on PATH so the suite
+    still builds in environments without the Vulkan SDK — the tests
+    that need real SPIR-V skip themselves at runtime.
+  -->
+  <ItemGroup>
+    <_ShaderSource Include="Shaders\*.vert;Shaders\*.frag;Shaders\*.comp" />
+  </ItemGroup>
+
+  <Target Name="CompileShaders" AfterTargets="Build" Inputs="@(_ShaderSource)" Outputs="@(_ShaderSource->'$(OutputPath)Shaders\%(Filename)%(Extension).spv')">
+    <PropertyGroup>
+      <_GlslcExe Condition="'$(_GlslcExe)' == '' and '$(VULKAN_SDK)' != ''">$(VULKAN_SDK)\Bin\glslc.exe</_GlslcExe>
+      <_GlslcExe Condition="'$(_GlslcExe)' == ''">glslc</_GlslcExe>
+    </PropertyGroup>
+    <MakeDir Directories="$(OutputPath)Shaders" />
+    <Exec Command="&quot;$(_GlslcExe)&quot; &quot;%(_ShaderSource.FullPath)&quot; -o &quot;$(OutputPath)Shaders\%(_ShaderSource.Filename)%(_ShaderSource.Extension).spv&quot;"
+          IgnoreExitCode="false"
+          ContinueOnError="WarnAndContinue" />
+  </Target>
+
 </Project>

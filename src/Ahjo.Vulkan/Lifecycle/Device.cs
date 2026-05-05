@@ -144,6 +144,12 @@ public sealed unsafe class Device : IDisposable
     }
 
     /// <summary>
+    /// Returns a <see cref="ComputePipelineBuilder"/> for fluent compute-
+    /// pipeline construction.
+    /// </summary>
+    public ComputePipelineBuilder BuildComputePipeline() => new(this);
+
+    /// <summary>
     /// Creates a <see cref="ShaderModule"/> from a span of SPIR-V words.
     /// Primary overload: SPIR-V is 32-bit-aligned by definition, so taking
     /// <see cref="ReadOnlySpan{UInt32}"/> enforces alignment at the call site.
