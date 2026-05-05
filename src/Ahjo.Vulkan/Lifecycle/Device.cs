@@ -22,6 +22,8 @@ public sealed unsafe class Device : IDisposable
     internal readonly DeviceFunctionTable Functions;
     public   readonly PhysicalDevice      PhysicalDevice;
     private  readonly Queue[]             _queues;
+    private  Allocator                    _allocator;
+    private  bool                         _allocatorCreated;
     private  bool                         _disposed;
 
     internal Device(VkDevice_T* handle, PhysicalDevice physicalDevice, Queue[] queues)
@@ -30,6 +32,24 @@ public sealed unsafe class Device : IDisposable
         Functions      = new DeviceFunctionTable(handle);
         PhysicalDevice = physicalDevice;
         _queues        = queues;
+    }
+
+    /// <summary>
+    /// The device's VMA allocator. Created on first access and disposed
+    /// during <see cref="Dispose"/>; do not call <see cref="Allocator.Dispose"/>
+    /// on the returned struct — the device owns the lifetime.
+    /// </summary>
+    public Allocator Allocator
+    {
+        get
+        {
+            if (!_allocatorCreated)
+            {
+                _allocator        = Ahjo.Vulkan.Allocator.Create(this);
+                _allocatorCreated = true;
+            }
+            return _allocator;
+        }
     }
 
     public ulong RawHandle => (ulong)(nint)Handle;
@@ -73,6 +93,9 @@ public sealed unsafe class Device : IDisposable
             // the success path. A failing wait-idle (lost device, OOM)
             // already implies the device is going away — destroy still runs.
             Vk.vkDeviceWaitIdle(Handle);
+            // Allocator must die before the VkDevice — vmaDestroyAllocator
+            // calls into the device's function table.
+            if (_allocatorCreated) _allocator.Dispose();
             Vk.vkDestroyDevice(Handle, null);
         }
         GC.SuppressFinalize(this);
