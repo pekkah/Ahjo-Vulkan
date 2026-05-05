@@ -83,6 +83,105 @@ public sealed unsafe class Device : IDisposable
         Vk.vkDeviceWaitIdle(Handle).ThrowIfFailed();
     }
 
+    /// <summary>
+    /// Builds a <see cref="DescriptorSetLayout"/> from a slot list.
+    /// Bindings may carry per-slot
+    /// <see cref="DescriptorBindingFlags"/>; if any do, the wrapper
+    /// chains a <c>VkDescriptorSetLayoutBindingFlagsCreateInfo</c>.
+    /// </summary>
+    public DescriptorSetLayout CreateDescriptorSetLayout(in DescriptorSetLayoutDescription desc)
+    {
+        if (desc.Bindings.IsEmpty)
+            throw new ArgumentException("DescriptorSetLayoutDescription.Bindings must contain at least one entry.");
+
+        Span<VkDescriptorSetLayoutBinding> nativeBindings =
+            stackalloc VkDescriptorSetLayoutBinding[desc.Bindings.Length];
+        Span<uint> flags = stackalloc uint[desc.Bindings.Length];
+        bool anyFlagsSet = false;
+        for (int i = 0; i < desc.Bindings.Length; i++)
+        {
+            ref readonly var b = ref desc.Bindings[i];
+            nativeBindings[i] = new VkDescriptorSetLayoutBinding
+            {
+                binding         = b.Slot,
+                descriptorType  = b.Type,
+                descriptorCount = b.Count == 0 ? 1u : b.Count,
+                stageFlags      = (uint)b.Stages,
+            };
+            flags[i] = (uint)b.BindingFlags;
+            if (flags[i] != 0) anyFlagsSet = true;
+        }
+
+        VkDescriptorSetLayout_T* raw = null;
+        fixed (VkDescriptorSetLayoutBinding* pBindings = nativeBindings)
+        fixed (uint*                          pFlags    = flags)
+        {
+            var ci = new VkDescriptorSetLayoutCreateInfo
+            {
+                sType        = VkStructureType.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                flags        = desc.UpdateAfterBindPool
+                    ? (uint)VkDescriptorSetLayoutCreateFlagBits.VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT
+                    : 0u,
+                bindingCount = (uint)nativeBindings.Length,
+                pBindings    = pBindings,
+            };
+
+            VkDescriptorSetLayoutBindingFlagsCreateInfo flagsInfo = default;
+            if (anyFlagsSet)
+            {
+                flagsInfo = new VkDescriptorSetLayoutBindingFlagsCreateInfo
+                {
+                    sType         = VkStructureType.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+                    bindingCount  = (uint)flags.Length,
+                    pBindingFlags = pFlags,
+                };
+                ci.pNext = &flagsInfo;
+            }
+
+            Vk.vkCreateDescriptorSetLayout(Handle, &ci, null, &raw).ThrowIfFailed();
+        }
+        return new DescriptorSetLayout(raw, Handle);
+    }
+
+    /// <summary>
+    /// Builds a <see cref="PipelineLayout"/> from descriptor-set layouts +
+    /// push-constant ranges.
+    /// </summary>
+    public PipelineLayout CreatePipelineLayout(in PipelineLayoutDescription desc)
+    {
+        Span<nint> setLayouts = stackalloc nint[desc.SetLayouts.Length];
+        for (int i = 0; i < desc.SetLayouts.Length; i++)
+            setLayouts[i] = (nint)desc.SetLayouts[i].Handle;
+
+        Span<VkPushConstantRange> ranges = stackalloc VkPushConstantRange[desc.PushConstantRanges.Length];
+        for (int i = 0; i < desc.PushConstantRanges.Length; i++)
+        {
+            ref readonly var r = ref desc.PushConstantRanges[i];
+            ranges[i] = new VkPushConstantRange
+            {
+                stageFlags = (uint)r.Stages,
+                offset     = r.Offset,
+                size       = r.Size,
+            };
+        }
+
+        VkPipelineLayout_T* raw = null;
+        fixed (nint*               pSetLayouts = setLayouts)
+        fixed (VkPushConstantRange* pRanges    = ranges)
+        {
+            var ci = new VkPipelineLayoutCreateInfo
+            {
+                sType                  = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                setLayoutCount         = (uint)setLayouts.Length,
+                pSetLayouts            = (VkDescriptorSetLayout_T**)pSetLayouts,
+                pushConstantRangeCount = (uint)ranges.Length,
+                pPushConstantRanges    = pRanges,
+            };
+            Vk.vkCreatePipelineLayout(Handle, &ci, null, &raw).ThrowIfFailed();
+        }
+        return new PipelineLayout(raw, Handle);
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
