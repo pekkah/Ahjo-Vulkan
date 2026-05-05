@@ -150,6 +150,13 @@ public sealed unsafe class Device : IDisposable
     public ComputePipelineBuilder BuildComputePipeline() => new(this);
 
     /// <summary>
+    /// Returns a <see cref="GraphicsPipelineBuilder"/> for fluent graphics-
+    /// pipeline construction. Vulkan 1.4 dynamic-rendering only — no
+    /// <c>VkRenderPass</c>.
+    /// </summary>
+    public GraphicsPipelineBuilder BuildGraphicsPipeline() => new(this);
+
+    /// <summary>
     /// Creates a <see cref="ShaderModule"/> from a span of SPIR-V words.
     /// Primary overload: SPIR-V is 32-bit-aligned by definition, so taking
     /// <see cref="ReadOnlySpan{UInt32}"/> enforces alignment at the call site.
