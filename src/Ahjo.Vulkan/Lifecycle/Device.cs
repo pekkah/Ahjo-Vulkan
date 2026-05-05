@@ -144,6 +144,45 @@ public sealed unsafe class Device : IDisposable
     }
 
     /// <summary>
+    /// Creates a <see cref="ShaderModule"/> from a span of SPIR-V words.
+    /// Primary overload: SPIR-V is 32-bit-aligned by definition, so taking
+    /// <see cref="ReadOnlySpan{UInt32}"/> enforces alignment at the call site.
+    /// </summary>
+    public ShaderModule CreateShaderModule(ReadOnlySpan<uint> spirv)
+    {
+        if (spirv.IsEmpty)
+            throw new ArgumentException("SPIR-V blob cannot be empty.", nameof(spirv));
+
+        VkShaderModule_T* raw = null;
+        fixed (uint* pCode = spirv)
+        {
+            var ci = new VkShaderModuleCreateInfo
+            {
+                sType    = VkStructureType.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+                codeSize = (nuint)spirv.Length * sizeof(uint),
+                pCode    = pCode,
+            };
+            Vk.vkCreateShaderModule(Handle, &ci, null, &raw).ThrowIfFailed();
+        }
+        return new ShaderModule(raw, Handle);
+    }
+
+    /// <summary>
+    /// Convenience overload over <see cref="ReadOnlySpan{Byte}"/>.
+    /// SPIR-V's word size is 4 bytes; the byte span's length must be a
+    /// multiple of 4 and the underlying memory must be 4-byte-aligned.
+    /// </summary>
+    public ShaderModule CreateShaderModule(ReadOnlySpan<byte> spirvBytes)
+    {
+        if (spirvBytes.Length == 0)
+            throw new ArgumentException("SPIR-V blob cannot be empty.", nameof(spirvBytes));
+        if ((spirvBytes.Length & 3) != 0)
+            throw new ArgumentException(
+                $"SPIR-V byte length must be a multiple of 4 (got {spirvBytes.Length}).", nameof(spirvBytes));
+        return CreateShaderModule(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>(spirvBytes));
+    }
+
+    /// <summary>
     /// Builds a <see cref="PipelineLayout"/> from descriptor-set layouts +
     /// push-constant ranges.
     /// </summary>
