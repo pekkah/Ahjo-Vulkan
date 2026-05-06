@@ -1,3 +1,5 @@
+using Ahjo.Vulkan.Native;
+
 namespace Ahjo.Vulkan;
 
 /// <summary>
@@ -5,8 +7,10 @@ namespace Ahjo.Vulkan;
 /// (one per slot) plus the per-slot resources that the engine needs
 /// fresh every frame: a <see cref="CommandBufferPool"/>, a
 /// <see cref="StagingUploader"/>, two binary semaphores reserved for
-/// swapchain handoff (#24), and the in-flight <see cref="Fence"/> that
-/// throttles the CPU when the GPU falls behind.
+/// swapchain handoff (#24), the in-flight <see cref="Fence"/> that
+/// throttles the CPU when the GPU falls behind, and — when the ring is
+/// configured with descriptor-pool sizes — a per-slot
+/// <see cref="DescriptorSetPool"/> reset alongside the command pool.
 /// </summary>
 /// <remarks>
 /// <para><b>Lifecycle.</b> Build once at engine startup with the queue
@@ -17,9 +21,9 @@ namespace Ahjo.Vulkan;
 /// calls <see cref="FrameContext.Submit"/>, and lets the
 /// <c>using var frame = ring.BeginFrame()</c> scope close.</para>
 /// <para><b>Allocation.</b> Slot resources are constructed in
-/// <see cref="FrameRing(Device,uint,uint,ulong)"/>; the steady-state
-/// per-frame path is index advance + fence wait + pool resets and
-/// allocates 0 B.</para>
+/// <see cref="FrameRing(Device,uint,uint,ulong,ReadOnlySpan{VkDescriptorPoolSize},uint)"/>;
+/// the steady-state per-frame path is index advance + fence wait +
+/// pool resets and allocates 0 B.</para>
 /// </remarks>
 public sealed unsafe class FrameRing : IDisposable
 {
@@ -33,15 +37,30 @@ public sealed unsafe class FrameRing : IDisposable
     /// <summary>
     /// Creates the ring. <paramref name="framesInFlight"/> typically 2 or
     /// 3 — higher values increase latency without raising throughput.
+    /// Pass <paramref name="descriptorPoolSizes"/> + a non-zero
+    /// <paramref name="descriptorMaxSets"/> to give every slot its own
+    /// <see cref="DescriptorSetPool"/>; the pool is reset alongside the
+    /// command pool at the start of each rotation, so descriptor sets
+    /// allocated through <see cref="FrameContext.DescriptorSets"/> are
+    /// valid for exactly one frame.
     /// </summary>
     public FrameRing(
         Device device,
         uint   framesInFlight,
         uint   queueFamily,
-        ulong  stagingChunkSize = StagingUploader.DefaultChunkSize)
+        ulong  stagingChunkSize     = StagingUploader.DefaultChunkSize,
+        ReadOnlySpan<VkDescriptorPoolSize> descriptorPoolSizes = default,
+        uint   descriptorMaxSets    = 0)
     {
         ArgumentNullException.ThrowIfNull(device);
         if (framesInFlight == 0) throw new ArgumentOutOfRangeException(nameof(framesInFlight));
+        if (!descriptorPoolSizes.IsEmpty && descriptorMaxSets == 0)
+            throw new ArgumentOutOfRangeException(nameof(descriptorMaxSets),
+                "descriptorMaxSets must be > 0 when descriptorPoolSizes is non-empty.");
+        if (descriptorPoolSizes.IsEmpty && descriptorMaxSets != 0)
+            throw new ArgumentException(
+                "descriptorMaxSets is set but descriptorPoolSizes is empty — pass both or neither.",
+                nameof(descriptorPoolSizes));
 
         _device   = device;
         _slots    = new Slot[framesInFlight];
@@ -49,7 +68,7 @@ public sealed unsafe class FrameRing : IDisposable
 
         for (uint i = 0; i < framesInFlight; i++)
         {
-            _slots[i]    = new Slot(device, queueFamily, stagingChunkSize);
+            _slots[i]    = new Slot(device, queueFamily, stagingChunkSize, descriptorPoolSizes, descriptorMaxSets);
             _contexts[i] = new FrameContext(_slots[i], i);
         }
     }
@@ -99,9 +118,15 @@ public sealed unsafe class FrameRing : IDisposable
         public  readonly BinarySemaphore   ImageAcquired;
         public  readonly BinarySemaphore   RenderingDone;
         public  readonly Fence             InFlightHandle;
+        public  readonly DescriptorSetPool? DescriptorSets;
         private          bool              _everSubmitted;
 
-        public Slot(Device device, uint queueFamily, ulong stagingChunkSize)
+        public Slot(
+            Device device,
+            uint   queueFamily,
+            ulong  stagingChunkSize,
+            ReadOnlySpan<VkDescriptorPoolSize> descriptorPoolSizes,
+            uint   descriptorMaxSets)
         {
             _device         = device;
             CommandBuffers  = new CommandBufferPool(device, queueFamily);
@@ -111,6 +136,9 @@ public sealed unsafe class FrameRing : IDisposable
             ImageAcquired   = SemaphorePool.AcquireBinary();
             RenderingDone   = SemaphorePool.AcquireBinary();
             InFlightHandle  = FencePool.Acquire(initiallySignaled: true);
+            DescriptorSets  = descriptorPoolSizes.IsEmpty
+                ? null
+                : new DescriptorSetPool(device, descriptorMaxSets, descriptorPoolSizes);
         }
 
         public ref readonly Fence InFlight => ref InFlightHandle;
@@ -129,12 +157,13 @@ public sealed unsafe class FrameRing : IDisposable
             if (_everSubmitted)
             {
                 if (InFlightHandle.Wait(Timeout.InfiniteTimeSpan) != WaitState.Signaled)
-                    throw new VulkanException(Native.VkResult.VK_TIMEOUT,
+                    throw new VulkanException(VkResult.VK_TIMEOUT,
                         "FrameRing slot fence never signaled.");
             }
             InFlightHandle.Reset();
             CommandBuffers.ResetForFrame();
             Staging.Reset();
+            DescriptorSets?.Reset();
         }
 
         public void Dispose()
@@ -148,6 +177,7 @@ public sealed unsafe class FrameRing : IDisposable
             FencePool.Release(InFlightHandle);
             SemaphorePool.Release(ImageAcquired);
             SemaphorePool.Release(RenderingDone);
+            DescriptorSets?.Dispose();
             Staging.Dispose();
             CommandBuffers.Dispose();
             SemaphorePool.Dispose();

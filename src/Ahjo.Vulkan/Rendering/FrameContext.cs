@@ -37,6 +37,15 @@ public sealed class FrameContext : IDisposable
     public StagingUploader Staging => Slot.Staging;
 
     /// <summary>
+    /// Per-slot descriptor-set pool, or <c>null</c> when the ring was
+    /// constructed without descriptor-pool sizes. <see cref="FrameRing.BeginFrame"/>
+    /// calls <see cref="DescriptorSetPool.Reset"/> on rotation, so any
+    /// <see cref="DescriptorSet"/> acquired here is valid for exactly one
+    /// frame — re-acquire after every <see cref="FrameRing.BeginFrame"/>.
+    /// </summary>
+    public DescriptorSetPool? DescriptorSets => Slot.DescriptorSets;
+
+    /// <summary>
     /// Binary semaphore the swapchain will signal on image acquire. Reserved
     /// for the swapchain integration in #24 — currently created and held by
     /// the slot but not yet wired into <see cref="Submit"/>.

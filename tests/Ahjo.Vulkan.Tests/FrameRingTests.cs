@@ -1,3 +1,4 @@
+using Ahjo.Vulkan.Native;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -119,6 +120,127 @@ public sealed unsafe class FrameRingTests
         // Implicit assertion: ring.Dispose() (via using) must complete
         // without ABANDONED_QUEUE / DEVICE_LOST — proves the slot's
         // Dispose waited the in-flight fence before tearing pools down.
+    }
+
+    [Fact]
+    public void DescriptorSets_Default_NullWhenNotConfigured()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+
+        using var ring = new FrameRing(device, framesInFlight: 2, queueFamily: family);
+
+        using var frame = ring.BeginFrame();
+        Assert.Null(frame.DescriptorSets);
+    }
+
+    [Fact]
+    public void DescriptorSets_Mismatched_Args_Throw()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+
+        VkDescriptorPoolSize[] sizes =
+        [
+            new VkDescriptorPoolSize { type = VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, descriptorCount = 1 },
+        ];
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new FrameRing(device, framesInFlight: 2, queueFamily: family,
+                descriptorPoolSizes: sizes, descriptorMaxSets: 0));
+
+        Assert.Throws<ArgumentException>(() =>
+            new FrameRing(device, framesInFlight: 2, queueFamily: family,
+                descriptorPoolSizes: default, descriptorMaxSets: 4));
+    }
+
+    [Fact]
+    public void DescriptorSets_Pool_ResetsBetweenFrames()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+
+        VkDescriptorPoolSize[] sizes =
+        [
+            new VkDescriptorPoolSize { type = VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, descriptorCount = 8 },
+        ];
+        using var ring = new FrameRing(device, framesInFlight: 2, queueFamily: family,
+            descriptorPoolSizes: sizes, descriptorMaxSets: 8);
+        var queue = device.GetQueue(family, 0);
+
+        using var setLayout = device.CreateDescriptorSetLayout(new DescriptorSetLayoutDescription
+        {
+            Bindings =
+            [
+                new DescriptorBinding
+                {
+                    Slot   = 0,
+                    Type   = VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                    Count  = 1,
+                    Stages = ShaderStages.Vertex,
+                },
+            ],
+        });
+
+        // Two frames per slot. Allocate three sets per frame; the pool
+        // is reset on every BeginFrame so AllocatedCount snaps back to 3
+        // each time (rather than climbing to 12 across the loop).
+        for (int i = 0; i < 4; i++)
+        {
+            using var frame = ring.BeginFrame();
+            DescriptorSetPool? pool = frame.DescriptorSets;
+            Assert.NotNull(pool);
+
+            // Reset happens *before* this point — so the pool starts
+            // empty even after prior frames filled it.
+            Assert.Equal(0, pool.AllocatedCount);
+
+            for (int j = 0; j < 3; j++)
+            {
+                var set = pool.Acquire(setLayout.Handle);
+                Assert.False(set.IsNull);
+            }
+            Assert.Equal(3, pool.AllocatedCount);
+
+            var rec = frame.CommandBuffers.Begin();
+            try { frame.Submit(queue, ref rec); }
+            finally { rec.Dispose(); }
+        }
+
+        Assert.Equal(4ul, ring.FrameNumber);
+    }
+
+    [Fact]
+    public void DescriptorSets_Pool_IsPerSlot()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+
+        VkDescriptorPoolSize[] sizes =
+        [
+            new VkDescriptorPoolSize { type = VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, descriptorCount = 4 },
+        ];
+        using var ring = new FrameRing(device, framesInFlight: 2, queueFamily: family,
+            descriptorPoolSizes: sizes, descriptorMaxSets: 4);
+
+        var f0 = ring.BeginFrame();
+        DescriptorSetPool? pool0 = f0.DescriptorSets;
+        f0.Dispose();
+
+        var f1 = ring.BeginFrame();
+        DescriptorSetPool? pool1 = f1.DescriptorSets;
+        f1.Dispose();
+
+        Assert.NotNull(pool0);
+        Assert.NotNull(pool1);
+        Assert.NotSame(pool0, pool1);
     }
 
     [Fact]
