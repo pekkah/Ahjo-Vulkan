@@ -41,16 +41,18 @@ public sealed unsafe class CommandRecorderTests
         using var blob   = SpirvBlob.Load(FillSpvPath);
         using var module = device.CreateShaderModule(blob.Words);
 
+        DescriptorBinding[] bindings =
+        [
+            new DescriptorBinding
+            {
+                Slot = 0, Type = VkDescriptorType.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                Count = 1, Stages = ShaderStages.Compute,
+            },
+        ];
         using var setLayout = device.CreateDescriptorSetLayout(new DescriptorSetLayoutDescription
         {
-            Bindings =
-            [
-                new DescriptorBinding
-                {
-                    Slot = 0, Type = VkDescriptorType.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    Count = 1, Stages = ShaderStages.Compute,
-                },
-            ],
+            Bindings       = bindings,
+            PushDescriptor = true,
         });
 
         DescriptorSetLayout[] layouts = [setLayout];
@@ -79,30 +81,9 @@ public sealed unsafe class CommandRecorderTests
                 Flags = AllocationFlags.HostAccessRandom | AllocationFlags.Mapped,
             });
 
-        // ---- Descriptor wiring (raw — typed updater lands in #39) ----
-        ReadOnlySpan<VkDescriptorPoolSize> sizes =
-        [
-            new VkDescriptorPoolSize { type = VkDescriptorType.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, descriptorCount = 1 },
-        ];
-        using var dsPool = new DescriptorSetPool(device, maxSets: 1, sizes);
-        var set = dsPool.Acquire(setLayout.Handle);
-
-        var bufferInfo = new VkDescriptorBufferInfo
-        {
-            buffer = buffer.Handle,
-            offset = 0,
-            range  = buffer.Size,
-        };
-        var write = new VkWriteDescriptorSet
-        {
-            sType           = VkStructureType.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            dstSet          = set.Handle,
-            dstBinding      = 0,
-            descriptorCount = 1,
-            descriptorType  = VkDescriptorType.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            pBufferInfo     = &bufferInfo,
-        };
-        Vk.vkUpdateDescriptorSets(device.Handle, 1, &write, 0, null);
+        // ---- Descriptor wiring (typed push-descriptor template) ----
+        using var template = pipelineLayout.CreatePushDescriptorTemplate<FillDescriptors>(
+            set: 0, VkPipelineBindPoint.VK_PIPELINE_BIND_POINT_COMPUTE, bindings);
 
         // ---- Record + submit ----
         using var cmdPool   = new CommandBufferPool(device, family);
@@ -114,9 +95,11 @@ public sealed unsafe class CommandRecorderTests
             try
             {
                 rec.BindPipeline(in pipeline);
-                DescriptorSet[] sets = [set];
-                rec.BindDescriptorSets(VkPipelineBindPoint.VK_PIPELINE_BIND_POINT_COMPUTE,
-                    in pipelineLayout, firstSet: 0, sets);
+                var writes = new FillDescriptors
+                {
+                    Out = BufferDescriptorWrite.Of(in buffer),
+                };
+                rec.PushDescriptors(in template, in pipelineLayout, in writes);
                 var pc = new PushBlock { Count = Count };
                 rec.PushConstants(in pipelineLayout, ShaderStages.Compute, in pc);
                 rec.Dispatch(groupCountX: (Count + 63) / 64);
@@ -234,6 +217,9 @@ public sealed unsafe class CommandRecorderTests
 
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
     private struct PushBlock { public uint Count; }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct FillDescriptors { public BufferDescriptorWrite Out; }
 
     private static string FillSpvPath =>
         Path.Combine(AppContext.BaseDirectory, "Shaders", "fill.comp.spv");

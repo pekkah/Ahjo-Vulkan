@@ -23,6 +23,23 @@ public readonly unsafe struct PipelineLayout : IVulkanHandle<PipelineLayout>, ID
     public ulong RawHandle => (ulong)Handle;
     public bool IsNull => Handle == null;
 
+    /// <summary>
+    /// Builds a <see cref="DescriptorTemplate{T}"/> for the per-frame
+    /// <c>vkCmdPushDescriptorSetWithTemplate</c> path. The descriptor-set
+    /// layout backing <paramref name="set"/> in this pipeline layout must
+    /// have been created with
+    /// <see cref="DescriptorSetLayoutDescription.PushDescriptor"/>
+    /// enabled. Template entries are derived from
+    /// <typeparamref name="T"/>'s field offsets matched against
+    /// <paramref name="bindings"/> in declaration order.
+    /// </summary>
+    public DescriptorTemplate<T> CreatePushDescriptorTemplate<T>(
+        uint                            set,
+        VkPipelineBindPoint             bindPoint,
+        ReadOnlySpan<DescriptorBinding> bindings)
+        where T : unmanaged
+        => DescriptorTemplateBuilder.CreateForPush<T>(DeviceHandle, Handle, bindPoint, set, bindings);
+
     public void Dispose()
     {
         if (Handle == null) return;

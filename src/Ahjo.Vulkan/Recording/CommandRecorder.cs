@@ -127,6 +127,24 @@ public unsafe ref struct CommandRecorder : IDisposable
             Vk.vkCmdPushConstants(Handle, layout.Handle, (uint)stages, offset, (uint)Unsafe.SizeOf<T>(), p);
     }
 
+    /// <summary>
+    /// Issues <c>vkCmdPushDescriptorSetWithTemplate</c> — records
+    /// <paramref name="data"/> as the per-frame descriptor state for the
+    /// set index baked into <paramref name="template"/>. No
+    /// <c>VkDescriptorSet</c> is allocated; the layout backing the set
+    /// must have been created with
+    /// <see cref="DescriptorSetLayoutDescription.PushDescriptor"/>.
+    /// </summary>
+    public void PushDescriptors<T>(
+        in DescriptorTemplate<T> template,
+        in PipelineLayout        layout,
+        in T                     data)
+        where T : unmanaged
+    {
+        fixed (T* p = &data)
+            Vk.vkCmdPushDescriptorSetWithTemplate(Handle, template.Handle, layout.Handle, template.Set, p);
+    }
+
     // ---- Draw / Dispatch ----
 
     public void Draw(uint vertexCount, uint instanceCount = 1, uint firstVertex = 0, uint firstInstance = 0)

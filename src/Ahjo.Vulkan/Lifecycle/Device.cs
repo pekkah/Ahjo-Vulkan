@@ -116,12 +116,15 @@ public sealed unsafe class Device : IDisposable
         fixed (VkDescriptorSetLayoutBinding* pBindings = nativeBindings)
         fixed (uint*                          pFlags    = flags)
         {
+            uint createFlags = 0;
+            if (desc.UpdateAfterBindPool)
+                createFlags |= (uint)VkDescriptorSetLayoutCreateFlagBits.VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+            if (desc.PushDescriptor)
+                createFlags |= (uint)VkDescriptorSetLayoutCreateFlagBits.VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT;
             var ci = new VkDescriptorSetLayoutCreateInfo
             {
                 sType        = VkStructureType.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-                flags        = desc.UpdateAfterBindPool
-                    ? (uint)VkDescriptorSetLayoutCreateFlagBits.VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT
-                    : 0u,
+                flags        = createFlags,
                 bindingCount = (uint)nativeBindings.Length,
                 pBindings    = pBindings,
             };

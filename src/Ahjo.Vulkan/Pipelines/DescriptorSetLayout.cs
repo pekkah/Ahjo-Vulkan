@@ -30,6 +30,18 @@ public readonly unsafe struct DescriptorSetLayout : IVulkanHandle<DescriptorSetL
     public ulong RawHandle => (ulong)Handle;
     public bool IsNull => Handle == null;
 
+    /// <summary>
+    /// Builds a <see cref="DescriptorTemplate{T}"/> for the long-lived
+    /// <c>vkUpdateDescriptorSetWithTemplate</c> path. The template's update
+    /// entries are derived from <typeparamref name="T"/>'s field offsets
+    /// matched against <paramref name="bindings"/> in declaration order;
+    /// <paramref name="bindings"/> should be the same span used to build
+    /// this layout.
+    /// </summary>
+    public DescriptorTemplate<T> CreateUpdateTemplate<T>(ReadOnlySpan<DescriptorBinding> bindings)
+        where T : unmanaged
+        => DescriptorTemplateBuilder.CreateForSet<T>(DeviceHandle, Handle, bindings);
+
     public void Dispose()
     {
         if (Handle == null) return;

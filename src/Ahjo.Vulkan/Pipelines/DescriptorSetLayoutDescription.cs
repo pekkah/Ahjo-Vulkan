@@ -17,4 +17,13 @@ public ref struct DescriptorSetLayoutDescription
     /// any binding uses that flag.
     /// </summary>
     public bool UpdateAfterBindPool;
+
+    /// <summary>
+    /// Set true to enable the push-descriptor path
+    /// (<c>VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT</c>). Layouts
+    /// flagged this way cannot be used to allocate <c>VkDescriptorSet</c>s
+    /// from a pool; descriptors are recorded inline via
+    /// <see cref="CommandRecorder.PushDescriptors{T}"/> instead.
+    /// </summary>
+    public bool PushDescriptor;
 }
