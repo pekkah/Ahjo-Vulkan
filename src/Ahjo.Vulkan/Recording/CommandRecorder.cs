@@ -19,12 +19,11 @@ namespace Ahjo.Vulkan;
 /// the buffer to the pool. The two flags are independent: a recorder
 /// can be ended-and-submitted but not yet retired (the pool tracks it
 /// as outstanding until Dispose).</para>
-/// <para><b>Recording surface.</b> Issue 16 (#17) ships the modern
-/// minimum: BeginRendering / EndRendering, dynamic viewport + scissor,
-/// BindPipeline (compute and graphics), BindDescriptorSets, typed
-/// PushConstants, Draw, Dispatch. The narrower draw / bind family
-/// (DrawIndexed, DrawIndirect, DrawIndexedIndirect, BindVertexBuffers,
-/// BindIndexBuffer, DispatchIndirect) is filed as a follow-up.</para>
+/// <para><b>Recording surface.</b> BeginRendering / EndRendering,
+/// dynamic viewport + scissor, BindPipeline (compute and graphics),
+/// BindDescriptorSets, typed PushConstants, BindVertexBuffers /
+/// BindIndexBuffer, Draw / DrawIndexed / DrawIndirect /
+/// DrawIndexedIndirect, Dispatch / DispatchIndirect.</para>
 /// </remarks>
 public unsafe ref struct CommandRecorder : IDisposable
 {
@@ -128,6 +127,41 @@ public unsafe ref struct CommandRecorder : IDisposable
     }
 
     /// <summary>
+    /// Records <c>vkCmdBindVertexBuffers</c> for a tightly-packed range of
+    /// vertex bindings starting at <paramref name="firstBinding"/>. Pass
+    /// an empty <paramref name="offsets"/> span to bind every buffer at
+    /// offset 0; otherwise <paramref name="offsets"/> must match
+    /// <paramref name="buffers"/> in length.
+    /// </summary>
+    public void BindVertexBuffers(
+        uint                  firstBinding,
+        ReadOnlySpan<Buffer>  buffers,
+        ReadOnlySpan<ulong>   offsets = default)
+    {
+        if (buffers.IsEmpty) return;
+        if (!offsets.IsEmpty && offsets.Length != buffers.Length)
+            throw new ArgumentException(
+                "offsets must have the same length as buffers (or be empty to default to all-zero offsets).",
+                nameof(offsets));
+
+        Span<nint> rawBuffers = stackalloc nint[buffers.Length];
+        for (int i = 0; i < buffers.Length; i++)
+            rawBuffers[i] = (nint)buffers[i].Handle;
+
+        Span<ulong>         zero       = stackalloc ulong[offsets.IsEmpty ? buffers.Length : 0];
+        ReadOnlySpan<ulong> useOffsets = offsets.IsEmpty ? zero : offsets;
+
+        fixed (nint*  pBuffers = rawBuffers)
+        fixed (ulong* pOffsets = useOffsets)
+            Vk.vkCmdBindVertexBuffers(
+                Handle, firstBinding, (uint)buffers.Length,
+                (VkBuffer_T**)pBuffers, pOffsets);
+    }
+
+    public void BindIndexBuffer(in Buffer buffer, ulong offset, VkIndexType indexType)
+        => Vk.vkCmdBindIndexBuffer(Handle, buffer.Handle, offset, indexType);
+
+    /// <summary>
     /// Issues <c>vkCmdPushDescriptorSetWithTemplate</c> — records
     /// <paramref name="data"/> as the per-frame descriptor state for the
     /// set index baked into <paramref name="template"/>. No
@@ -150,8 +184,44 @@ public unsafe ref struct CommandRecorder : IDisposable
     public void Draw(uint vertexCount, uint instanceCount = 1, uint firstVertex = 0, uint firstInstance = 0)
         => Vk.vkCmdDraw(Handle, vertexCount, instanceCount, firstVertex, firstInstance);
 
+    public void DrawIndexed(
+        uint indexCount,
+        uint instanceCount = 1,
+        uint firstIndex    = 0,
+        int  vertexOffset  = 0,
+        uint firstInstance = 0)
+        => Vk.vkCmdDrawIndexed(Handle, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
+
+    /// <summary>
+    /// <c>vkCmdDrawIndirect</c> — reads <paramref name="drawCount"/>
+    /// <c>VkDrawIndirectCommand</c> structs from
+    /// <paramref name="buffer"/> at <paramref name="offset"/>,
+    /// <paramref name="stride"/> bytes apart. The buffer must have been
+    /// created with <see cref="BufferUsage.IndirectBuffer"/>.
+    /// </summary>
+    public void DrawIndirect(in Buffer buffer, ulong offset, uint drawCount, uint stride)
+        => Vk.vkCmdDrawIndirect(Handle, buffer.Handle, offset, drawCount, stride);
+
+    /// <summary>
+    /// <c>vkCmdDrawIndexedIndirect</c> — reads
+    /// <paramref name="drawCount"/> <c>VkDrawIndexedIndirectCommand</c>
+    /// structs from <paramref name="buffer"/>. Caller is responsible for
+    /// having bound an index buffer via
+    /// <see cref="BindIndexBuffer"/> beforehand.
+    /// </summary>
+    public void DrawIndexedIndirect(in Buffer buffer, ulong offset, uint drawCount, uint stride)
+        => Vk.vkCmdDrawIndexedIndirect(Handle, buffer.Handle, offset, drawCount, stride);
+
     public void Dispatch(uint groupCountX, uint groupCountY = 1, uint groupCountZ = 1)
         => Vk.vkCmdDispatch(Handle, groupCountX, groupCountY, groupCountZ);
+
+    /// <summary>
+    /// <c>vkCmdDispatchIndirect</c> — reads one
+    /// <c>VkDispatchIndirectCommand</c> from <paramref name="buffer"/> at
+    /// <paramref name="offset"/>.
+    /// </summary>
+    public void DispatchIndirect(in Buffer buffer, ulong offset)
+        => Vk.vkCmdDispatchIndirect(Handle, buffer.Handle, offset);
 
     // ---- Pipeline barriers (sync2) ----
 
