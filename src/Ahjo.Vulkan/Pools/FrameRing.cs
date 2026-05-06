@@ -68,8 +68,18 @@ public sealed unsafe class FrameRing : IDisposable
 
         for (uint i = 0; i < framesInFlight; i++)
         {
-            _slots[i]    = new Slot(device, queueFamily, stagingChunkSize, descriptorPoolSizes, descriptorMaxSets);
-            _contexts[i] = new FrameContext(_slots[i], i);
+            try
+            {
+                _slots[i]    = new Slot(device, queueFamily, stagingChunkSize, descriptorPoolSizes, descriptorMaxSets);
+                _contexts[i] = new FrameContext(_slots[i], i);
+            }
+            catch
+            {
+                // Roll back any earlier successfully-built slots so a later
+                // failure doesn't leak the wrappers they own.
+                for (uint j = 0; j < i; j++) _slots[j]?.Dispose();
+                throw;
+            }
         }
     }
 
@@ -128,17 +138,64 @@ public sealed unsafe class FrameRing : IDisposable
             ReadOnlySpan<VkDescriptorPoolSize> descriptorPoolSizes,
             uint   descriptorMaxSets)
         {
-            _device         = device;
-            CommandBuffers  = new CommandBufferPool(device, queueFamily);
-            Staging         = new StagingUploader(device.Allocator, stagingChunkSize);
-            SemaphorePool   = new SemaphorePool(device);
-            FencePool       = new FencePool(device);
-            ImageAcquired   = SemaphorePool.AcquireBinary();
-            RenderingDone   = SemaphorePool.AcquireBinary();
-            InFlightHandle  = FencePool.Acquire(initiallySignaled: true);
-            DescriptorSets  = descriptorPoolSizes.IsEmpty
-                ? null
-                : new DescriptorSetPool(device, descriptorMaxSets, descriptorPoolSizes);
+            _device = device;
+
+            // Build into locals so a throw partway through can dispose the
+            // wrappers we already created. `readonly` field assignment is
+            // deferred to the end of the happy path.
+            CommandBufferPool? cmdPool   = null;
+            StagingUploader?   staging   = null;
+            SemaphorePool?     semPool   = null;
+            FencePool?         fencePool = null;
+            BinarySemaphore    imgAcq    = default;
+            BinarySemaphore    rendDone  = default;
+            Fence              inFlight  = default;
+            DescriptorSetPool? descSets  = null;
+            bool committed = false;
+            try
+            {
+                cmdPool   = new CommandBufferPool(device, queueFamily);
+                staging   = new StagingUploader(device.Allocator, stagingChunkSize);
+                semPool   = new SemaphorePool(device);
+                fencePool = new FencePool(device);
+                imgAcq    = semPool.AcquireBinary();
+                rendDone  = semPool.AcquireBinary();
+                inFlight  = fencePool.Acquire(initiallySignaled: true);
+                descSets  = descriptorPoolSizes.IsEmpty
+                    ? null
+                    : new DescriptorSetPool(device, descriptorMaxSets, descriptorPoolSizes);
+
+                CommandBuffers = cmdPool;
+                Staging        = staging;
+                SemaphorePool  = semPool;
+                FencePool      = fencePool;
+                ImageAcquired  = imgAcq;
+                RenderingDone  = rendDone;
+                InFlightHandle = inFlight;
+                DescriptorSets = descSets;
+                committed = true;
+            }
+            finally
+            {
+                if (!committed)
+                {
+                    // Reverse-order cleanup mirroring Dispose(): pool-borrowed
+                    // handles return to their pools first, owned wrappers
+                    // get disposed last.
+                    descSets?.Dispose();
+                    if (fencePool is not null && !inFlight.IsNull)
+                        fencePool.Release(inFlight);
+                    if (semPool is not null)
+                    {
+                        if (!rendDone.IsNull) semPool.Release(rendDone);
+                        if (!imgAcq.IsNull)   semPool.Release(imgAcq);
+                    }
+                    staging?.Dispose();
+                    cmdPool?.Dispose();
+                    semPool?.Dispose();
+                    fencePool?.Dispose();
+                }
+            }
         }
 
         public ref readonly Fence InFlight => ref InFlightHandle;

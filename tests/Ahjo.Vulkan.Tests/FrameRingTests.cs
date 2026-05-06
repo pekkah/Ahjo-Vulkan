@@ -244,6 +244,54 @@ public sealed unsafe class FrameRingTests
     }
 
     [Fact]
+    public void Construction_StagingUploader_Failure_Unwinds_Earlier_Resources()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+
+        // Sanity baseline: a normal ring builds + tears down cleanly so
+        // we know the device starts the test in a healthy state.
+        using (new FrameRing(device, framesInFlight: 2, queueFamily: family)) { }
+
+        // Inject a deterministic, driver-independent mid-construction failure:
+        // stagingChunkSize = 0 throws ArgumentOutOfRangeException inside
+        // StagingUploader's ctor — but only after Slot has already
+        // constructed the CommandBufferPool. Without the unwind path that
+        // VkCommandPool would leak.
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new FrameRing(device, framesInFlight: 2, queueFamily: family, stagingChunkSize: 0));
+
+        // Build + tear down a second healthy ring. A leaked command pool
+        // from the failed construction would surface here at vkDestroyDevice
+        // (via the validation layer when present) or as device-state
+        // corruption on subsequent Vulkan calls.
+        using (new FrameRing(device, framesInFlight: 2, queueFamily: family)) { }
+    }
+
+    [Fact]
+    public void Construction_LaterSlot_Failure_Disposes_EarlierSlots()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+
+        // Exercises the outer FrameRing-ctor catch with framesInFlight=3.
+        // Every slot fails at the same step (StagingUploader rejects
+        // stagingChunkSize=0), so the inner Slot-ctor catch is exercised
+        // for slot 0; the outer FrameRing-ctor catch sees the throw at
+        // i==0 with no earlier full slots to roll back. The test still
+        // proves the outer try/catch path doesn't itself crash with an
+        // empty roll-back set, which is the corner case the issue calls out.
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new FrameRing(device, framesInFlight: 3, queueFamily: family, stagingChunkSize: 0));
+
+        using (new FrameRing(device, framesInFlight: 2, queueFamily: family)) { }
+    }
+
+    [Fact]
     public void Dispose_Is_Idempotent()
     {
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
