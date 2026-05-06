@@ -135,6 +135,58 @@ public unsafe ref struct CommandRecorder : IDisposable
     public void Dispatch(uint groupCountX, uint groupCountY = 1, uint groupCountZ = 1)
         => Vk.vkCmdDispatch(Handle, groupCountX, groupCountY, groupCountZ);
 
+    // ---- Pipeline barriers (sync2) ----
+
+    /// <summary>
+    /// Issues one <c>vkCmdPipelineBarrier2</c> for an arbitrary mix of
+    /// memory / buffer / image barriers. Vulkan rewards batching — the
+    /// API enforces a single underlying call regardless of how many
+    /// barriers the caller supplies. Pass <c>default</c> for any kind
+    /// you don't need.
+    /// </summary>
+    public void PipelineBarrier(
+        ReadOnlySpan<MemoryBarrier> memory,
+        ReadOnlySpan<BufferBarrier> buffer,
+        ReadOnlySpan<ImageBarrier>  image)
+    {
+        if (memory.IsEmpty && buffer.IsEmpty && image.IsEmpty) return;
+
+        Span<VkMemoryBarrier2>       nm = stackalloc VkMemoryBarrier2[Math.Max(memory.Length, 1)];
+        Span<VkBufferMemoryBarrier2> nb = stackalloc VkBufferMemoryBarrier2[Math.Max(buffer.Length, 1)];
+        Span<VkImageMemoryBarrier2>  ni = stackalloc VkImageMemoryBarrier2[Math.Max(image.Length, 1)];
+        for (int i = 0; i < memory.Length; i++) nm[i] = memory[i].ToNative();
+        for (int i = 0; i < buffer.Length; i++) nb[i] = buffer[i].ToNative();
+        for (int i = 0; i < image.Length;  i++) ni[i] = image[i].ToNative();
+
+        fixed (VkMemoryBarrier2*       pm = nm)
+        fixed (VkBufferMemoryBarrier2* pb = nb)
+        fixed (VkImageMemoryBarrier2*  pi = ni)
+        {
+            var dep = new VkDependencyInfo
+            {
+                sType                    = VkStructureType.VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                memoryBarrierCount       = (uint)memory.Length,
+                pMemoryBarriers          = memory.Length > 0 ? pm : null,
+                bufferMemoryBarrierCount = (uint)buffer.Length,
+                pBufferMemoryBarriers    = buffer.Length > 0 ? pb : null,
+                imageMemoryBarrierCount  = (uint)image.Length,
+                pImageMemoryBarriers     = image.Length  > 0 ? pi : null,
+            };
+            Vk.vkCmdPipelineBarrier2(Handle, &dep);
+        }
+    }
+
+    /// <summary>Image-only convenience overload — the dominant case.</summary>
+    public void PipelineBarrier(ReadOnlySpan<ImageBarrier> image)
+        => PipelineBarrier(default, default, image);
+
+    /// <summary>Single image-barrier convenience overload.</summary>
+    public void PipelineBarrier(in ImageBarrier image)
+    {
+        ImageBarrier copy = image;
+        PipelineBarrier(default, default, MemoryMarshal.CreateReadOnlySpan(ref copy, 1));
+    }
+
     // ---- Dynamic rendering ----
 
     public void BeginRendering(in RenderingInfo info)

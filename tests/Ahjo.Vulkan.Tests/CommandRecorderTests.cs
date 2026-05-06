@@ -189,11 +189,12 @@ public sealed unsafe class CommandRecorderTests
         using var cmdPool = new CommandBufferPool(device, family);
         using var rec = cmdPool.Begin();
 
-        // Layout transition UNDEFINED → COLOR_ATTACHMENT_OPTIMAL via a raw
-        // sync2 barrier (typed barrier wrapper lands in #18).
-        TransitionImage(rec.Handle, image.Handle,
-            VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
-            VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        rec.PipelineBarrier(ImageBarrier.Transition(
+            in image,
+            from:      VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
+            to:        VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            srcStage:  Stage.TopOfPipe,             srcAccess: Access.None,
+            dstStage:  Stage.ColorAttachmentOutput, dstAccess: Access.ColorAttachmentWrite));
 
         ColorAttachment[] color = [new ColorAttachment
         {
@@ -219,39 +220,6 @@ public sealed unsafe class CommandRecorderTests
         // test simply proves we can record a well-formed dynamic-rendering
         // pass through the wrapper.
         rec.End();
-    }
-
-    private static void TransitionImage(VkCommandBuffer_T* cb, VkImage_T* image, VkImageLayout oldLayout, VkImageLayout newLayout)
-    {
-        // sync2 bit values for the lower 32 bits match the original
-        // VkPipelineStageFlagBits / VkAccessFlagBits ordinals; cast and
-        // widen. Typed wrapper enums land with #18 (17 — pipeline barriers).
-        var barrier = new VkImageMemoryBarrier2
-        {
-            sType            = VkStructureType.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            srcStageMask     = (ulong)VkPipelineStageFlagBits.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            dstStageMask     = (ulong)VkPipelineStageFlagBits.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            srcAccessMask    = 0,
-            dstAccessMask    = (ulong)VkAccessFlagBits.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            oldLayout        = oldLayout,
-            newLayout        = newLayout,
-            srcQueueFamilyIndex = ~0u,
-            dstQueueFamilyIndex = ~0u,
-            image            = image,
-            subresourceRange = new VkImageSubresourceRange
-            {
-                aspectMask     = (uint)VkImageAspectFlagBits.VK_IMAGE_ASPECT_COLOR_BIT,
-                baseMipLevel   = 0, levelCount = 1,
-                baseArrayLayer = 0, layerCount = 1,
-            },
-        };
-        var dep = new VkDependencyInfo
-        {
-            sType                   = VkStructureType.VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            imageMemoryBarrierCount = 1,
-            pImageMemoryBarriers    = &barrier,
-        };
-        Vk.vkCmdPipelineBarrier2(cb, &dep);
     }
 
     private static VkClearColorValue ClearColor(float r, float g, float b, float a)
