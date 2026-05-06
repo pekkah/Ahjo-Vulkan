@@ -1,0 +1,162 @@
+using System.Runtime.InteropServices;
+using Ahjo.Vulkan.Native;
+using Xunit;
+
+namespace Ahjo.Vulkan.Tests;
+
+/// <summary>
+/// Win32-only — covers issue 24's surface + swapchain creation and
+/// resize round-trip. Linux/macOS tests land alongside the matching
+/// platform surface bindings in a follow-up.
+/// </summary>
+public sealed unsafe class SwapchainTests
+{
+    private static bool IsWindows => RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+
+    [Fact]
+    public void Win32_Surface_Plus_Swapchain_Creates_Multiple_Images()
+    {
+        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var window = new Win32Window(800, 600, $"AhjoVk_{Guid.NewGuid():N}");
+
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        var instDesc = new InstanceDescription { Extensions = instanceExts };
+        using var instance = Instance.Create(instDesc);
+
+        using var surface = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        Assert.False(surface.IsNull);
+
+        using var device = CreatePresentDevice(instance, in surface, out _);
+
+        var swapDesc = new SwapchainDescription
+        {
+            Surface = surface,
+            Width   = window.Width,
+            Height  = window.Height,
+        };
+        using var swap = new Swapchain(device, in swapDesc);
+
+        // Vulkan reports the *client* extent — for an OVERLAPPED window
+        // that's smaller than the requested CreateWindowEx size by the
+        // non-client decorations. Asserting non-zero + reasonable lower
+        // bound is the right invariant; exact size needs an
+        // AdjustWindowRect dance the surface API doesn't care about.
+        Assert.True(swap.ImageCount >= 2);
+        Assert.True(swap.Extent.width  > 0);
+        Assert.True(swap.Extent.height > 0);
+        Assert.Equal(swap.ImageCount, (uint)swap.ImageViews.Length);
+        for (int i = 0; i < swap.ImageViews.Length; i++)
+            Assert.False(swap.ImageViews[i].IsNull);
+    }
+
+    [Fact]
+    public void Recreate_Swapchain_At_New_Extent()
+    {
+        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out _);
+
+        var initialDesc = new SwapchainDescription
+        {
+            Surface = surface, Width = window.Width, Height = window.Height,
+        };
+        using var swap = new Swapchain(device, in initialDesc);
+        VkExtent2D before = swap.Extent;
+        Assert.True(before.width  > 0);
+        Assert.True(before.height > 0);
+
+        // Pump any pending messages, resize the window so currentExtent
+        // moves with it, then ask the swapchain to rebuild.
+        window.Resize(1024, 768);
+        var resizedDesc = new SwapchainDescription
+        {
+            Surface = surface, Width = window.Width, Height = window.Height,
+        };
+        swap.Recreate(in resizedDesc);
+
+        VkExtent2D after = swap.Extent;
+        Assert.True(after.width  != before.width || after.height != before.height,
+            $"Resize had no effect on swapchain extent (was {before.width}x{before.height}, still is).");
+        Assert.True(after.width  > before.width);
+        Assert.True(after.height > before.height);
+        Assert.True(swap.ImageCount >= 2);
+    }
+
+    [Fact]
+    public void Swapchain_Recreate_With_Different_Surface_Throws()
+    {
+        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surfaceA = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var surfaceB = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surfaceA, out _);
+
+        var desc = new SwapchainDescription { Surface = surfaceA, Width = 640, Height = 480 };
+        using var swap = new Swapchain(device, in desc);
+
+        // Recreate is non-generic, so wrap the call site in a static
+        // method that takes the ref struct by `in` to satisfy the
+        // "no ref struct in lambda" rule.
+        TryRecreate(swap, surfaceB, out bool threw);
+        Assert.True(threw);
+
+        static void TryRecreate(Swapchain s, Surface other, out bool threw)
+        {
+            try
+            {
+                var bogus = new SwapchainDescription { Surface = other, Width = 640, Height = 480 };
+                s.Recreate(in bogus);
+                threw = false;
+            }
+            catch (ArgumentException) { threw = true; }
+        }
+    }
+
+    /// <summary>
+    /// Picks the first physical device whose graphics queue family also
+    /// supports presenting to <paramref name="surface"/>, then creates a
+    /// device with VK_KHR_swapchain enabled.
+    /// </summary>
+    private static Device CreatePresentDevice(Instance instance, in Surface surface, out uint family)
+    {
+        VkSurfaceKHR_T* surfaceHandle = surface.Handle;
+        uint chosen = uint.MaxValue;
+        var gpu = instance.PickPhysicalDevice((in PhysicalDeviceInfo info) =>
+        {
+            for (int i = 0; i < info.QueueFamilies.Length; i++)
+            {
+                if (!info.QueueFamilies[i].SupportsGraphics) continue;
+                uint supported = 0;
+                Vk.vkGetPhysicalDeviceSurfaceSupportKHR(
+                    info.Device.Handle, info.QueueFamilies[i].Index,
+                    surfaceHandle, &supported).ThrowIfFailed();
+                if (supported != 0)
+                {
+                    chosen = info.QueueFamilies[i].Index;
+                    return true;
+                }
+            }
+            return false;
+        });
+        family = chosen;
+
+        Utf8Name[] deviceExts = [VulkanExtensions.KhrSwapchain];
+        return gpu.CreateDevice(new DeviceDescription
+        {
+            Queues     = [new QueueRequest(family, count: 1, priority: 1.0f)],
+            Extensions = deviceExts,
+        });
+    }
+}
