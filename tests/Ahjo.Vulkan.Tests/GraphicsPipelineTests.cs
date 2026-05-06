@@ -75,6 +75,80 @@ public sealed class GraphicsPipelineTests
         unsafe { Assert.True(pipeline.Layout == layout.Handle); }
     }
 
+    [Fact]
+    public void Builder_AlphaBlend_Msaa4x_DynamicLineWidth_Builds()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
+        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+
+        using var vBlob = SpirvBlob.Load(VertSpvPath);
+        using var fBlob = SpirvBlob.Load(FragSpvPath);
+        using var vMod  = device.CreateShaderModule(vBlob.Words);
+        using var fMod  = device.CreateShaderModule(fBlob.Words);
+        using var layout = device.CreatePipelineLayout(default);
+
+        ReadOnlySpan<VkFormat> colorFormats = [VkFormat.VK_FORMAT_R8G8B8A8_UNORM];
+        ColorBlendAttachment[] blends       = [ColorBlendAttachment.AlphaBlend];
+        VkDynamicState[] dynamicStates =
+        [
+            VkDynamicState.VK_DYNAMIC_STATE_VIEWPORT,
+            VkDynamicState.VK_DYNAMIC_STATE_SCISSOR,
+            VkDynamicState.VK_DYNAMIC_STATE_LINE_WIDTH,
+        ];
+
+        using var pipeline = device.BuildGraphicsPipeline()
+            .WithStages(in vMod, in fMod)
+            .WithDynamicRendering(colorFormats)
+            .WithLayout(in layout)
+            .WithColorBlend(new ColorBlendDescription { Attachments = blends })
+            .WithMultisample(VkSampleCountFlagBits.VK_SAMPLE_COUNT_4_BIT)
+            .WithDynamicState(dynamicStates)
+            .Build();
+
+        Assert.False(pipeline.IsNull);
+    }
+
+    [Fact]
+    public void Builder_TessellationStages_RequireBoth()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
+        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+
+        using var vBlob = SpirvBlob.Load(VertSpvPath);
+        using var fBlob = SpirvBlob.Load(FragSpvPath);
+        using var vMod  = device.CreateShaderModule(vBlob.Words);
+        using var fMod  = device.CreateShaderModule(fBlob.Words);
+        using var layout = device.CreatePipelineLayout(default);
+        ReadOnlySpan<VkFormat> colorFormats = [VkFormat.VK_FORMAT_R8G8B8A8_UNORM];
+
+        // Hand only the tess-control side a non-null module by re-using the
+        // vertex shader's handle. The build should fail the new symmetry
+        // check before vkCreateGraphicsPipelines ever gets called. Lambdas
+        // can't close over the ref-struct builder, so we catch directly.
+        ShaderModule control = vMod;
+        ShaderModule eval    = default;
+        Exception? caught = null;
+        try
+        {
+            device.BuildGraphicsPipeline()
+                .WithStages(in vMod, in fMod)
+                .WithDynamicRendering(colorFormats)
+                .WithLayout(in layout)
+                .WithTessellationStages(in control, in eval)
+                .Build();
+        }
+        catch (Exception ex) { caught = ex; }
+        Assert.IsType<InvalidOperationException>(caught);
+    }
+
     private static string VertSpvPath =>
         Path.Combine(AppContext.BaseDirectory, "Shaders", "triangle.vert.spv");
 

@@ -22,11 +22,17 @@ public unsafe ref struct GraphicsPipelineBuilder
 {
     private readonly Device _device;
 
-    // Stages.
+    // Stages. vert + frag are required; geom + tessControl + tessEval are optional.
     private VkShaderModule_T* _vert;
     private VkShaderModule_T* _frag;
+    private VkShaderModule_T* _geom;
+    private VkShaderModule_T* _tessControl;
+    private VkShaderModule_T* _tessEval;
     private EntryPointBuffer  _vertEntry;
     private EntryPointBuffer  _fragEntry;
+    private EntryPointBuffer  _geomEntry;
+    private EntryPointBuffer  _tessControlEntry;
+    private EntryPointBuffer  _tessEvalEntry;
 
     // Vertex input.
     private ReadOnlySpan<VertexBindingDescription>   _vBindings;
@@ -35,20 +41,37 @@ public unsafe ref struct GraphicsPipelineBuilder
     // Input assembly.
     private VkPrimitiveTopology _topology;
 
+    // Tessellation.
+    private uint _patchControlPoints;
+
     // Rasterization.
     private VkCullModeFlagBits _cullMode;
     private VkFrontFace        _frontFace;
     private VkPolygonMode      _polygonMode;
+
+    // Multisample.
+    private VkSampleCountFlagBits _samples;
+    private bool                  _sampleShadingEnable;
+    private float                 _minSampleShading;
 
     // Depth stencil.
     private bool        _depthTestEnable;
     private bool        _depthWriteEnable;
     private VkCompareOp _depthCompareOp;
 
+    // Color blend.
+    private ReadOnlySpan<ColorBlendAttachment> _blendAttachments;
+    private bool           _blendLogicOpEnable;
+    private VkLogicOp      _blendLogicOp;
+    private BlendConstants _blendConstants;
+
     // Dynamic rendering.
     private ReadOnlySpan<VkFormat> _colorFormats;
     private VkFormat               _depthFormat;
     private VkFormat               _stencilFormat;
+
+    // Dynamic state. Defaults to viewport + scissor when the caller doesn't override.
+    private ReadOnlySpan<VkDynamicState> _dynamicStates;
 
     // Layout + cache.
     private VkPipelineLayout_T* _layout;
@@ -64,10 +87,15 @@ public unsafe ref struct GraphicsPipelineBuilder
         _cullMode       = VkCullModeFlagBits.VK_CULL_MODE_NONE;
         _frontFace      = VkFrontFace.VK_FRONT_FACE_COUNTER_CLOCKWISE;
         _polygonMode    = VkPolygonMode.VK_POLYGON_MODE_FILL;
+        _samples        = VkSampleCountFlagBits.VK_SAMPLE_COUNT_1_BIT;
+        _minSampleShading = 1.0f;
         _depthCompareOp = VkCompareOp.VK_COMPARE_OP_LESS;
         // Default entry points = "main\0"
         InitMain(ref _vertEntry);
         InitMain(ref _fragEntry);
+        InitMain(ref _geomEntry);
+        InitMain(ref _tessControlEntry);
+        InitMain(ref _tessEvalEntry);
     }
 
     private static void InitMain(ref EntryPointBuffer buf)
@@ -87,8 +115,36 @@ public unsafe ref struct GraphicsPipelineBuilder
         return this;
     }
 
+    /// <summary>
+    /// Adds a geometry-shader stage. Pipeline must already have vert + frag
+    /// via <see cref="WithStages"/>; the device must support geometry
+    /// shaders (<c>geometryShader</c> feature, enabled at device-create
+    /// time).
+    /// </summary>
+    public GraphicsPipelineBuilder WithGeometryStage(in ShaderModule geometry)
+    {
+        _geom = geometry.Handle;
+        return this;
+    }
+
+    /// <summary>
+    /// Adds the tessellation control + evaluation shader stages. Both stages
+    /// must be present together — Vulkan rejects a tess pipeline with only
+    /// one. Caller still has to call <see cref="WithTessellation"/> to set
+    /// the patch control-point count.
+    /// </summary>
+    public GraphicsPipelineBuilder WithTessellationStages(in ShaderModule control, in ShaderModule evaluation)
+    {
+        _tessControl = control.Handle;
+        _tessEval    = evaluation.Handle;
+        return this;
+    }
+
     public GraphicsPipelineBuilder WithVertexEntryPoint(ReadOnlySpan<byte> name) { CopyName(name, ref _vertEntry); return this; }
     public GraphicsPipelineBuilder WithFragmentEntryPoint(ReadOnlySpan<byte> name) { CopyName(name, ref _fragEntry); return this; }
+    public GraphicsPipelineBuilder WithGeometryEntryPoint(ReadOnlySpan<byte> name) { CopyName(name, ref _geomEntry); return this; }
+    public GraphicsPipelineBuilder WithTessellationControlEntryPoint(ReadOnlySpan<byte> name) { CopyName(name, ref _tessControlEntry); return this; }
+    public GraphicsPipelineBuilder WithTessellationEvaluationEntryPoint(ReadOnlySpan<byte> name) { CopyName(name, ref _tessEvalEntry); return this; }
 
     private static void CopyName(ReadOnlySpan<byte> name, ref EntryPointBuffer dst)
     {
@@ -112,6 +168,17 @@ public unsafe ref struct GraphicsPipelineBuilder
         return this;
     }
 
+    /// <summary>
+    /// Sets the patch control-point count for tessellation pipelines. Must
+    /// be paired with <see cref="WithTessellationStages"/> and a
+    /// <c>VK_PRIMITIVE_TOPOLOGY_PATCH_LIST</c> topology.
+    /// </summary>
+    public GraphicsPipelineBuilder WithTessellation(uint patchControlPoints)
+    {
+        _patchControlPoints = patchControlPoints;
+        return this;
+    }
+
     public GraphicsPipelineBuilder WithRasterization(
         VkCullModeFlagBits cullMode  = VkCullModeFlagBits.VK_CULL_MODE_NONE,
         VkFrontFace        frontFace = VkFrontFace.VK_FRONT_FACE_COUNTER_CLOCKWISE,
@@ -120,6 +187,52 @@ public unsafe ref struct GraphicsPipelineBuilder
         _cullMode    = cullMode;
         _frontFace   = frontFace;
         _polygonMode = polygonMode;
+        return this;
+    }
+
+    /// <summary>
+    /// Multisample state. <paramref name="sampleShadingEnable"/> + a
+    /// <paramref name="minSampleShading"/> below 1.0 reduces the per-fragment
+    /// shading rate; the default (false / 1.0) means standard MSAA with
+    /// one shader invocation per pixel.
+    /// </summary>
+    public GraphicsPipelineBuilder WithMultisample(
+        VkSampleCountFlagBits samples,
+        bool                  sampleShadingEnable = false,
+        float                 minSampleShading    = 1.0f)
+    {
+        _samples             = samples;
+        _sampleShadingEnable = sampleShadingEnable;
+        _minSampleShading    = minSampleShading;
+        return this;
+    }
+
+    /// <summary>
+    /// Per-attachment color blend state. <paramref name="description"/>'s
+    /// <c>Attachments</c> span is consumed synchronously inside
+    /// <see cref="Build"/>; callers can use the
+    /// <see cref="ColorBlendAttachment.AlphaBlend"/> /
+    /// <see cref="ColorBlendAttachment.Additive"/> presets or build the
+    /// state by hand.
+    /// </summary>
+    public GraphicsPipelineBuilder WithColorBlend(in ColorBlendDescription description)
+    {
+        _blendAttachments    = description.Attachments;
+        _blendLogicOpEnable  = description.LogicOpEnable;
+        _blendLogicOp        = description.LogicOp;
+        _blendConstants      = description.BlendConstants;
+        return this;
+    }
+
+    /// <summary>
+    /// Override the dynamic-state list (default is viewport + scissor).
+    /// Add the new states; the wrapper does not auto-include
+    /// <c>VIEWPORT</c> / <c>SCISSOR</c> when overridden, so include them
+    /// explicitly if you still want them dynamic.
+    /// </summary>
+    public GraphicsPipelineBuilder WithDynamicState(ReadOnlySpan<VkDynamicState> dynamicStates)
+    {
+        _dynamicStates = dynamicStates;
         return this;
     }
 
@@ -168,6 +281,8 @@ public unsafe ref struct GraphicsPipelineBuilder
         if (!_stagesSet)    throw new InvalidOperationException("GraphicsPipelineBuilder requires WithStages.");
         if (!_renderingSet) throw new InvalidOperationException("GraphicsPipelineBuilder requires WithDynamicRendering.");
         if (_layout == null) throw new InvalidOperationException("GraphicsPipelineBuilder requires WithLayout.");
+        if ((_tessControl == null) != (_tessEval == null))
+            throw new InvalidOperationException("Tessellation requires both control + evaluation stages (WithTessellationStages).");
 
         // ---- Vertex input native arrays ----
         Span<VkVertexInputBindingDescription>   nativeBindings = stackalloc VkVertexInputBindingDescription[Math.Max(_vBindings.Length, 1)];
@@ -192,54 +307,54 @@ public unsafe ref struct GraphicsPipelineBuilder
             };
         }
 
-        // ---- Color blend attachments (default opaque, sized to color formats) ----
+        // ---- Color blend attachments. User-provided overrides take
+        // precedence; any unspecified tail entries fall back to opaque so
+        // the attachment count always matches color-attachment count.
+        int blendCount = _colorFormats.Length;
         Span<VkPipelineColorBlendAttachmentState> blendAttachments =
-            stackalloc VkPipelineColorBlendAttachmentState[Math.Max(_colorFormats.Length, 1)];
-        for (int i = 0; i < _colorFormats.Length; i++)
+            stackalloc VkPipelineColorBlendAttachmentState[Math.Max(blendCount, 1)];
+        for (int i = 0; i < blendCount; i++)
         {
-            blendAttachments[i] = new VkPipelineColorBlendAttachmentState
-            {
-                blendEnable = 0,
-                colorWriteMask =
-                    (uint)(VkColorComponentFlagBits.VK_COLOR_COMPONENT_R_BIT |
-                           VkColorComponentFlagBits.VK_COLOR_COMPONENT_G_BIT |
-                           VkColorComponentFlagBits.VK_COLOR_COMPONENT_B_BIT |
-                           VkColorComponentFlagBits.VK_COLOR_COMPONENT_A_BIT),
-            };
+            ColorBlendAttachment ca = i < _blendAttachments.Length
+                ? _blendAttachments[i]
+                : ColorBlendAttachment.Opaque;
+            blendAttachments[i] = ca.ToNative();
         }
 
-        // ---- Dynamic state (viewport + scissor) ----
-        Span<VkDynamicState> dynamicStates = stackalloc VkDynamicState[]
+        // ---- Dynamic state. Default = viewport + scissor; any explicit
+        // override (WithDynamicState) replaces the default wholesale.
+        Span<VkDynamicState> defaultDynamic = stackalloc VkDynamicState[2]
         {
             VkDynamicState.VK_DYNAMIC_STATE_VIEWPORT,
             VkDynamicState.VK_DYNAMIC_STATE_SCISSOR,
         };
+        ReadOnlySpan<VkDynamicState> dynamicStates = _dynamicStates.IsEmpty ? defaultDynamic : _dynamicStates;
 
         VkPipeline_T* raw = null;
-        fixed (byte* pVertEntry = &_vertEntry[0])
-        fixed (byte* pFragEntry = &_fragEntry[0])
-        fixed (VkVertexInputBindingDescription*   pBindings = nativeBindings)
-        fixed (VkVertexInputAttributeDescription* pAttrs    = nativeAttrs)
+        fixed (byte* pVertEntry        = &_vertEntry[0])
+        fixed (byte* pFragEntry        = &_fragEntry[0])
+        fixed (byte* pGeomEntry        = &_geomEntry[0])
+        fixed (byte* pTessControlEntry = &_tessControlEntry[0])
+        fixed (byte* pTessEvalEntry    = &_tessEvalEntry[0])
+        fixed (VkVertexInputBindingDescription*    pBindings = nativeBindings)
+        fixed (VkVertexInputAttributeDescription*  pAttrs    = nativeAttrs)
         fixed (VkFormat*                           pColors   = _colorFormats)
-        fixed (VkPipelineColorBlendAttachmentState* pBlend  = blendAttachments)
-        fixed (VkDynamicState*                     pDyn     = dynamicStates)
+        fixed (VkPipelineColorBlendAttachmentState* pBlend   = blendAttachments)
+        fixed (VkDynamicState*                     pDyn      = dynamicStates)
         {
-            // Two stages. VkPipelineShaderStageCreateInfo size is fixed; build inline.
-            var stages = stackalloc VkPipelineShaderStageCreateInfo[2];
-            stages[0] = new VkPipelineShaderStageCreateInfo
+            // Up to five stages: vert, frag, optional geom, optional tess
+            // control + tess eval. Built inline; size is bounded.
+            var stages = stackalloc VkPipelineShaderStageCreateInfo[5];
+            uint stageCount = 0;
+            stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_VERTEX_BIT,   _vert, pVertEntry);
+            stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_FRAGMENT_BIT, _frag, pFragEntry);
+            if (_geom != null)
+                stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_GEOMETRY_BIT, _geom, pGeomEntry);
+            if (_tessControl != null)
             {
-                sType  = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                stage  = VkShaderStageFlagBits.VK_SHADER_STAGE_VERTEX_BIT,
-                module = _vert,
-                pName  = (sbyte*)pVertEntry,
-            };
-            stages[1] = new VkPipelineShaderStageCreateInfo
-            {
-                sType  = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                stage  = VkShaderStageFlagBits.VK_SHADER_STAGE_FRAGMENT_BIT,
-                module = _frag,
-                pName  = (sbyte*)pFragEntry,
-            };
+                stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT,    _tessControl, pTessControlEntry);
+                stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT, _tessEval,    pTessEvalEntry);
+            }
 
             var vertexInput = new VkPipelineVertexInputStateCreateInfo
             {
@@ -254,6 +369,12 @@ public unsafe ref struct GraphicsPipelineBuilder
             {
                 sType    = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
                 topology = _topology,
+            };
+
+            var tessellation = new VkPipelineTessellationStateCreateInfo
+            {
+                sType              = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO,
+                patchControlPoints = _patchControlPoints,
             };
 
             // Viewport state — counts only, real values come from dynamic state.
@@ -277,8 +398,10 @@ public unsafe ref struct GraphicsPipelineBuilder
 
             var multisample = new VkPipelineMultisampleStateCreateInfo
             {
-                sType                = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-                rasterizationSamples = VkSampleCountFlagBits.VK_SAMPLE_COUNT_1_BIT,
+                sType                 = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+                rasterizationSamples  = _samples,
+                sampleShadingEnable   = _sampleShadingEnable ? 1u : 0u,
+                minSampleShading      = _minSampleShading,
             };
 
             var depthStencil = new VkPipelineDepthStencilStateCreateInfo
@@ -294,10 +417,15 @@ public unsafe ref struct GraphicsPipelineBuilder
             var colorBlend = new VkPipelineColorBlendStateCreateInfo
             {
                 sType           = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-                logicOpEnable   = 0,
-                attachmentCount = (uint)_colorFormats.Length,
-                pAttachments    = _colorFormats.Length > 0 ? pBlend : null,
+                logicOpEnable   = _blendLogicOpEnable ? 1u : 0u,
+                logicOp         = _blendLogicOp,
+                attachmentCount = (uint)blendCount,
+                pAttachments    = blendCount > 0 ? pBlend : null,
             };
+            colorBlend.blendConstants[0] = _blendConstants.R;
+            colorBlend.blendConstants[1] = _blendConstants.G;
+            colorBlend.blendConstants[2] = _blendConstants.B;
+            colorBlend.blendConstants[3] = _blendConstants.A;
 
             var dynamicState = new VkPipelineDynamicStateCreateInfo
             {
@@ -319,10 +447,11 @@ public unsafe ref struct GraphicsPipelineBuilder
             {
                 sType               = VkStructureType.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
                 pNext               = &renderingInfo,
-                stageCount          = 2,
+                stageCount          = stageCount,
                 pStages             = stages,
                 pVertexInputState   = &vertexInput,
                 pInputAssemblyState = &inputAssembly,
+                pTessellationState  = _patchControlPoints > 0 ? &tessellation : null,
                 pViewportState      = &viewportState,
                 pRasterizationState = &rasterization,
                 pMultisampleState   = &multisample,
@@ -339,6 +468,18 @@ public unsafe ref struct GraphicsPipelineBuilder
         }
         return new GraphicsPipeline(raw, _layout, _device.Handle);
     }
+
+    private static VkPipelineShaderStageCreateInfo ShaderStage(
+        VkShaderStageFlagBits stage,
+        VkShaderModule_T*     module,
+        byte*                 entry)
+        => new()
+        {
+            sType  = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            stage  = stage,
+            module = module,
+            pName  = (sbyte*)entry,
+        };
 
     [InlineArray(32)]
     private struct EntryPointBuffer { internal byte e0; }
