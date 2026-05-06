@@ -187,6 +187,213 @@ public unsafe ref struct CommandRecorder : IDisposable
         PipelineBarrier(default, default, MemoryMarshal.CreateReadOnlySpan(ref copy, 1));
     }
 
+    // ---- Copy / blit / clear / fill (copy_commands2 path) ----
+
+    /// <summary>
+    /// One <c>vkCmdCopyBuffer2</c>. <paramref name="regions"/> may be
+    /// any length (caller's stackalloc, array, ArrayPool rental).
+    /// Empty span is a no-op.
+    /// </summary>
+    public void CopyBuffer(in Buffer src, in Buffer dst, params ReadOnlySpan<BufferCopyRegion> regions)
+    {
+        if (regions.IsEmpty) return;
+        Span<VkBufferCopy2> n = stackalloc VkBufferCopy2[regions.Length];
+        for (int i = 0; i < regions.Length; i++) n[i] = regions[i].ToNative();
+        fixed (VkBufferCopy2* p = n)
+        {
+            var info = new VkCopyBufferInfo2
+            {
+                sType       = VkStructureType.VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2,
+                srcBuffer   = src.Handle,
+                dstBuffer   = dst.Handle,
+                regionCount = (uint)regions.Length,
+                pRegions    = p,
+            };
+            Vk.vkCmdCopyBuffer2(Handle, &info);
+        }
+    }
+
+    /// <summary>Whole-buffer copy from <paramref name="src"/> offset 0 → <paramref name="dst"/> offset 0.</summary>
+    public void CopyBuffer(in Buffer src, in Buffer dst)
+    {
+        BufferCopyRegion r = BufferCopyRegion.Of(size: src.Size);
+        CopyBuffer(in src, in dst, r);
+    }
+
+    public void CopyBufferToImage(
+        in Buffer                       src,
+        in Image                        dst,
+        VkImageLayout                   dstLayout,
+        params ReadOnlySpan<BufferImageCopy> regions)
+    {
+        if (regions.IsEmpty) return;
+        Span<VkBufferImageCopy2> n = stackalloc VkBufferImageCopy2[regions.Length];
+        for (int i = 0; i < regions.Length; i++) n[i] = regions[i].ToNative();
+        fixed (VkBufferImageCopy2* p = n)
+        {
+            var info = new VkCopyBufferToImageInfo2
+            {
+                sType          = VkStructureType.VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
+                srcBuffer      = src.Handle,
+                dstImage       = dst.Handle,
+                dstImageLayout = dstLayout,
+                regionCount    = (uint)regions.Length,
+                pRegions       = p,
+            };
+            Vk.vkCmdCopyBufferToImage2(Handle, &info);
+        }
+    }
+
+    public void CopyImageToBuffer(
+        in Image                        src,
+        VkImageLayout                   srcLayout,
+        in Buffer                       dst,
+        params ReadOnlySpan<BufferImageCopy> regions)
+    {
+        if (regions.IsEmpty) return;
+        Span<VkBufferImageCopy2> n = stackalloc VkBufferImageCopy2[regions.Length];
+        for (int i = 0; i < regions.Length; i++) n[i] = regions[i].ToNative();
+        fixed (VkBufferImageCopy2* p = n)
+        {
+            var info = new VkCopyImageToBufferInfo2
+            {
+                sType          = VkStructureType.VK_STRUCTURE_TYPE_COPY_IMAGE_TO_BUFFER_INFO_2,
+                srcImage       = src.Handle,
+                srcImageLayout = srcLayout,
+                dstBuffer      = dst.Handle,
+                regionCount    = (uint)regions.Length,
+                pRegions       = p,
+            };
+            Vk.vkCmdCopyImageToBuffer2(Handle, &info);
+        }
+    }
+
+    public void CopyImage(
+        in Image                       src, VkImageLayout srcLayout,
+        in Image                       dst, VkImageLayout dstLayout,
+        params ReadOnlySpan<ImageCopyRegion> regions)
+    {
+        if (regions.IsEmpty) return;
+        Span<VkImageCopy2> n = stackalloc VkImageCopy2[regions.Length];
+        for (int i = 0; i < regions.Length; i++) n[i] = regions[i].ToNative();
+        fixed (VkImageCopy2* p = n)
+        {
+            var info = new VkCopyImageInfo2
+            {
+                sType          = VkStructureType.VK_STRUCTURE_TYPE_COPY_IMAGE_INFO_2,
+                srcImage       = src.Handle,
+                srcImageLayout = srcLayout,
+                dstImage       = dst.Handle,
+                dstImageLayout = dstLayout,
+                regionCount    = (uint)regions.Length,
+                pRegions       = p,
+            };
+            Vk.vkCmdCopyImage2(Handle, &info);
+        }
+    }
+
+    /// <summary>
+    /// One <c>vkCmdBlitImage2</c>. <paramref name="filter"/> defaults to
+    /// linear — the right call for downscale / upscale of color targets.
+    /// Use nearest for integer formats or single-texel reads.
+    /// </summary>
+    public void BlitImage(
+        in Image                       src, VkImageLayout srcLayout,
+        in Image                       dst, VkImageLayout dstLayout,
+        ReadOnlySpan<ImageBlitRegion>  regions,
+        VkFilter                       filter = VkFilter.VK_FILTER_LINEAR)
+    {
+        if (regions.IsEmpty) return;
+        Span<VkImageBlit2> n = stackalloc VkImageBlit2[regions.Length];
+        for (int i = 0; i < regions.Length; i++) n[i] = regions[i].ToNative();
+        fixed (VkImageBlit2* p = n)
+        {
+            var info = new VkBlitImageInfo2
+            {
+                sType          = VkStructureType.VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2,
+                srcImage       = src.Handle,
+                srcImageLayout = srcLayout,
+                dstImage       = dst.Handle,
+                dstImageLayout = dstLayout,
+                regionCount    = (uint)regions.Length,
+                pRegions       = p,
+                filter         = filter,
+            };
+            Vk.vkCmdBlitImage2(Handle, &info);
+        }
+    }
+
+    /// <summary>
+    /// 32-bit pattern fill via <c>vkCmdFillBuffer</c>. <paramref name="size"/>
+    /// of <c>~0ul</c> means <c>VK_WHOLE_SIZE</c> (the rest of the buffer
+    /// from <paramref name="offset"/>) — Vulkan rounds down to a 4-byte
+    /// boundary internally.
+    /// </summary>
+    public void FillBuffer(in Buffer dst, uint data, ulong offset = 0, ulong size = ~0ul)
+        => Vk.vkCmdFillBuffer(Handle, dst.Handle, offset, size, data);
+
+    /// <summary>
+    /// <c>vkCmdClearColorImage</c> across one or more subresource ranges.
+    /// Image must have been transitioned to <c>TRANSFER_DST_OPTIMAL</c>
+    /// (or <c>GENERAL</c>); the wrapper does not enforce that — that's
+    /// the caller's barrier responsibility.
+    /// </summary>
+    public void ClearColorImage(
+        in Image                              image,
+        VkImageLayout                         layout,
+        in VkClearColorValue                  color,
+        ReadOnlySpan<VkImageSubresourceRange> ranges)
+    {
+        if (ranges.IsEmpty) return;
+        fixed (VkClearColorValue*       pColor = &color)
+        fixed (VkImageSubresourceRange* pRange = ranges)
+            Vk.vkCmdClearColorImage(Handle, image.Handle, layout, pColor, (uint)ranges.Length, pRange);
+    }
+
+    /// <summary>Whole-image color clear (mip 0+, layer 0+, color aspect).</summary>
+    public void ClearColorImage(in Image image, VkImageLayout layout, in VkClearColorValue color)
+    {
+        var range = new VkImageSubresourceRange
+        {
+            aspectMask     = (uint)VkImageAspectFlagBits.VK_IMAGE_ASPECT_COLOR_BIT,
+            baseMipLevel   = 0, levelCount = image.MipLevels   == 0 ? 1u : image.MipLevels,
+            baseArrayLayer = 0, layerCount = image.ArrayLayers == 0 ? 1u : image.ArrayLayers,
+        };
+        ClearColorImage(in image, layout, in color, MemoryMarshal.CreateReadOnlySpan(ref range, 1));
+    }
+
+    public void ClearDepthStencilImage(
+        in Image                              image,
+        VkImageLayout                         layout,
+        in VkClearDepthStencilValue           depthStencil,
+        ReadOnlySpan<VkImageSubresourceRange> ranges)
+    {
+        if (ranges.IsEmpty) return;
+        fixed (VkClearDepthStencilValue* pDs    = &depthStencil)
+        fixed (VkImageSubresourceRange*  pRange = ranges)
+            Vk.vkCmdClearDepthStencilImage(Handle, image.Handle, layout, pDs, (uint)ranges.Length, pRange);
+    }
+
+    /// <summary>
+    /// Whole-image depth (and optionally stencil) clear. Pass
+    /// <c>VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT</c>
+    /// for combined formats.
+    /// </summary>
+    public void ClearDepthStencilImage(
+        in Image                    image,
+        VkImageLayout               layout,
+        in VkClearDepthStencilValue depthStencil,
+        VkImageAspectFlagBits       aspect = VkImageAspectFlagBits.VK_IMAGE_ASPECT_DEPTH_BIT)
+    {
+        var range = new VkImageSubresourceRange
+        {
+            aspectMask     = (uint)aspect,
+            baseMipLevel   = 0, levelCount = image.MipLevels   == 0 ? 1u : image.MipLevels,
+            baseArrayLayer = 0, layerCount = image.ArrayLayers == 0 ? 1u : image.ArrayLayers,
+        };
+        ClearDepthStencilImage(in image, layout, in depthStencil, MemoryMarshal.CreateReadOnlySpan(ref range, 1));
+    }
+
     // ---- Dynamic rendering ----
 
     public void BeginRendering(in RenderingInfo info)
