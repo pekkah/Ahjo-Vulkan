@@ -45,6 +45,15 @@ public sealed unsafe class Swapchain : IDisposable
     public uint                  ImageCount  => (uint)_images.Length;
     public ReadOnlySpan<ImageView> ImageViews  => _views;
 
+    /// <summary>
+    /// Raw <c>VkImage_T*</c> for image <paramref name="index"/>, returned
+    /// as <c>nint</c> so it can drop straight into
+    /// <see cref="ImageBarrier.Image"/>. The wrapper does not vend a
+    /// full <see cref="Image"/> for swapchain-owned images — they are
+    /// not VMA-allocated and have no <see cref="Allocator"/> backing.
+    /// </summary>
+    public nint GetImageHandle(uint index) => (nint)_images[index];
+
     public Swapchain(Device device, in SwapchainDescription desc)
     {
         ArgumentNullException.ThrowIfNull(device);

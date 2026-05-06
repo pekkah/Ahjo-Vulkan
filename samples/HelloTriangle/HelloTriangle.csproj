@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Ahjo.Vulkan.Samples.HelloTriangle</RootNamespace>
+    <AssemblyName>HelloTriangle</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <!-- Win32 surface only — restrict the sample's runtime targets so a
+         non-Windows host fails fast at build instead of at vkCreateSurface. -->
+    <SupportedOSPlatformVersion>7.0</SupportedOSPlatformVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan\Ahjo.Vulkan.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <_ShaderSource Include="Shaders\*.vert;Shaders\*.frag" />
+  </ItemGroup>
+
+  <Target Name="CompileShaders" AfterTargets="Build" Inputs="@(_ShaderSource)" Outputs="@(_ShaderSource->'$(OutputPath)Shaders\%(Filename)%(Extension).spv')">
+    <PropertyGroup>
+      <_GlslcExe Condition="'$(_GlslcExe)' == '' and '$(VULKAN_SDK)' != ''">$(VULKAN_SDK)\Bin\glslc.exe</_GlslcExe>
+      <_GlslcExe Condition="'$(_GlslcExe)' == ''">glslc</_GlslcExe>
+    </PropertyGroup>
+    <MakeDir Directories="$(OutputPath)Shaders" />
+    <Exec Command="&quot;$(_GlslcExe)&quot; &quot;%(_ShaderSource.FullPath)&quot; -o &quot;$(OutputPath)Shaders\%(_ShaderSource.Filename)%(_ShaderSource.Extension).spv&quot;"
+          IgnoreExitCode="false"
+          ContinueOnError="WarnAndContinue" />
+  </Target>
+
+</Project>

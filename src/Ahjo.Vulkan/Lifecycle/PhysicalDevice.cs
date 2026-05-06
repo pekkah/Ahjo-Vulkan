@@ -34,6 +34,23 @@ public sealed unsafe class PhysicalDevice
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_PHYSICAL_DEVICE;
 
     /// <summary>
+    /// Wraps <c>vkGetPhysicalDeviceSurfaceSupportKHR</c>. Returns
+    /// <see langword="true"/> when the queue family at
+    /// <paramref name="queueFamilyIndex"/> on this physical device can
+    /// present to <paramref name="surface"/>. The instance that built
+    /// the surface MUST have <see cref="VulkanExtensions.KhrSurface"/>
+    /// enabled — otherwise the extension entry-point isn't loaded.
+    /// </summary>
+    public bool SupportsPresent(uint queueFamilyIndex, in Surface surface)
+    {
+        if (surface.IsNull) throw new ArgumentException("Surface is null.", nameof(surface));
+        uint supported = 0;
+        Vk.vkGetPhysicalDeviceSurfaceSupportKHR(Handle, queueFamilyIndex, surface.Handle, &supported)
+            .ThrowIfFailed();
+        return supported != 0;
+    }
+
+    /// <summary>
     /// Creates a Vulkan device with the wrapper's 1.4 default feature set
     /// (<c>synchronization2</c>, <c>dynamicRendering</c>,
     /// <c>timelineSemaphore</c>, <c>bufferDeviceAddress</c>,
