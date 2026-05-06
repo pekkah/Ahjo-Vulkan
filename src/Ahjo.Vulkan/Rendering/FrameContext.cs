@@ -61,14 +61,42 @@ public sealed class FrameContext : IDisposable
     /// <summary>
     /// Submits <paramref name="recorder"/> on <paramref name="queue"/> and
     /// signals <see cref="InFlight"/>. Headless variant — does not wire
-    /// up <see cref="ImageAcquired"/> / <see cref="RenderingDone"/>; that
-    /// arrives with #24 (swapchain).
+    /// the swapchain semaphores. Use the
+    /// <see cref="Submit(Queue, ref CommandRecorder, Stage, Stage)"/>
+    /// overload during a real present loop.
     /// </summary>
     public void Submit(Queue queue, ref CommandRecorder recorder)
     {
         ArgumentNullException.ThrowIfNull(queue);
         Slot.MarkSubmitted();
         queue.Submit2(ref recorder, in Slot.InFlightHandle);
+    }
+
+    /// <summary>
+    /// Swapchain-aware submit. Waits on
+    /// <see cref="ImageAcquired"/> at <paramref name="imageAcquireWaitStage"/>
+    /// (typically <see cref="Stage.ColorAttachmentOutput"/> for a
+    /// dynamic-rendering color pass), signals
+    /// <see cref="RenderingDone"/> at
+    /// <paramref name="renderingDoneSignalStage"/> (typically
+    /// <see cref="Stage.AllGraphics"/>), and signals the slot's fence
+    /// at completion.
+    /// </summary>
+    public void Submit(
+        Queue                queue,
+        ref CommandRecorder  recorder,
+        Stage                imageAcquireWaitStage    = Stage.ColorAttachmentOutput,
+        Stage                renderingDoneSignalStage = Stage.AllGraphics)
+    {
+        ArgumentNullException.ThrowIfNull(queue);
+        Slot.MarkSubmitted();
+
+        var wait   = new SemaphoreSubmit(ImageAcquired, imageAcquireWaitStage);
+        var signal = new SemaphoreSubmit(RenderingDone, renderingDoneSignalStage);
+        queue.Submit2(
+            ref recorder, in Slot.InFlightHandle,
+            System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(ref wait,   1),
+            System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(ref signal, 1));
     }
 
     public void Dispose()

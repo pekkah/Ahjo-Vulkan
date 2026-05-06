@@ -112,6 +112,42 @@ public sealed unsafe class Swapchain : IDisposable
         };
     }
 
+    /// <summary>
+    /// Presents <paramref name="imageIndex"/> on <paramref name="queue"/>
+    /// after <paramref name="waitSemaphore"/> fires (the
+    /// rendering-done semaphore from the matching submit). Returns the
+    /// same <see cref="AcquireResult"/> shape as
+    /// <see cref="AcquireNextImage"/> so the caller's "did the surface
+    /// change?" branch is symmetric with the acquire path.
+    /// </summary>
+    public AcquireResult Present(Queue queue, uint imageIndex, in BinarySemaphore waitSemaphore)
+    {
+        ArgumentNullException.ThrowIfNull(queue);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        VkSemaphore_T*    waitRaw = waitSemaphore.Handle;
+        VkSwapchainKHR_T* swap    = _handle;
+        uint              idx     = imageIndex;
+
+        var info = new VkPresentInfoKHR
+        {
+            sType              = VkStructureType.VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+            waitSemaphoreCount = waitRaw != null ? 1u : 0u,
+            pWaitSemaphores    = waitRaw != null ? &waitRaw : null,
+            swapchainCount     = 1,
+            pSwapchains        = &swap,
+            pImageIndices      = &idx,
+        };
+        VkResult r = Vk.vkQueuePresentKHR(queue.Handle, &info);
+        return r switch
+        {
+            VkResult.VK_SUCCESS               => AcquireResult.Success,
+            VkResult.VK_SUBOPTIMAL_KHR        => AcquireResult.Suboptimal,
+            VkResult.VK_ERROR_OUT_OF_DATE_KHR => AcquireResult.OutOfDate,
+            _                                 => throw new VulkanException(r, "vkQueuePresentKHR"),
+        };
+    }
+
     public void Dispose()
     {
         if (_disposed) return;

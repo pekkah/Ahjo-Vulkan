@@ -40,12 +40,19 @@ public sealed unsafe class Queue
     /// open. Pass <c>default(Fence)</c> for fire-and-forget; otherwise
     /// the fence is signaled when GPU execution completes.
     /// </summary>
-    /// <remarks>
-    /// Single-buffer / no-semaphore overload to start. Multi-submit and
-    /// wait/signal semaphore variants land alongside the FrameContext
-    /// (#16 — issue 15) where they're actually used.
-    /// </remarks>
     public void Submit2(ref CommandRecorder recorder, in Fence fence)
+        => Submit2(ref recorder, in fence, default, default);
+
+    /// <summary>
+    /// Submits a single command buffer with optional wait + signal
+    /// binary semaphores. Pass empty spans (or use the no-semaphore
+    /// overload) for fire-and-forget submits.
+    /// </summary>
+    public void Submit2(
+        ref CommandRecorder           recorder,
+        in  Fence                     fence,
+        ReadOnlySpan<SemaphoreSubmit> waits,
+        ReadOnlySpan<SemaphoreSubmit> signals)
     {
         recorder.End();
         VkCommandBuffer_T* cb = recorder.Handle;
@@ -54,12 +61,38 @@ public sealed unsafe class Queue
             sType         = VkStructureType.VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
             commandBuffer = cb,
         };
-        var submit = new VkSubmitInfo2
+
+        Span<VkSemaphoreSubmitInfo> waitInfos   = stackalloc VkSemaphoreSubmitInfo[Math.Max(waits.Length,   1)];
+        Span<VkSemaphoreSubmitInfo> signalInfos = stackalloc VkSemaphoreSubmitInfo[Math.Max(signals.Length, 1)];
+        for (int i = 0; i < waits.Length; i++)
+            waitInfos[i] = new VkSemaphoreSubmitInfo
+            {
+                sType     = VkStructureType.VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+                semaphore = waits[i].Semaphore.Handle,
+                stageMask = (ulong)waits[i].Stage,
+            };
+        for (int i = 0; i < signals.Length; i++)
+            signalInfos[i] = new VkSemaphoreSubmitInfo
+            {
+                sType     = VkStructureType.VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+                semaphore = signals[i].Semaphore.Handle,
+                stageMask = (ulong)signals[i].Stage,
+            };
+
+        fixed (VkSemaphoreSubmitInfo* pWait   = waitInfos)
+        fixed (VkSemaphoreSubmitInfo* pSignal = signalInfos)
         {
-            sType                  = VkStructureType.VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-            commandBufferInfoCount = 1,
-            pCommandBufferInfos    = &cbInfo,
-        };
-        Vk.vkQueueSubmit2(Handle, 1, &submit, fence.Handle).ThrowIfFailed();
+            var submit = new VkSubmitInfo2
+            {
+                sType                    = VkStructureType.VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+                waitSemaphoreInfoCount   = (uint)waits.Length,
+                pWaitSemaphoreInfos      = waits.Length   > 0 ? pWait   : null,
+                commandBufferInfoCount   = 1,
+                pCommandBufferInfos      = &cbInfo,
+                signalSemaphoreInfoCount = (uint)signals.Length,
+                pSignalSemaphoreInfos    = signals.Length > 0 ? pSignal : null,
+            };
+            Vk.vkQueueSubmit2(Handle, 1, &submit, fence.Handle).ThrowIfFailed();
+        }
     }
 }
