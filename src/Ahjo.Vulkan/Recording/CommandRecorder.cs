@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Ahjo.Vulkan.Native;
@@ -122,6 +123,10 @@ public unsafe ref struct CommandRecorder : IDisposable
     public void PushConstants<T>(in PipelineLayout layout, ShaderStages stages, in T data, uint offset = 0)
         where T : unmanaged
     {
+        // Vulkan guarantees only 128 bytes of push-constant space (VkPhysicalDeviceLimits.maxPushConstantsSize ≥ 128).
+        Debug.Assert(Unsafe.SizeOf<T>() + offset <= 128,
+            $"PushConstants<{typeof(T).Name}>: sizeof+offset ({Unsafe.SizeOf<T>()}+{offset}) exceeds Vulkan's 128-byte minimum guarantee.");
+
         fixed (T* p = &data)
             Vk.vkCmdPushConstants(Handle, layout.Handle, (uint)stages, offset, (uint)Unsafe.SizeOf<T>(), p);
     }

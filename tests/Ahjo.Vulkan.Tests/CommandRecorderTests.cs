@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.CompilerServices;
 using Ahjo.Vulkan.Native;
 using Xunit;
 
@@ -441,6 +442,59 @@ public sealed unsafe class CommandRecorderTests
         rec.End();
     }
 
+    [Fact]
+    public void PushConstants_64ByteStruct_PassesValidation()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver,          "No Vulkan driver on host.");
+        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer, "Validation layer not installed.");
+
+        var errors = new List<DebugMessage>();
+        using var instance = Instance.Create(new InstanceDescription
+        {
+            ApiVersion       = VulkanVersion.V1_4,
+            EnableValidation = true,
+            DebugCallback    = m =>
+            {
+                if ((m.Severity & VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0)
+                    lock (errors) errors.Add(m);
+            },
+        });
+
+        using var device = CreateGraphicsDevice(instance, out uint family);
+
+        PushConstantRange[] ranges = [PushConstantRange.For<PushBlock64>(ShaderStages.Compute)];
+        using var pipelineLayout = device.CreatePipelineLayout(new PipelineLayoutDescription
+        {
+            PushConstantRanges = ranges,
+        });
+
+        using var cmdPool   = new CommandBufferPool(device, family);
+        using var fencePool = new FencePool(device);
+        var fence = fencePool.Acquire();
+        try
+        {
+            var rec = cmdPool.Begin();
+            try
+            {
+                var pc = new PushBlock64();
+                for (int i = 0; i < 16; i++) pc[i] = (uint)(i * 7 + 1);
+                rec.PushConstants(in pipelineLayout, ShaderStages.Compute, in pc);
+
+                var queue = device.GetQueue(family, 0);
+                queue.Submit2(ref rec, in fence);
+            }
+            finally { rec.Dispose(); }
+
+            Assert.Equal(WaitState.Signaled, fence.Wait(TimeSpan.FromSeconds(5)));
+        }
+        finally { fencePool.Release(fence); }
+
+        Assert.Equal(64, Unsafe.SizeOf<PushBlock64>());
+        lock (errors)
+            Assert.True(errors.Count == 0,
+                "Validation errors recorded: " + string.Join("; ", errors.ConvertAll(e => e.Message)));
+    }
+
     private static VkClearColorValue ClearColor(float r, float g, float b, float a)
     {
         var c = new VkClearColorValue();
@@ -453,6 +507,19 @@ public sealed unsafe class CommandRecorderTests
 
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
     private struct PushBlock { public uint Count; }
+
+    // 64 bytes — exercises the largest realistic single-stage push-constants
+    // payload (Vulkan guarantees ≥ 128 across all stages combined).
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, Size = 64)]
+    private struct PushBlock64
+    {
+        private uint _w0;
+        public uint this[int i]
+        {
+            get { fixed (uint* p = &_w0) return p[i]; }
+            set { fixed (uint* p = &_w0) p[i] = value; }
+        }
+    }
 
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
     private struct FillDescriptors { public BufferDescriptorWrite Out; }
