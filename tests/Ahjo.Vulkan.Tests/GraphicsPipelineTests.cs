@@ -14,6 +14,25 @@ public sealed class GraphicsPipelineTests
         p.Dispose();
     }
 
+    /// <summary>
+    /// FromRaw produces a borrowed handle with no owning device — Dispose
+    /// must short-circuit instead of calling vkDestroyPipeline with a null
+    /// device handle (which would crash on every loader). Use a plausible
+    /// non-null pointer so the IsNull short-circuit doesn't mask the
+    /// DeviceHandle check.
+    /// </summary>
+    [Fact]
+    public void FromRaw_Dispose_NoOpEvenWithNonNullHandle()
+    {
+        GraphicsPipeline gp = GraphicsPipeline.FromRaw(unchecked((nint)0xDEADBEEF));
+        Assert.False(gp.IsNull);
+        gp.Dispose();
+
+        ComputePipeline cp = ComputePipeline.FromRaw(unchecked((nint)0xDEADBEEF));
+        Assert.False(cp.IsNull);
+        cp.Dispose();
+    }
+
     [Fact]
     public void Builder_MissingStages_Throws()
     {

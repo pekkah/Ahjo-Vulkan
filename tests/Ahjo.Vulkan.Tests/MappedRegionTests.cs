@@ -135,6 +135,36 @@ public sealed class MappedRegionTests
         Assert.Throws<InvalidOperationException>(() => buffer.AsSpan<float>());
     }
 
+    /// <summary>
+    /// Pin previously rejected only indices strictly greater than the
+    /// length, allowing <c>elementIndex == _length</c> to produce a
+    /// one-past-the-end pointer the caller could legally dereference
+    /// through <c>MemoryHandle.Pointer</c>. Tighten the bound to reject
+    /// the boundary case too.
+    /// </summary>
+    [Fact]
+    public void Pin_AtLength_Throws()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+
+        using var buffer = device.Allocator.CreateBuffer(
+            new BufferDescription { Size = 1024, Usage = BufferUsage.TransferSrc },
+            new AllocationDescription
+            {
+                Usage = MemoryUsage.AutoPreferHost,
+                Flags = AllocationFlags.HostAccessSequentialWrite | AllocationFlags.Mapped,
+            });
+
+        using var region = buffer.Map<int>();
+        int length = region.GetSpan().Length;
+        Assert.Throws<ArgumentOutOfRangeException>(() => region.Pin(length));
+        // One inside the end is still valid.
+        using var pin = region.Pin(length - 1);
+    }
+
     [Fact]
     public void Map_MemoryProperty_RoundtripsThroughAsyncBoundary()
     {

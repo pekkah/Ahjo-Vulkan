@@ -51,7 +51,11 @@ public sealed unsafe class MappedRegion<T> : MemoryManager<T>
 
     public override MemoryHandle Pin(int elementIndex = 0)
     {
-        if ((uint)elementIndex > (uint)_length)
+        // Pin must hand out a pointer to a valid element. _length is the
+        // count of T's, so any index >= _length is past the end — even
+        // _length itself, which would yield a one-past-the-end pointer
+        // that the caller could legally dereference through MemoryHandle.
+        if ((uint)elementIndex >= (uint)_length)
             throw new ArgumentOutOfRangeException(nameof(elementIndex));
         return new MemoryHandle((T*)_data + elementIndex, default, this);
     }
@@ -61,7 +65,13 @@ public sealed unsafe class MappedRegion<T> : MemoryManager<T>
     protected override void Dispose(bool disposing)
     {
         if (_data == null) return;
-        if (!_persistent)
+        // Finalizer-driven path: the owning Allocator may already have been
+        // destroyed (it has its own finalizer with non-deterministic order).
+        // Calling vmaUnmapMemory on a destroyed allocator is undefined; the
+        // best we can do is null the pointer and let the missed unmap leak
+        // for the rest of the process. Only the explicit Dispose() path
+        // (disposing == true) is allowed to touch the allocator.
+        if (disposing && !_persistent)
             VmaApi.vmaUnmapMemory(_allocator, _allocation);
         _data = null;
     }

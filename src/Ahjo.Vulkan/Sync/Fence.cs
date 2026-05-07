@@ -56,7 +56,11 @@ public readonly unsafe struct Fence : IVulkanHandle<Fence>
     /// <summary>
     /// Blocks until the fence is signaled or <paramref name="timeout"/>
     /// elapses. Pass <see cref="Timeout.InfiniteTimeSpan"/> (or any
-    /// negative span) to wait forever.
+    /// negative span) to wait forever; pass <see cref="TimeSpan.Zero"/>
+    /// to poll (returns <see cref="WaitState.Timeout"/> immediately if
+    /// not yet signaled, matching <c>vkWaitForFences</c>'s 0-ns poll
+    /// semantics — use <see cref="IsSignaled"/> when polling intent
+    /// should be self-documenting).
     /// </summary>
     public WaitState Wait(TimeSpan timeout)
     {

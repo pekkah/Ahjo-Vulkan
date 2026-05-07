@@ -17,6 +17,20 @@ namespace Ahjo.Vulkan;
 /// or three lines: <c>TRIANGLE_LIST</c> topology, fill polygon, no
 /// culling, CCW front-face, depth disabled, single opaque color blend
 /// per color attachment, dynamic viewport + scissor.</para>
+/// <para><b>Aliasing.</b> Each <c>WithX</c> returns the builder by
+/// value, so an aliased reference (<c>var b1 = builder.WithA(...);
+/// builder.WithB(...);</c>) yields two independent copies that diverge
+/// silently — the captured span fields (<see cref="WithVertexInput"/>,
+/// <see cref="WithDynamicRendering"/>, <see cref="WithColorBlend"/>,
+/// <see cref="WithDynamicState"/>) point at the original caller's
+/// memory and don't crash, but the second builder won't see the first's
+/// edits and vice versa. The intended pattern is a single chained
+/// expression <c>builder.WithA(...).WithB(...).Build()</c>; do not
+/// stash intermediate copies. (<c>ref this</c> returns would prevent
+/// the divergence, but with C# 14's ref-safety analysis the captured
+/// stack-bound spans become non-escapable through an
+/// <c>[UnscopedRef]</c> return and the chain stops compiling at the
+/// span-passing call site.)</para>
 /// </remarks>
 public unsafe ref struct GraphicsPipelineBuilder
 {

@@ -58,7 +58,12 @@ public readonly unsafe struct TimelineSemaphore : IVulkanHandle<TimelineSemaphor
     /// Blocks the calling thread until the counter reaches at least
     /// <paramref name="value"/> or <paramref name="timeout"/> elapses.
     /// Pass <see cref="Timeout.InfiniteTimeSpan"/> (or any negative span)
-    /// to wait forever.
+    /// to wait forever; pass <see cref="TimeSpan.Zero"/> to poll (returns
+    /// <see cref="WaitState.Timeout"/> immediately if the counter has
+    /// not yet reached <paramref name="value"/>, matching
+    /// <c>vkWaitSemaphores</c>'s 0-ns poll semantics — read
+    /// <see cref="Value"/> directly when polling intent should be
+    /// self-documenting).
     /// </summary>
     public WaitState WaitFor(ulong value, TimeSpan timeout)
     {
