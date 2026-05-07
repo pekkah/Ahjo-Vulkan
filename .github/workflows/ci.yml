@@ -18,7 +18,7 @@ env:
   # SwiftShader has no tagged releases; pin a commit hash. Bump by hand
   # after a local CI run confirms the new revision builds + passes the
   # driver-gated test subset.
-  SWIFTSHADER_COMMIT: "b18d31cc4d57e4ea9fbd91c7dd1ae93b85f5f6bb"
+  SWIFTSHADER_COMMIT: "f9d5d49a3c599a315e3493dc1e9b5309cffb3305"
 
 jobs:
   build-test:
