@@ -13,7 +13,7 @@ namespace Ahjo.Vulkan;
 ///   <item><description><c>readonly struct</c> holding one (or two, for VMA-backed
 ///     resources) raw handles — pointer-typedef'd <c>Vk*_T*</c> for buffers,
 ///     images, and other dispatchable/non-dispatchable handles, plus an
-///     optional VMA <see cref="Allocation"/>.</description></item>
+///     optional <c>VmaAllocation_T*</c> for VMA-backed resources.</description></item>
 ///   <item><description><c>default(T)</c> is a legal null handle. <see cref="IsNull"/>
 ///     returns <see langword="true"/> for it; passing a null handle to
 ///     destroy/free APIs is a no-op per Vulkan spec.</description></item>
