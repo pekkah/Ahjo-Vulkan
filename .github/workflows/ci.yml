@@ -69,3 +69,12 @@ jobs:
 
       - name: Test — Ahjo.Vulkan.Tests
         run: dotnet test tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj -c Release --no-build --nologo --logger "console;verbosity=detailed" --blame-hang --blame-hang-timeout 60s --blame-crash
+
+      - name: Upload test crash artifacts
+        if: failure() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-crash-${{ matrix.os }}
+          path: tests/Ahjo.Vulkan.Tests/TestResults/
+          if-no-files-found: ignore
+          retention-days: 7
