@@ -118,7 +118,14 @@ public unsafe ref struct CommandRecorder : IDisposable
         ReadOnlySpan<uint>     dynamicOffsets = default)
     {
         if (sets.IsEmpty) return;
-        Span<nint> raw = stackalloc nint[sets.Length];
+        // Vulkan's maxBoundDescriptorSets is at least 4 by spec and 32 on
+        // typical desktop drivers. The stack-vs-heap threshold below
+        // covers every real GPU; falls back to the heap on the
+        // pathological "I'm passing 1024 sets" path so the wrapper can't
+        // overflow the recording thread's stack.
+        Span<nint> raw = sets.Length <= 32
+            ? stackalloc nint[sets.Length]
+            : new nint[sets.Length];
         for (int i = 0; i < sets.Length; i++) raw[i] = (nint)sets[i].Handle;
 
         fixed (nint* pSets    = raw)
@@ -166,11 +173,25 @@ public unsafe ref struct CommandRecorder : IDisposable
                 "offsets must have the same length as buffers (or be empty to default to all-zero offsets).",
                 nameof(offsets));
 
-        Span<nint> rawBuffers = stackalloc nint[buffers.Length];
+        // maxVertexInputBindings is at least 16 by spec and 32 on typical
+        // desktop drivers; mirror the BindDescriptorSets threshold so the
+        // wrapper can't be coerced into a stack overflow by an oversized
+        // caller span.
+        Span<nint> rawBuffers = buffers.Length <= 32
+            ? stackalloc nint[buffers.Length]
+            : new nint[buffers.Length];
         for (int i = 0; i < buffers.Length; i++)
             rawBuffers[i] = (nint)buffers[i].Handle;
 
-        Span<ulong>         zero       = stackalloc ulong[offsets.IsEmpty ? buffers.Length : 0];
+        // Single-expression init keeps the stackalloc at method scope so
+        // the C# ref-safety analysis accepts it; the heap-fallback path
+        // only triggers when offsets is empty AND the caller passed more
+        // than 32 buffers, which is far outside any real-world bind set.
+        Span<ulong> zero = !offsets.IsEmpty
+            ? default
+            : (buffers.Length <= 32
+                ? stackalloc ulong[buffers.Length]
+                : (Span<ulong>)new ulong[buffers.Length]);
         ReadOnlySpan<ulong> useOffsets = offsets.IsEmpty ? zero : offsets;
 
         fixed (nint*  pBuffers = rawBuffers)
@@ -292,10 +313,8 @@ public unsafe ref struct CommandRecorder : IDisposable
 
     /// <summary>Single image-barrier convenience overload.</summary>
     public void PipelineBarrier(in ImageBarrier image)
-    {
-        ImageBarrier copy = image;
-        PipelineBarrier(default, default, MemoryMarshal.CreateReadOnlySpan(ref copy, 1));
-    }
+        => PipelineBarrier(default, default,
+            MemoryMarshal.CreateReadOnlySpan(ref Unsafe.AsRef(in image), 1));
 
     // ---- Copy / blit / clear / fill (copy_commands2 path) ----
 
@@ -326,6 +345,16 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <summary>Whole-buffer copy from <paramref name="src"/> offset 0 → <paramref name="dst"/> offset 0.</summary>
     public void CopyBuffer(in Buffer src, in Buffer dst)
     {
+        // Whole-buffer overload writes src.Size bytes into dst at offset 0.
+        // Without this guard a smaller dst would either trip Vulkan
+        // validation (best case) or silently overrun another allocation
+        // backing the same VkDeviceMemory range. The multi-region overload
+        // is the right tool for partial copies — point callers at it.
+        if (dst.Size < src.Size)
+            throw new ArgumentException(
+                $"CopyBuffer whole-buffer overload requires dst.Size ({dst.Size}) >= src.Size ({src.Size}). " +
+                "Use the multi-region overload with explicit BufferCopyRegion bounds for a partial copy.",
+                nameof(dst));
         BufferCopyRegion r = BufferCopyRegion.Of(size: src.Size);
         CopyBuffer(in src, in dst, r);
     }
@@ -485,16 +514,28 @@ public unsafe ref struct CommandRecorder : IDisposable
     }
 
     /// <summary>
-    /// Whole-image depth (and optionally stencil) clear. Pass
-    /// <c>VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT</c>
-    /// for combined formats.
+    /// Whole-image depth (and optionally stencil) clear. When
+    /// <paramref name="aspect"/> is <c>VK_IMAGE_ASPECT_NONE</c> (the
+    /// default), the wrapper infers it from <paramref name="image"/>'s
+    /// format: depth-only formats clear depth, stencil-only formats clear
+    /// stencil, combined formats (D24_UNORM_S8_UINT etc.) clear both.
+    /// Pass an explicit aspect mask to override — e.g. clear only depth on
+    /// a combined format.
     /// </summary>
     public void ClearDepthStencilImage(
         in Image                    image,
         VkImageLayout               layout,
         in VkClearDepthStencilValue depthStencil,
-        VkImageAspectFlagBits       aspect = VkImageAspectFlagBits.VK_IMAGE_ASPECT_DEPTH_BIT)
+        VkImageAspectFlagBits       aspect = VkImageAspectFlagBits.VK_IMAGE_ASPECT_NONE)
     {
+        // The previous default of VK_IMAGE_ASPECT_DEPTH_BIT only would
+        // silently miss the stencil plane on combined formats and trip
+        // VUID-vkCmdClearDepthStencilImage-image-02825. Infer from format
+        // so the dominant case (clear everything the format carries)
+        // works without the caller doing format gymnastics.
+        if (aspect == VkImageAspectFlagBits.VK_IMAGE_ASPECT_NONE)
+            aspect = InferDepthStencilAspect(image.Format);
+
         var range = new VkImageSubresourceRange
         {
             aspectMask     = (uint)aspect,
@@ -503,6 +544,20 @@ public unsafe ref struct CommandRecorder : IDisposable
         };
         ClearDepthStencilImage(in image, layout, in depthStencil, MemoryMarshal.CreateReadOnlySpan(ref range, 1));
     }
+
+    private static VkImageAspectFlagBits InferDepthStencilAspect(VkFormat format) => format switch
+    {
+        VkFormat.VK_FORMAT_S8_UINT => VkImageAspectFlagBits.VK_IMAGE_ASPECT_STENCIL_BIT,
+        VkFormat.VK_FORMAT_D16_UNORM_S8_UINT
+            or VkFormat.VK_FORMAT_D24_UNORM_S8_UINT
+            or VkFormat.VK_FORMAT_D32_SFLOAT_S8_UINT
+            => VkImageAspectFlagBits.VK_IMAGE_ASPECT_DEPTH_BIT
+             | VkImageAspectFlagBits.VK_IMAGE_ASPECT_STENCIL_BIT,
+        // D16, D32_SFLOAT, X8_D24 — depth-only. Also catches non-depth
+        // formats; the caller will hit Vulkan validation with a clearer
+        // message than aspect=0 would have produced.
+        _ => VkImageAspectFlagBits.VK_IMAGE_ASPECT_DEPTH_BIT,
+    };
 
     // ---- Dynamic rendering ----
 

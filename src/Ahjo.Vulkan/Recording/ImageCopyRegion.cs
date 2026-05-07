@@ -52,7 +52,10 @@ public readonly record struct ImageCopyRegion
         sType          = VkStructureType.VK_STRUCTURE_TYPE_IMAGE_COPY_2,
         srcSubresource = new VkImageSubresourceLayers
         {
-            aspectMask     = (uint)SrcAspect,
+            // See ImageBarrier.ToNative — record-zero-init aspect=0 lands
+            // as a VUID reject; default to COLOR to match WholeImage and
+            // give object-initializer callers the dominant case.
+            aspectMask     = SrcAspect == 0 ? (uint)VkImageAspectFlagBits.VK_IMAGE_ASPECT_COLOR_BIT : (uint)SrcAspect,
             mipLevel       = SrcMipLevel,
             baseArrayLayer = SrcBaseArrayLayer,
             layerCount     = SrcLayerCount == 0 ? 1u : SrcLayerCount,
@@ -60,7 +63,7 @@ public readonly record struct ImageCopyRegion
         srcOffset      = SrcOffset,
         dstSubresource = new VkImageSubresourceLayers
         {
-            aspectMask     = (uint)DstAspect,
+            aspectMask     = DstAspect == 0 ? (uint)VkImageAspectFlagBits.VK_IMAGE_ASPECT_COLOR_BIT : (uint)DstAspect,
             mipLevel       = DstMipLevel,
             baseArrayLayer = DstBaseArrayLayer,
             layerCount     = DstLayerCount == 0 ? 1u : DstLayerCount,

@@ -34,6 +34,8 @@ namespace Ahjo.Vulkan;
 /// </remarks>
 public unsafe ref struct GraphicsPipelineBuilder
 {
+    private const int MaxStages = 5;
+
     private readonly Device _device;
 
     // Stages. vert + frag are required; geom + tessControl + tessEval are optional.
@@ -380,8 +382,13 @@ public unsafe ref struct GraphicsPipelineBuilder
         fixed (VkDynamicState*                     pDyn      = dynamicStates)
         {
             // Up to five stages: vert, frag, optional geom, optional tess
-            // control + tess eval. Built inline; size is bounded.
-            var stages = stackalloc VkPipelineShaderStageCreateInfo[5];
+            // control + tess eval. Built inline; size is bounded by the
+            // wrapper's currently-supported stage set. Mesh + task shaders
+            // are not wired through the builder yet; raise MaxStages when
+            // they land (the count would become 7 = vert+frag+geom+
+            // tessC+tessE+task+mesh, but only one of {classic, mesh} can
+            // be used at a time so the actual ceiling stays at 5).
+            var stages = stackalloc VkPipelineShaderStageCreateInfo[MaxStages];
             uint stageCount = 0;
             stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_VERTEX_BIT,   _vert, pVertEntry);
             stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_FRAGMENT_BIT, _frag, pFragEntry);

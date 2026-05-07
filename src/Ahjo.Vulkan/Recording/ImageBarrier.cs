@@ -163,7 +163,14 @@ public unsafe readonly record struct ImageBarrier
         image               = (VkImage_T*)Image,
         subresourceRange    = new VkImageSubresourceRange
         {
-            aspectMask     = (uint)Aspect,
+            // Aspect=0 from a record-zero-init slips through Vulkan
+            // validation as VUID-VkImageSubresourceRange-aspectMask-requiredbitmask.
+            // Default to COLOR (matching the Transition/Release/Acquire
+            // factories) so an object-initializer caller who forgot the
+            // field gets the dominant case rather than a driver reject.
+            // Depth/stencil callers must set Aspect explicitly — the
+            // factories already do.
+            aspectMask     = Aspect == 0 ? (uint)VkImageAspectFlagBits.VK_IMAGE_ASPECT_COLOR_BIT : (uint)Aspect,
             baseMipLevel   = BaseMipLevel,
             levelCount     = LevelCount == 0 ? 1u : LevelCount,
             baseArrayLayer = BaseArrayLayer,
