@@ -283,6 +283,21 @@ public unsafe ref struct GraphicsPipelineBuilder
         if (_layout == null) throw new InvalidOperationException("GraphicsPipelineBuilder requires WithLayout.");
         if ((_tessControl == null) != (_tessEval == null))
             throw new InvalidOperationException("Tessellation requires both control + evaluation stages (WithTessellationStages).");
+        // WithColorBlend(...) is optional — when omitted every color
+        // attachment defaults to opaque. When provided, the attachment
+        // count must match the rendering color-format count exactly:
+        // the previous fall-back-to-opaque-on-mismatch loop silently
+        // dropped tail entries (caller asks for 4 blends with 2 formats
+        // → only 2 written, no warning) AND quietly produced opaque
+        // tails (1 format with 0 blends after WithColorBlend([]) → 1
+        // opaque written, but the caller's intent to disable blending
+        // entirely was discarded). Reject the mismatch here so the
+        // builder fails loud at Build instead of producing a pipeline
+        // whose blend state doesn't match what the caller asked for.
+        if (!_blendAttachments.IsEmpty && _blendAttachments.Length != _colorFormats.Length)
+            throw new InvalidOperationException(
+                $"WithColorBlend supplied {_blendAttachments.Length} attachment(s) but WithDynamicRendering declared {_colorFormats.Length} color format(s) — counts must match. " +
+                "Pass one ColorBlendAttachment per color format, or omit WithColorBlend to default every attachment to opaque.");
 
         // ---- Vertex input native arrays ----
         Span<VkVertexInputBindingDescription>   nativeBindings = stackalloc VkVertexInputBindingDescription[Math.Max(_vBindings.Length, 1)];

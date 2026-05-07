@@ -112,6 +112,94 @@ public sealed class GraphicsPipelineTests
         Assert.False(pipeline.IsNull);
     }
 
+    /// <summary>
+    /// Regression: WithColorBlend used to silently truncate to the
+    /// rendering color-format count — caller asks for 2 attachments
+    /// against a 1-color-format pipeline, the second is dropped, the
+    /// pipeline builds with wrong blend state. Build now throws so the
+    /// mismatch surfaces before vkCreateGraphicsPipelines.
+    /// </summary>
+    [Fact]
+    public void Builder_BlendAttachmentCount_MismatchedColorFormats_Throws()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
+        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+
+        using var vBlob = SpirvBlob.Load(VertSpvPath);
+        using var fBlob = SpirvBlob.Load(FragSpvPath);
+        using var vMod  = device.CreateShaderModule(vBlob.Words);
+        using var fMod  = device.CreateShaderModule(fBlob.Words);
+        using var layout = device.CreatePipelineLayout(default);
+
+        // Two blend attachments against one color format — build must reject.
+        ColorBlendAttachment[] tooManyBlends =
+        [
+            ColorBlendAttachment.Opaque,
+            ColorBlendAttachment.AlphaBlend,
+        ];
+        ReadOnlySpan<VkFormat> oneFormat = [VkFormat.VK_FORMAT_R8G8B8A8_UNORM];
+
+        Exception? caught = null;
+        try
+        {
+            device.BuildGraphicsPipeline()
+                .WithStages(in vMod, in fMod)
+                .WithDynamicRendering(oneFormat)
+                .WithLayout(in layout)
+                .WithColorBlend(new ColorBlendDescription { Attachments = tooManyBlends })
+                .Build();
+        }
+        catch (Exception ex) { caught = ex; }
+        Assert.IsType<InvalidOperationException>(caught);
+    }
+
+    /// <summary>
+    /// Symmetric guard: WithColorBlend with one attachment against a
+    /// pipeline that declared two color formats also fails — would
+    /// previously have silently used Opaque for the second attachment,
+    /// discarding the caller's intent for that slot.
+    /// </summary>
+    [Fact]
+    public void Builder_BlendAttachmentCount_FewerThanColorFormats_Throws()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
+        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+
+        using var vBlob = SpirvBlob.Load(VertSpvPath);
+        using var fBlob = SpirvBlob.Load(FragSpvPath);
+        using var vMod  = device.CreateShaderModule(vBlob.Words);
+        using var fMod  = device.CreateShaderModule(fBlob.Words);
+        using var layout = device.CreatePipelineLayout(default);
+
+        ColorBlendAttachment[] oneBlend = [ColorBlendAttachment.AlphaBlend];
+        ReadOnlySpan<VkFormat> twoFormats =
+        [
+            VkFormat.VK_FORMAT_R8G8B8A8_UNORM,
+            VkFormat.VK_FORMAT_R8G8B8A8_UNORM,
+        ];
+
+        Exception? caught = null;
+        try
+        {
+            device.BuildGraphicsPipeline()
+                .WithStages(in vMod, in fMod)
+                .WithDynamicRendering(twoFormats)
+                .WithLayout(in layout)
+                .WithColorBlend(new ColorBlendDescription { Attachments = oneBlend })
+                .Build();
+        }
+        catch (Exception ex) { caught = ex; }
+        Assert.IsType<InvalidOperationException>(caught);
+    }
+
     [Fact]
     public void Builder_TessellationStages_RequireBoth()
     {
