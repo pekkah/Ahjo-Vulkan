@@ -25,11 +25,11 @@ target_include_directories(vma PRIVATE
     "${AHJO_VULKAN_HEADERS_DIR}"
 )
 
-# Strip the lib prefix on POSIX so the produced filenames are predictable
-# from the C# side: vma.dll / libvma.so / libvma.dylib.
+# CMake's platform defaults already produce the names the C# side expects:
+# vma.dll on Windows (no prefix), libvma.so on Linux, libvma.dylib on macOS.
+# Don't override PREFIX — setting it to "" would strip the "lib" on POSIX.
 set_target_properties(vma PROPERTIES
     OUTPUT_NAME "vma"
-    PREFIX ""
     POSITION_INDEPENDENT_CODE ON
     # VMA's headers declare its C API as extern "C" but never tag it with
     # __declspec(dllexport). Without this, the resulting DLL on Windows
