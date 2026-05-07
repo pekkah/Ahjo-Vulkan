@@ -24,32 +24,50 @@ public readonly unsafe struct PipelineLayout : IVulkanHandle<PipelineLayout>, ID
     public ulong RawHandle => (ulong)Handle;
     public bool IsNull => Handle == null;
 
-    // Push-constant ranges declared at create time, keyed by raw handle.
+    // Constraints declared at create time, keyed by raw handle.
     // PipelineLayout is a `readonly struct` constrained to `unmanaged` by
-    // IVulkanHandle, so it can't carry a managed-reference field — the
-    // ranges live in this side-table, populated by Device.CreatePipelineLayout
-    // and read by CommandRecorder.PushConstants's debug-only range-fits
-    // assertion. Layout creation/disposal is not on a hot path; the
-    // dictionary lock and the small heap allocation per layout are
-    // acceptable. FromRaw'd layouts have no entry here — the assertion
-    // gracefully no-ops in that case.
+    // IVulkanHandle, so it can't carry managed-reference fields — the
+    // declared push-constant ranges and descriptor-set-layout handles
+    // live in these side-tables, populated by Device.CreatePipelineLayout
+    // and read by CommandRecorder's debug-only assertions
+    // (PushConstants's range-fits check and BindDescriptorSets's
+    // set-layout-matches check). Layout creation/disposal is not on a
+    // hot path; the dictionary lock and the small heap allocations per
+    // layout are acceptable. FromRaw'd layouts have no entry here — the
+    // assertions gracefully no-op in that case.
     private static readonly Dictionary<nint, PushConstantRange[]> s_pushRanges = new();
-    private static readonly object s_pushRangesLock = new();
+    private static readonly Dictionary<nint, nint[]>              s_setLayouts = new();
+    private static readonly object s_metadataLock = new();
 
     internal static void RegisterPushRanges(VkPipelineLayout_T* handle, PushConstantRange[] ranges)
     {
-        lock (s_pushRangesLock) s_pushRanges[(nint)handle] = ranges;
+        lock (s_metadataLock) s_pushRanges[(nint)handle] = ranges;
     }
 
     internal static PushConstantRange[]? TryGetPushRanges(VkPipelineLayout_T* handle)
     {
-        lock (s_pushRangesLock)
+        lock (s_metadataLock)
             return s_pushRanges.TryGetValue((nint)handle, out var ranges) ? ranges : null;
     }
 
-    private static void UnregisterPushRanges(VkPipelineLayout_T* handle)
+    internal static void RegisterSetLayouts(VkPipelineLayout_T* handle, nint[] setLayoutHandles)
     {
-        lock (s_pushRangesLock) s_pushRanges.Remove((nint)handle);
+        lock (s_metadataLock) s_setLayouts[(nint)handle] = setLayoutHandles;
+    }
+
+    internal static nint[]? TryGetSetLayouts(VkPipelineLayout_T* handle)
+    {
+        lock (s_metadataLock)
+            return s_setLayouts.TryGetValue((nint)handle, out var layouts) ? layouts : null;
+    }
+
+    private static void UnregisterMetadata(VkPipelineLayout_T* handle)
+    {
+        lock (s_metadataLock)
+        {
+            s_pushRanges.Remove((nint)handle);
+            s_setLayouts.Remove((nint)handle);
+        }
     }
 
     /// <summary>
@@ -72,7 +90,7 @@ public readonly unsafe struct PipelineLayout : IVulkanHandle<PipelineLayout>, ID
     public void Dispose()
     {
         if (Handle == null) return;
-        UnregisterPushRanges(Handle);
+        UnregisterMetadata(Handle);
         Vk.vkDestroyPipelineLayout(DeviceHandle, Handle, null);
     }
 }

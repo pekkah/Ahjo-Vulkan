@@ -235,13 +235,22 @@ public sealed unsafe class Device : IDisposable
             Vk.vkCreatePipelineLayout(Handle, &ci, null, &raw).ThrowIfFailed();
         }
 
-        // Register the declared push-constant ranges on the side table
-        // PipelineLayout exposes for CommandRecorder.PushConstants's
-        // debug-only range-fits assertion. PipelineLayout is constrained
-        // to `unmanaged` by IVulkanHandle, so the ranges can't ride on
-        // the struct itself — see PipelineLayout.RegisterPushRanges.
+        // Register the declared push-constant ranges and set layouts on
+        // the side table PipelineLayout exposes for CommandRecorder's
+        // debug-only assertions (PushConstants range-fits,
+        // BindDescriptorSets layout-matches). PipelineLayout is
+        // constrained to `unmanaged` by IVulkanHandle so this metadata
+        // can't ride on the struct itself — see
+        // PipelineLayout.RegisterPushRanges / RegisterSetLayouts.
         if (!desc.PushConstantRanges.IsEmpty)
             PipelineLayout.RegisterPushRanges(raw, desc.PushConstantRanges.ToArray());
+        if (!desc.SetLayouts.IsEmpty)
+        {
+            nint[] handles = new nint[desc.SetLayouts.Length];
+            for (int i = 0; i < desc.SetLayouts.Length; i++)
+                handles[i] = (nint)desc.SetLayouts[i].Handle;
+            PipelineLayout.RegisterSetLayouts(raw, handles);
+        }
         return new PipelineLayout(raw, Handle);
     }
 

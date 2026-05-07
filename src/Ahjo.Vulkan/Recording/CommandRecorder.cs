@@ -118,6 +118,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         ReadOnlySpan<uint>     dynamicOffsets = default)
     {
         if (sets.IsEmpty) return;
+        AssertSetsMatchLayout(in layout, firstSet, sets);
         // Vulkan's maxBoundDescriptorSets is at least 4 by spec and 32 on
         // typical desktop drivers. The stack-vs-heap threshold below
         // covers every real GPU; falls back to the heap on the
@@ -135,6 +136,33 @@ public unsafe ref struct CommandRecorder : IDisposable
                 Handle, bindPoint, layout.Handle,
                 firstSet, (uint)sets.Length, (VkDescriptorSet_T**)pSets,
                 (uint)dynamicOffsets.Length, dynamicOffsets.IsEmpty ? null : pOffsets);
+        }
+    }
+
+    [Conditional("DEBUG")]
+    private static void AssertSetsMatchLayout(in PipelineLayout layout, uint firstSet, ReadOnlySpan<DescriptorSet> sets)
+    {
+        var declared = PipelineLayout.TryGetSetLayouts(layout.Handle);
+        // PipelineLayout.FromRaw / a layout built without set layouts
+        // has no entry — there's nothing to validate against. The bind
+        // still fires; the driver / validation layer is the backstop.
+        if (declared is null) return;
+
+        for (int i = 0; i < sets.Length; i++)
+        {
+            // DescriptorSet.FromRaw produces sets without a Layout —
+            // those can't be validated and should not have been routed
+            // to BindDescriptorSets in the first place. Skip rather
+            // than fail to keep FromRaw debug-name flows usable.
+            if (sets[i].Layout == null) continue;
+
+            uint slot = firstSet + (uint)i;
+            Debug.Assert(slot < declared.Length,
+                $"BindDescriptorSets: slot {slot} (firstSet={firstSet} + i={i}) is out of range; PipelineLayout declares {declared.Length} set(s).");
+
+            Debug.Assert(declared[slot] == (nint)sets[i].Layout,
+                $"BindDescriptorSets: set[{i}] was allocated against a different VkDescriptorSetLayout than slot {slot} declares on PipelineLayout. " +
+                "The pipeline layout's set layout and the bound set's source layout must match.");
         }
     }
 
