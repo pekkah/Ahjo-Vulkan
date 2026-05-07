@@ -28,6 +28,13 @@ public sealed unsafe class Instance : IDisposable
     internal readonly InstanceFunctionTable       Functions;
     private  GCHandle                    _callbackKeepAlive;
     private  bool                        _disposed;
+    // Single-writer field — populated lazily by GetOrCreatePhysicalDevice on
+    // the first call that misses the cache. Concurrent picker calls would
+    // each rebuild and overwrite the cache, breaking the "same handle =>
+    // same PhysicalDevice instance" reference-equality contract documented
+    // on PickPhysicalDevice. The wrapper does not lock — PickPhysicalDevice
+    // is a startup-time call and the contract is "one picker call at a
+    // time per Instance, or external sync."
     private  PhysicalDevice[]?           _physicalDeviceCache;
 
     private Instance(
@@ -45,6 +52,18 @@ public sealed unsafe class Instance : IDisposable
     public static Instance Create(scoped in InstanceDescription desc)
     {
         uint apiVersion = desc.ApiVersion.Packed != 0 ? desc.ApiVersion.Packed : VulkanVersion.V1_4.Packed;
+
+        // Confirm the auto-injected validation layer + debug-utils extension
+        // are actually available before vkCreateInstance, so the failure mode
+        // when the SDK isn't installed is a wrapper-level message naming the
+        // missing piece instead of a bare VK_ERROR_LAYER_NOT_PRESENT /
+        // VK_ERROR_EXTENSION_NOT_PRESENT from the loader. Costs two
+        // enumerations on the validation-on path; nothing on validation-off.
+        if (desc.EnableValidation)
+        {
+            EnsureInstanceLayerPresent(InstanceExtensionNames.KhronosValidationLayer);
+            EnsureInstanceExtensionPresent(InstanceExtensionNames.DebugUtilsExtension);
+        }
 
         Span<nint> layerPtrs = stackalloc nint[desc.Layers.Length + 1];
         int layerCount = CopyAndMaybeAppend(desc.Layers, layerPtrs,
@@ -396,6 +415,24 @@ public sealed unsafe class Instance : IDisposable
         return n;
     }
 
+    /// <summary>
+    /// Compares a NUL-terminated UTF-8 string at <paramref name="p"/>
+    /// against the (non-NUL-terminated) <paramref name="target"/> bytes.
+    /// Returns true iff the strings are equal *and* the source is exactly
+    /// <c>target.Length</c> bytes long (so a longer source whose prefix
+    /// matches returns false).
+    /// </summary>
+    /// <remarks>
+    /// Reads <paramref name="p"/>[<paramref name="target"/>.Length] to
+    /// confirm the NUL terminator. Safe only when the caller can guarantee
+    /// <paramref name="p"/> is a real C-style NUL-terminated string — the
+    /// Vulkan loader / VK_LAYER_/VK_EXT_ constants in this assembly always
+    /// are (UTF-8 string literals carry an implicit trailing NUL byte
+    /// past <c>span.Length</c>; <see cref="Utf8Name"/>'s contract enforces
+    /// that callers pass only such literals). Do not feed this function a
+    /// pointer into a byte buffer the caller authored without first
+    /// asserting NUL termination.
+    /// </remarks>
     private static bool PointerStringEquals(sbyte* p, ReadOnlySpan<byte> target)
     {
         if (p == null) return false;
@@ -404,6 +441,62 @@ public sealed unsafe class Instance : IDisposable
             if (p[i] == 0 || (byte)p[i] != target[i]) return false;
         }
         return p[target.Length] == 0;
+    }
+
+    private static void EnsureInstanceLayerPresent(ReadOnlySpan<byte> layerName)
+    {
+        uint count = 0;
+        Vk.vkEnumerateInstanceLayerProperties(&count, null).ThrowIfFailed();
+        if (count == 0)
+            throw new VulkanException(VkResult.VK_ERROR_LAYER_NOT_PRESENT,
+                $"EnableValidation = true but the loader reports no instance layers — install the Vulkan SDK validation layers, or set EnableValidation = false (looking for '{System.Text.Encoding.UTF8.GetString(layerName)}').");
+
+        var pool = ArrayPool<VkLayerProperties>.Shared;
+        var buf  = pool.Rent((int)count);
+        try
+        {
+            fixed (VkLayerProperties* p = buf)
+                Vk.vkEnumerateInstanceLayerProperties(&count, p).ThrowIfFailed();
+            for (int i = 0; i < (int)count; i++)
+            {
+                ref readonly var first = ref buf[i].layerName.e0;
+                if (PointerStringEquals(
+                        (sbyte*)Unsafe.AsPointer(ref Unsafe.AsRef(in first)), layerName))
+                    return;
+            }
+        }
+        finally { pool.Return(buf); }
+
+        throw new VulkanException(VkResult.VK_ERROR_LAYER_NOT_PRESENT,
+            $"EnableValidation = true but instance layer '{System.Text.Encoding.UTF8.GetString(layerName)}' is not installed on this host. Install the Vulkan SDK validation layers, or set EnableValidation = false.");
+    }
+
+    private static void EnsureInstanceExtensionPresent(ReadOnlySpan<byte> extensionName)
+    {
+        uint count = 0;
+        Vk.vkEnumerateInstanceExtensionProperties(null, &count, null).ThrowIfFailed();
+        if (count == 0)
+            throw new VulkanException(VkResult.VK_ERROR_EXTENSION_NOT_PRESENT,
+                $"EnableValidation = true but the loader reports no instance extensions — install the Vulkan SDK, or set EnableValidation = false (looking for '{System.Text.Encoding.UTF8.GetString(extensionName)}').");
+
+        var pool = ArrayPool<VkExtensionProperties>.Shared;
+        var buf  = pool.Rent((int)count);
+        try
+        {
+            fixed (VkExtensionProperties* p = buf)
+                Vk.vkEnumerateInstanceExtensionProperties(null, &count, p).ThrowIfFailed();
+            for (int i = 0; i < (int)count; i++)
+            {
+                ref readonly var first = ref buf[i].extensionName.e0;
+                if (PointerStringEquals(
+                        (sbyte*)Unsafe.AsPointer(ref Unsafe.AsRef(in first)), extensionName))
+                    return;
+            }
+        }
+        finally { pool.Return(buf); }
+
+        throw new VulkanException(VkResult.VK_ERROR_EXTENSION_NOT_PRESENT,
+            $"EnableValidation = true but instance extension '{System.Text.Encoding.UTF8.GetString(extensionName)}' is not advertised by the loader. Install the Vulkan SDK, or set EnableValidation = false.");
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
@@ -462,15 +555,27 @@ public sealed unsafe class Instance : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
-        _disposed = true;
-        if (Messenger != null && Functions.DestroyDebugUtilsMessenger != null)
+        try
         {
-            Functions.DestroyDebugUtilsMessenger(Handle, Messenger, null);
-            Messenger = null;
+            if (Messenger != null && Functions.DestroyDebugUtilsMessenger != null)
+            {
+                Functions.DestroyDebugUtilsMessenger(Handle, Messenger, null);
+                Messenger = null;
+            }
+            if (Handle != null) Vk.vkDestroyInstance(Handle, null);
+            if (_callbackKeepAlive.IsAllocated) _callbackKeepAlive.Free();
         }
-        if (Handle != null) Vk.vkDestroyInstance(Handle, null);
-        if (_callbackKeepAlive.IsAllocated) _callbackKeepAlive.Free();
-        GC.SuppressFinalize(this);
+        finally
+        {
+            // Set the flag and suppress the finalizer in finally so a throw
+            // out of destroy can't leave the handle alive AND have the
+            // finalizer re-enter Dispose to destroy it a second time
+            // (vkDestroyInstance on an already-destroyed handle is UB). The
+            // tradeoff is that a destroy failure leaks the handle for the
+            // rest of the process — preferable to UB.
+            _disposed = true;
+            GC.SuppressFinalize(this);
+        }
     }
 
     ~Instance()

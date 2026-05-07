@@ -240,19 +240,31 @@ public sealed unsafe class Device : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
-        _disposed = true;
-        if (Handle != null)
+        try
         {
-            // Best-effort wait-idle before destroy; Dispose mustn't throw on
-            // the success path. A failing wait-idle (lost device, OOM)
-            // already implies the device is going away — destroy still runs.
-            Vk.vkDeviceWaitIdle(Handle);
-            // Allocator must die before the VkDevice — vmaDestroyAllocator
-            // calls into the device's function table.
-            if (_allocatorCreated) _allocator.Dispose();
-            Vk.vkDestroyDevice(Handle, null);
+            if (Handle != null)
+            {
+                // Best-effort wait-idle before destroy; Dispose mustn't throw on
+                // the success path. A failing wait-idle (lost device, OOM)
+                // already implies the device is going away — destroy still runs.
+                Vk.vkDeviceWaitIdle(Handle);
+                // Allocator must die before the VkDevice — vmaDestroyAllocator
+                // calls into the device's function table.
+                if (_allocatorCreated) _allocator.Dispose();
+                Vk.vkDestroyDevice(Handle, null);
+            }
         }
-        GC.SuppressFinalize(this);
+        finally
+        {
+            // Set the flag and suppress the finalizer in finally so a throw
+            // out of destroy can't leave the handle alive AND have the
+            // finalizer re-enter Dispose to destroy it a second time
+            // (vkDestroyDevice on an already-destroyed handle is UB). The
+            // tradeoff is that a destroy failure leaks the handle for the
+            // rest of the process — preferable to UB.
+            _disposed = true;
+            GC.SuppressFinalize(this);
+        }
     }
 
     ~Device()

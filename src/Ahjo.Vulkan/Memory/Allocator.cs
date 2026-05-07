@@ -46,34 +46,47 @@ public readonly unsafe struct Allocator : IDisposable
     {
         ArgumentNullException.ThrowIfNull(device);
 
+        // The loader handle is only needed for the GetExport calls below — VMA
+        // copies the function pointers into its internal state, and the OS
+        // keeps the DLL loaded via the wrapper's other reference (the static
+        // [DllImport] path in Ahjo.Vulkan.Native). Releasing the handle in
+        // finally keeps repeated Create/Dispose cycles (tests, benchmarks)
+        // from accumulating handles on the loader.
         nint loader = LoadVulkanLoader();
-        var functions = new VmaVulkanFunctions
+        try
         {
-            vkGetInstanceProcAddr =
-                (delegate* unmanaged[Stdcall]<VkInstance_T*, sbyte*, delegate* unmanaged[Stdcall]<void>>)
-                NativeLibrary.GetExport(loader, "vkGetInstanceProcAddr"),
-            vkGetDeviceProcAddr =
-                (delegate* unmanaged[Stdcall]<VkDevice_T*, sbyte*, delegate* unmanaged[Stdcall]<void>>)
-                NativeLibrary.GetExport(loader, "vkGetDeviceProcAddr"),
-        };
+            var functions = new VmaVulkanFunctions
+            {
+                vkGetInstanceProcAddr =
+                    (delegate* unmanaged[Stdcall]<VkInstance_T*, sbyte*, delegate* unmanaged[Stdcall]<void>>)
+                    NativeLibrary.GetExport(loader, "vkGetInstanceProcAddr"),
+                vkGetDeviceProcAddr =
+                    (delegate* unmanaged[Stdcall]<VkDevice_T*, sbyte*, delegate* unmanaged[Stdcall]<void>>)
+                    NativeLibrary.GetExport(loader, "vkGetDeviceProcAddr"),
+            };
 
-        var ci = new VmaAllocatorCreateInfo
+            var ci = new VmaAllocatorCreateInfo
+            {
+                // bufferDeviceAddress is on by default in the wrapper's 1.4 device
+                // feature chain (PhysicalDevice.CreateDevice). VMA needs this flag
+                // to allocate buffers carrying VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+                // without it, vmaCreateBuffer returns VK_ERROR_INITIALIZATION_FAILED.
+                flags            = (uint)VmaAllocatorCreateFlagBits.VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
+                physicalDevice   = device.PhysicalDevice.Handle,
+                device           = device.Handle,
+                instance         = device.PhysicalDevice.Instance.Handle,
+                pVulkanFunctions = &functions,
+                vulkanApiVersion = VulkanVersion.V1_4.Packed,
+            };
+
+            VmaAllocator_T* raw = null;
+            VmaApi.vmaCreateAllocator(&ci, &raw).ThrowIfFailed();
+            return new Allocator(raw);
+        }
+        finally
         {
-            // bufferDeviceAddress is on by default in the wrapper's 1.4 device
-            // feature chain (PhysicalDevice.CreateDevice). VMA needs this flag
-            // to allocate buffers carrying VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-            // without it, vmaCreateBuffer returns VK_ERROR_INITIALIZATION_FAILED.
-            flags            = (uint)VmaAllocatorCreateFlagBits.VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
-            physicalDevice   = device.PhysicalDevice.Handle,
-            device           = device.Handle,
-            instance         = device.PhysicalDevice.Instance.Handle,
-            pVulkanFunctions = &functions,
-            vulkanApiVersion = VulkanVersion.V1_4.Packed,
-        };
-
-        VmaAllocator_T* raw = null;
-        VmaApi.vmaCreateAllocator(&ci, &raw).ThrowIfFailed();
-        return new Allocator(raw);
+            NativeLibrary.Free(loader);
+        }
     }
 
     /// <summary>
