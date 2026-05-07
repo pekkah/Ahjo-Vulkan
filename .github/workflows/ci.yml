@@ -77,7 +77,7 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ env.VULKAN_SDK_VERSION }}"
-          $url = "https://sdk.lunarg.com/sdk/download/$ver/windows/VulkanSDK-$ver-Installer.exe"
+          $url = "https://sdk.lunarg.com/sdk/download/$ver/windows/vulkansdk-windows-X64-$ver.exe"
           $exe = Join-Path $env:RUNNER_TEMP "VulkanSDK.exe"
           Write-Host "Downloading $url"
           Invoke-WebRequest -Uri $url -OutFile $exe
