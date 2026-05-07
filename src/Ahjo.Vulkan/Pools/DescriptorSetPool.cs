@@ -4,13 +4,35 @@ using Ahjo.Vulkan.Native;
 namespace Ahjo.Vulkan;
 
 /// <summary>
-/// Wraps a <c>VkDescriptorPool</c> with per-layout free-lists so per-frame
-/// descriptor-set allocation stays O(1) and allocation-free after warmup.
-/// One pool per <c>(thread × use case)</c> per Vulkan's external-sync
-/// rules: a single <see cref="DescriptorSetPool"/> is not safe to
-/// <see cref="Acquire"/> from multiple threads concurrently.
+/// Wraps a <c>VkDescriptorPool</c> with per-layout free-lists so
+/// descriptor-set <see cref="Acquire"/> / <see cref="Release"/> stays O(1)
+/// and allocation-free after warmup. One pool per
+/// <c>(thread × use case)</c> per Vulkan's external-sync rules: a single
+/// <see cref="DescriptorSetPool"/> is not safe to <see cref="Acquire"/>
+/// from multiple threads concurrently.
 /// </summary>
 /// <remarks>
+/// <para><b>Lifetime contract.</b> The pool itself is policy-free — the
+/// caller decides whether the <c>VkDescriptorSet</c>s it hands out live
+/// for one frame, one scene, or the whole app. The wrapper drives the
+/// pool both ways:</para>
+/// <list type="bullet">
+///   <item><description><b>Per-frame slot</b> (the
+///     <see cref="FrameRing"/> path): the ring constructs one pool per
+///     in-flight slot and calls <see cref="Reset"/> on every
+///     <see cref="FrameRing.BeginFrame"/>. Sets returned by
+///     <see cref="FrameContext.DescriptorSets"/> are valid for exactly
+///     one frame; retaining a handle across the next BeginFrame is a
+///     use-after-free.</description></item>
+///   <item><description><b>Long-lived</b> (texture arrays, bindless
+///     resource tables, material descriptors): construct the pool
+///     directly, never call <see cref="Reset"/>, and either keep the
+///     sets for the whole app or return individual sets through
+///     <see cref="Release"/>. Per-frame uniform/storage descriptors
+///     should usually flow through
+///     <c>CommandRecorder.PushDescriptors</c> instead — that path
+///     never allocates a <c>VkDescriptorSet</c>.</description></item>
+/// </list>
 /// <para><b>Reuse semantics.</b> <see cref="Release"/> does not call
 /// <c>vkFreeDescriptorSets</c> — the underlying <c>VkDescriptorSet</c>
 /// stays alive and re-enters the layout-keyed free-list, ready for the
@@ -19,10 +41,6 @@ namespace Ahjo.Vulkan;
 /// re-use). <see cref="Reset"/> calls <c>vkResetDescriptorPool</c> and
 /// invalidates every set the pool ever handed out — use it to wipe the
 /// per-frame table in one cheap call.</para>
-/// <para>The pool is for long-lived descriptor sets (texture arrays,
-/// bindless resource tables). Per-frame uniform/storage descriptors
-/// flow through <c>CommandRecorder.PushDescriptors</c> when that lands
-/// (#17 follow-up) and never allocate a <c>VkDescriptorSet</c> at all.</para>
 /// </remarks>
 public sealed unsafe class DescriptorSetPool : IDisposable
 {
