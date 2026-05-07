@@ -34,6 +34,17 @@ public readonly unsafe struct Buffer : IVulkanHandle<Buffer>, IDisposable
     public readonly bool             IsHostVisible;
 
     /// <summary>
+    /// <see langword="true"/> when the backing memory carries
+    /// <c>VK_MEMORY_PROPERTY_HOST_COHERENT_BIT</c>. Coherent allocations
+    /// don't need <see cref="Flush"/>/<see cref="Invalidate"/> bracketing
+    /// around host reads/writes; non-coherent allocations (typical on
+    /// mobile/UMA targets and some BAR setups) do. The Flush/Invalidate
+    /// helpers short-circuit when this is <see langword="true"/>, so it's
+    /// safe to call them unconditionally.
+    /// </summary>
+    public readonly bool IsHostCoherent;
+
+    /// <summary>
     /// Persistent mapped pointer when the buffer was allocated with
     /// <see cref="AllocationFlags.Mapped"/>; <see langword="null"/> otherwise.
     /// Lets <see cref="AsSpan{T}"/> and <see cref="Map{T}"/> skip the
@@ -48,6 +59,7 @@ public readonly unsafe struct Buffer : IVulkanHandle<Buffer>, IDisposable
         ulong            size,
         BufferUsage      usage,
         bool             isHostVisible,
+        bool             isHostCoherent,
         void*            persistentMapped)
     {
         Handle           = handle;
@@ -56,13 +68,14 @@ public readonly unsafe struct Buffer : IVulkanHandle<Buffer>, IDisposable
         Size             = size;
         Usage            = usage;
         IsHostVisible    = isHostVisible;
+        IsHostCoherent   = isHostCoherent;
         PersistentMapped = persistentMapped;
     }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_BUFFER;
 
     public static Buffer FromRaw(nint handle) =>
-        new((VkBuffer_T*)handle, null, default, 0, BufferUsage.None, false, null);
+        new((VkBuffer_T*)handle, null, default, 0, BufferUsage.None, false, false, null);
 
     public ulong RawHandle => (ulong)Handle;
 
@@ -120,6 +133,32 @@ public readonly unsafe struct Buffer : IVulkanHandle<Buffer>, IDisposable
         void* data = null;
         VmaApi.vmaMapMemory(Owner.Handle, AllocationHandle, &data).ThrowIfFailed();
         return new MappedRegion<T>(Owner.Handle, AllocationHandle, data, length, persistent: false);
+    }
+
+    /// <summary>
+    /// Pushes prior host writes to GPU-visible memory by wrapping
+    /// <c>vmaFlushAllocation</c>. No-op on <see cref="IsHostCoherent"/>
+    /// allocations (the spec guarantees coherent writes are visible
+    /// without explicit flushing). The default <paramref name="size"/>
+    /// of <c>UInt64.MaxValue</c> maps to <c>VK_WHOLE_SIZE</c> — flush
+    /// from <paramref name="offset"/> to the end of the allocation.
+    /// </summary>
+    public void Flush(ulong offset = 0, ulong size = ulong.MaxValue)
+    {
+        if (Handle == null || IsHostCoherent) return;
+        VmaApi.vmaFlushAllocation(Owner.Handle, AllocationHandle, offset, size).ThrowIfFailed();
+    }
+
+    /// <summary>
+    /// Pulls prior GPU writes into host-visible memory by wrapping
+    /// <c>vmaInvalidateAllocation</c>. Symmetrical counterpart to
+    /// <see cref="Flush"/>; same coherent-skip and
+    /// <c>VK_WHOLE_SIZE</c> defaulting rules.
+    /// </summary>
+    public void Invalidate(ulong offset = 0, ulong size = ulong.MaxValue)
+    {
+        if (Handle == null || IsHostCoherent) return;
+        VmaApi.vmaInvalidateAllocation(Owner.Handle, AllocationHandle, offset, size).ThrowIfFailed();
     }
 
     public void Dispose()

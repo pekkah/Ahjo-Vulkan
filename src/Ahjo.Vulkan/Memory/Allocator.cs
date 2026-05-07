@@ -101,14 +101,23 @@ public readonly unsafe struct Allocator : IDisposable
 
         uint memProps = 0;
         VmaApi.vmaGetAllocationMemoryProperties(Handle, rawAlloc, &memProps);
-        bool hostVisible = (memProps & (uint)VkMemoryPropertyFlagBits.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0;
+        bool hostVisible  = (memProps & (uint)VkMemoryPropertyFlagBits.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)  != 0;
+        // HOST_COHERENT decides whether host writes/reads need an explicit
+        // vmaFlushAllocation/vmaInvalidateAllocation around the mapped span.
+        // On most desktop discrete GPUs HOST_VISIBLE memory is also coherent
+        // and the calls are no-ops; mobile/UMA targets and certain BAR-only
+        // setups expose host-visible memory without coherency, where missing
+        // flushes silently corrupt GPU reads of fresh CPU writes (and vice
+        // versa). Buffer carries the bit so callers can branch and the
+        // Flush/Invalidate helpers can skip the syscall when unnecessary.
+        bool hostCoherent = (memProps & (uint)VkMemoryPropertyFlagBits.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
 
         // VMA returns pMappedData != null when the allocation was created
         // with VMA_ALLOCATION_CREATE_MAPPED_BIT (our AllocationFlags.Mapped),
         // even for AUTO_PREFER_DEVICE allocations that landed on a non-host
         // memory type (in which case it stays null). The buffer caches it
         // so AsSpan/Map can skip vmaMapMemory in the persistent-mapped case.
-        return new Buffer(rawBuffer, rawAlloc, this, buffer.Size, buffer.Usage, hostVisible, info.pMappedData);
+        return new Buffer(rawBuffer, rawAlloc, this, buffer.Size, buffer.Usage, hostVisible, hostCoherent, info.pMappedData);
     }
 
     /// <summary>

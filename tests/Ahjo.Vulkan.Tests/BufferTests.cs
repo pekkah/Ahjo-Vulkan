@@ -35,6 +35,51 @@ public sealed class BufferTests
         Assert.True(buffer.IsHostVisible);
     }
 
+    /// <summary>
+    /// Flush/Invalidate are spec-no-ops on host-coherent allocations and the
+    /// wrapper short-circuits before reaching VMA. On platforms that expose
+    /// non-coherent host memory (mobile/UMA, some BAR setups) the calls
+    /// reach <c>vmaFlushAllocation</c>/<c>vmaInvalidateAllocation</c> and
+    /// must succeed for a freshly-mapped, fully-in-bounds region. Either
+    /// way the bracket has to be safe — assert IsHostCoherent is observable
+    /// and that both calls return without throwing.
+    /// </summary>
+    [Fact]
+    public void Flush_Invalidate_RoundTripOnHostVisibleBuffer()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device = CreateGraphicsDevice(instance, out _);
+
+        using var buffer = device.Allocator.CreateBuffer(
+            new BufferDescription { Size = 4096, Usage = BufferUsage.TransferSrc },
+            new AllocationDescription
+            {
+                Usage = MemoryUsage.AutoPreferHost,
+                Flags = AllocationFlags.HostAccessSequentialWrite | AllocationFlags.Mapped,
+            });
+
+        Assert.True(buffer.IsHostVisible);
+        // IsHostCoherent is platform-dependent — most desktops report
+        // coherent here, but the test only verifies the field is readable
+        // and the helpers tolerate both branches.
+        _ = buffer.IsHostCoherent;
+
+        buffer.Flush();
+        buffer.Invalidate();
+        buffer.Flush(offset: 0, size: 1024);
+        buffer.Invalidate(offset: 0, size: 1024);
+    }
+
+    [Fact]
+    public void Flush_OnNullBuffer_NoThrow()
+    {
+        Buffer b = default;
+        b.Flush();
+        b.Invalidate();
+    }
+
     [Fact]
     public void GetDeviceAddress_ReturnsNonZero_WhenShaderDeviceAddressUsageSet()
     {
