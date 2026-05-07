@@ -291,6 +291,101 @@ public sealed unsafe class FrameRingTests
         using (new FrameRing(device, framesInFlight: 2, queueFamily: family)) { }
     }
 
+    /// <summary>
+    /// Regression: a slot whose BeginFrame ran but whose Submit did
+    /// not (caller bailed out before the queue submit) used to leave
+    /// the slot's fence reset-and-unsignaled while a sticky
+    /// "ever submitted" flag still asked Slot.Dispose to wait for it.
+    /// That hung Dispose forever; with the pending-submit tracking it
+    /// must complete in bounded time.
+    /// </summary>
+    [Fact]
+    public void Dispose_AfterBeginFrameWithoutSubmit_DoesNotHang()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+        var       queue   = device.GetQueue(family, 0);
+
+        var ring = new FrameRing(device, framesInFlight: 2, queueFamily: family);
+
+        // First slot: real submit, so the ring sees a "this slot has
+        // pending GPU work" path at least once.
+        {
+            using var frame = ring.BeginFrame();
+            var rec = frame.CommandBuffers.Begin();
+            try { frame.Submit(queue, ref rec); }
+            finally { rec.Dispose(); }
+        }
+
+        // Second slot: BeginFrame runs WaitAndReset and resets the
+        // fence to unsignaled, but the caller never submits. Without
+        // the fix, ring.Dispose below waits on this fence forever.
+        {
+            using var frame = ring.BeginFrame();
+            // intentional: no submit, no record
+        }
+
+        // Third BeginFrame (rotates back to slot 0 whose submit IS
+        // pending) — proves we don't deadlock just by re-entering.
+        // After this, slot 0's pending flag is cleared (WaitAndReset
+        // ran), and the slot whose pending flag is still false stays
+        // false on Dispose.
+        {
+            using var frame = ring.BeginFrame();
+            // intentional: no submit
+        }
+
+        // Bounded teardown: must finish quickly even though no slot
+        // has pending GPU work at this point. If it hangs the test
+        // host kills it, but to surface a clearer message also assert
+        // it stays under a generous wall-clock bound.
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        ring.Dispose();
+        sw.Stop();
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2),
+            $"FrameRing.Dispose hung: {sw.Elapsed} elapsed (expected near-zero — no pending GPU work).");
+    }
+
+    /// <summary>
+    /// Regression: an unsignaled fence returned to FencePool by an
+    /// aborted-frame slot used to be handed straight back out of
+    /// <c>Acquire(initiallySignaled: true)</c>, deadlocking the next
+    /// caller. The pool now routes by current state and grows when the
+    /// matching free-list is empty, so a subsequent FrameRing rebuild
+    /// against the same device starts clean.
+    /// </summary>
+    [Fact]
+    public void Aborted_Frame_DoesNot_Poison_Subsequent_Ring()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+
+        // First ring: BeginFrame + bail without submitting. Slot
+        // disposal pushes an unsignaled fence back to its (slot-local)
+        // FencePool, which is then itself disposed — so this branch is
+        // really about proving Dispose doesn't hang. The cross-ring
+        // safety is structural (each Slot owns its own FencePool).
+        using (var ring = new FrameRing(device, framesInFlight: 2, queueFamily: family))
+        {
+            using var frame = ring.BeginFrame();
+            // no submit
+        }
+
+        // Second ring on the same device: must build and tear down
+        // cleanly. A poisoned device or a leaked fence handle from the
+        // first ring would surface here as either a build failure or a
+        // BeginFrame hang.
+        using (var ring = new FrameRing(device, framesInFlight: 2, queueFamily: family))
+        {
+            using var frame = ring.BeginFrame();
+            Assert.Equal(1ul, ring.FrameNumber);
+        }
+    }
+
     [Fact]
     public void Dispose_Is_Idempotent()
     {

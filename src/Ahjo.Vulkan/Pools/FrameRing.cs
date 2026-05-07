@@ -97,10 +97,13 @@ public sealed unsafe class FrameRing : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         uint slotIdx = _nextSlot;
-        _nextSlot    = (slotIdx + 1) % (uint)_slots.Length;
-
-        Slot slot = _slots[slotIdx];
+        Slot slot    = _slots[slotIdx];
+        // Wait+reset *before* advancing the index so a throw out of
+        // WaitAndReset doesn't skip past the broken slot — the next call
+        // will retry the same slot rather than silently rotating past
+        // GPU work the caller still needs to recover from.
         slot.WaitAndReset();
+        _nextSlot = (slotIdx + 1) % (uint)_slots.Length;
 
         FrameContext fc = _contexts[slotIdx];
         fc.FrameNumber = ++_frameCounter;
@@ -129,7 +132,16 @@ public sealed unsafe class FrameRing : IDisposable
         public  readonly BinarySemaphore   RenderingDone;
         public  readonly Fence             InFlightHandle;
         public  readonly DescriptorSetPool? DescriptorSets;
-        private          bool              _everSubmitted;
+        // True when the slot has been submitted-to-the-queue since its
+        // last WaitAndReset — i.e. the in-flight fence has pending GPU
+        // work that will signal it. False on a fresh slot, after
+        // WaitAndReset (fence was just reset to unsignaled), and after
+        // Dispose's terminal wait. The previous "ever submitted" flag
+        // was a different question — it stayed sticky-true after Reset,
+        // which made Dispose try to wait on a freshly-reset fence and
+        // deadlock when the user called BeginFrame without a matching
+        // Submit before tearing the ring down.
+        private          bool              _pendingSubmit;
 
         public Slot(
             Device device,
@@ -200,24 +212,26 @@ public sealed unsafe class FrameRing : IDisposable
 
         public ref readonly Fence InFlight => ref InFlightHandle;
 
-        public void MarkSubmitted() => _everSubmitted = true;
+        public void MarkSubmitted() => _pendingSubmit = true;
 
         /// <summary>
-        /// Block on the in-flight fence (skip on a slot that's never been
-        /// submitted to — though our fence is initially signaled either
-        /// way, that early-out keeps the wait stack out of profilers
-        /// during the first round through the ring), then reset the
-        /// fence and downstream per-frame pools.
+        /// Block on the in-flight fence when there is a pending submit
+        /// for it, then reset the fence and downstream per-frame pools.
+        /// On a fresh slot the fence was created signaled and there is
+        /// no pending submit, so the wait is skipped — keeping the wait
+        /// stack out of profilers during the first round through the
+        /// ring without resorting to a sticky "ever submitted" flag.
         /// </summary>
         public void WaitAndReset()
         {
-            if (_everSubmitted)
+            if (_pendingSubmit)
             {
                 if (InFlightHandle.Wait(Timeout.InfiniteTimeSpan) != WaitState.Signaled)
                     throw new VulkanException(VkResult.VK_TIMEOUT,
                         "FrameRing slot fence never signaled.");
             }
             InFlightHandle.Reset();
+            _pendingSubmit = false;
             CommandBuffers.ResetForFrame();
             Staging.Reset();
             DescriptorSets?.Reset();
@@ -228,8 +242,13 @@ public sealed unsafe class FrameRing : IDisposable
             // Block on outstanding GPU work before tearing down the pools
             // so a teardown immediately after a Submit doesn't trip
             // VK_ERROR_DEVICE_LOST or similar on the validation layer.
-            if (_everSubmitted)
+            // Critically, only wait when a submit is actually pending —
+            // a slot whose fence was reset by BeginFrame but never
+            // re-submitted has an unsignaled fence with no GPU work
+            // behind it, and waiting on it would hang Dispose forever.
+            if (_pendingSubmit)
                 InFlightHandle.Wait(Timeout.InfiniteTimeSpan);
+            _pendingSubmit = false;
 
             FencePool.Release(InFlightHandle);
             SemaphorePool.Release(ImageAcquired);

@@ -5,9 +5,15 @@ namespace Ahjo.Vulkan;
 /// <summary>
 /// Pools <see cref="Fence"/> handles so per-frame
 /// <see cref="Acquire(bool)"/>/<see cref="Release"/> stays allocation-free
-/// after warmup. Released fences are not reset — the caller decides
-/// whether the fence needs <see cref="Fence.Reset"/> before re-use, since
-/// resetting a still-pending fence is a validation error.
+/// after warmup. The pool routes by fence state: <see cref="Release"/>
+/// queries <c>vkGetFenceStatus</c> once and pushes the handle onto the
+/// signaled or unsignaled free-list, so <see cref="Acquire(bool)"/>
+/// always honors <c>initiallySignaled</c> — popping from the matching
+/// list, or growing the pool with the right create flag when the list is
+/// empty. A still-pending fence (caller didn't wait before releasing) is
+/// a usage bug; it would surface as an asymmetric stack push since
+/// <c>vkGetFenceStatus</c> distinguishes only signaled / not-signaled,
+/// not signaled / unsignaled / pending.
 /// </summary>
 /// <remarks>
 /// Single-threaded by design: a pool is one thread's view of an internal
@@ -19,12 +25,15 @@ namespace Ahjo.Vulkan;
 public sealed unsafe class FencePool : IDisposable
 {
     private readonly Device       _device;
-    private readonly Stack<nint>  _free = new();
-    private readonly List<nint>   _allHandles = new();
+    private readonly Stack<nint>  _freeSignaled   = new();
+    private readonly Stack<nint>  _freeUnsignaled = new();
+    private readonly List<nint>   _allHandles     = new();
     private bool _disposed;
 
-    public int IdleCount      => _free.Count;
-    public int AllocatedCount => _allHandles.Count;
+    public int IdleCount           => _freeSignaled.Count + _freeUnsignaled.Count;
+    public int IdleSignaledCount   => _freeSignaled.Count;
+    public int IdleUnsignaledCount => _freeUnsignaled.Count;
+    public int AllocatedCount      => _allHandles.Count;
 
     public FencePool(Device device)
     {
@@ -33,20 +42,19 @@ public sealed unsafe class FencePool : IDisposable
     }
 
     /// <summary>
-    /// Hands out a fence. Pops the free list if available; otherwise
-    /// <c>vkCreateFence</c> grows the pool by one.
+    /// Hands out a fence in the requested state. Pops the matching
+    /// free-list when non-empty; otherwise <c>vkCreateFence</c> grows the
+    /// pool by one with the correct <c>VK_FENCE_CREATE_SIGNALED_BIT</c>
+    /// setting. The returned fence is guaranteed to be in the requested
+    /// state regardless of pool history.
     /// </summary>
-    /// <param name="initiallySignaled">
-    /// Only meaningful when the pool grows. Pooled fences are returned in
-    /// whatever state the caller left them; <see cref="Fence.Reset"/>
-    /// before re-using if you need it unsignaled.
-    /// </param>
     public Fence Acquire(bool initiallySignaled = false)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (_free.Count > 0)
-            return new Fence((VkFence_T*)_free.Pop(), _device.Handle);
+        Stack<nint> preferred = initiallySignaled ? _freeSignaled : _freeUnsignaled;
+        if (preferred.Count > 0)
+            return new Fence((VkFence_T*)preferred.Pop(), _device.Handle);
 
         var ci = new VkFenceCreateInfo
         {
@@ -59,12 +67,18 @@ public sealed unsafe class FencePool : IDisposable
         return new Fence(raw, _device.Handle);
     }
 
-    /// <summary>Returns a fence to the free list. Double-release is undefined.</summary>
+    /// <summary>
+    /// Returns a fence to the appropriate free-list, querying
+    /// <c>vkGetFenceStatus</c> to decide. Caller must not release a
+    /// fence with pending GPU work — wait or reset first. Double-release
+    /// is undefined.
+    /// </summary>
     public void Release(Fence fence)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (fence.IsNull) return;
-        _free.Push((nint)fence.Handle);
+        Stack<nint> bucket = fence.IsSignaled ? _freeSignaled : _freeUnsignaled;
+        bucket.Push((nint)fence.Handle);
     }
 
     public void Dispose()
@@ -74,6 +88,7 @@ public sealed unsafe class FencePool : IDisposable
         foreach (nint h in _allHandles)
             Vk.vkDestroyFence(_device.Handle, (VkFence_T*)h, null);
         _allHandles.Clear();
-        _free.Clear();
+        _freeSignaled.Clear();
+        _freeUnsignaled.Clear();
     }
 }

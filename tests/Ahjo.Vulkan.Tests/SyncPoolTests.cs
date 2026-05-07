@@ -57,6 +57,73 @@ public sealed class SyncPoolTests
         Assert.Equal(1, pool.AllocatedCount);
     }
 
+    /// <summary>
+    /// Regression: <c>Acquire(initiallySignaled: true)</c> used to ignore
+    /// the parameter on the recycle path and return whatever state the
+    /// previous user left, so a caller asking for a signaled fence could
+    /// silently get an unsignaled one and then deadlock on Wait.
+    /// </summary>
+    [Fact]
+    public void FencePool_AcquireSignaled_AfterReleasingUnsignaled_StillSignaled()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+        using var pool     = new FencePool(device);
+
+        var unsignaled = pool.Acquire(initiallySignaled: false);
+        Assert.False(unsignaled.IsSignaled);
+        pool.Release(unsignaled);
+
+        var signaled = pool.Acquire(initiallySignaled: true);
+        try
+        {
+            Assert.True(signaled.IsSignaled);
+            Assert.Equal(WaitState.Signaled, signaled.Wait(TimeSpan.Zero));
+        }
+        finally { pool.Release(signaled); }
+    }
+
+    /// <summary>
+    /// Release routes by current state — a signaled fence ends up on
+    /// the signaled stack, an unsignaled one on the unsignaled stack —
+    /// so subsequent Acquire calls honor <c>initiallySignaled</c>
+    /// without growing the pool.
+    /// </summary>
+    [Fact]
+    public void FencePool_Release_RoutesByFenceState()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+        using var pool     = new FencePool(device);
+
+        var signaled   = pool.Acquire(initiallySignaled: true);
+        var unsignaled = pool.Acquire(initiallySignaled: false);
+        Assert.Equal(2, pool.AllocatedCount);
+
+        pool.Release(signaled);
+        pool.Release(unsignaled);
+        Assert.Equal(1, pool.IdleSignaledCount);
+        Assert.Equal(1, pool.IdleUnsignaledCount);
+
+        // Acquire(true) hits the signaled stack — same handle back, no growth.
+        var s2 = pool.Acquire(initiallySignaled: true);
+        unsafe { Assert.True(signaled.Handle == s2.Handle); }
+        Assert.Equal(2, pool.AllocatedCount);
+        Assert.True(s2.IsSignaled);
+
+        var u2 = pool.Acquire(initiallySignaled: false);
+        unsafe { Assert.True(unsignaled.Handle == u2.Handle); }
+        Assert.Equal(2, pool.AllocatedCount);
+        Assert.False(u2.IsSignaled);
+
+        pool.Release(s2);
+        pool.Release(u2);
+    }
+
     [Fact]
     public void SemaphorePool_BinaryAndTimeline_AreSeparateFreeLists()
     {

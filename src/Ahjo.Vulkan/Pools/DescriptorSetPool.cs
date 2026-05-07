@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Ahjo.Vulkan.Native;
 
 namespace Ahjo.Vulkan;
@@ -76,7 +77,7 @@ public sealed unsafe class DescriptorSetPool : IDisposable
         if (layout == null) throw new ArgumentNullException(nameof(layout));
 
         if (_idle.TryGetValue((nint)layout, out Stack<nint>? stack) && stack.Count > 0)
-            return new DescriptorSet((VkDescriptorSet_T*)stack.Pop());
+            return new DescriptorSet((VkDescriptorSet_T*)stack.Pop(), layout);
 
         var ai = new VkDescriptorSetAllocateInfo
         {
@@ -88,24 +89,37 @@ public sealed unsafe class DescriptorSetPool : IDisposable
         VkDescriptorSet_T* raw = null;
         Vk.vkAllocateDescriptorSets(_device.Handle, &ai, &raw).ThrowIfFailed();
         _allHandles.Add((nint)raw);
-        return new DescriptorSet(raw);
+        return new DescriptorSet(raw, layout);
     }
 
     /// <summary>
     /// Returns <paramref name="set"/> to the layout-keyed free-list. The
-    /// caller passes the same <paramref name="layout"/> it used to
-    /// <see cref="Acquire"/>; mixing layouts is undefined behavior. The
     /// underlying <c>VkDescriptorSet</c> stays alive — no
-    /// <c>vkFreeDescriptorSets</c> call here.
+    /// <c>vkFreeDescriptorSets</c> call here. <paramref name="layout"/>
+    /// must match the layout the set was allocated against; a debug
+    /// build asserts this against the layout the set carries internally,
+    /// and the routing is by that carried layout regardless, so a
+    /// mismatched layout doesn't silently corrupt a different layout's
+    /// free-list.
     /// </summary>
     public void Release(VkDescriptorSetLayout_T* layout, DescriptorSet set)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (set.IsNull) return;
         if (layout == null) throw new ArgumentNullException(nameof(layout));
+        Debug.Assert(set.Layout == layout,
+            "DescriptorSetPool.Release: layout argument doesn't match the layout the set was acquired with.");
+        Debug.Assert(set.Layout != null,
+            "DescriptorSetPool.Release: set has no layout — was it constructed via FromRaw rather than Acquire?");
 
-        if (!_idle.TryGetValue((nint)layout, out Stack<nint>? stack))
-            _idle[(nint)layout] = stack = new Stack<nint>();
+        // Route by the carried layout, not the caller-supplied one. In
+        // release builds where the assert is compiled out a buggy caller
+        // would otherwise push the set onto the wrong layout's stack and
+        // a later Acquire(otherLayout) would hand back a set with the
+        // wrong binding shape.
+        nint key = set.Layout != null ? (nint)set.Layout : (nint)layout;
+        if (!_idle.TryGetValue(key, out Stack<nint>? stack))
+            _idle[key] = stack = new Stack<nint>();
         stack.Push((nint)set.Handle);
     }
 

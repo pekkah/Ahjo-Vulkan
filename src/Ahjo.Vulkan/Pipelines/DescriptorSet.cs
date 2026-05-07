@@ -18,8 +18,19 @@ namespace Ahjo.Vulkan;
 public readonly unsafe struct DescriptorSet : IVulkanHandle<DescriptorSet>
 {
     public readonly VkDescriptorSet_T* Handle;
+    // The layout the pool used to allocate this set. Carried so
+    // DescriptorSetPool.Release can assert it matches the layout the
+    // caller is claiming, instead of trusting the caller and silently
+    // routing to the wrong layout-keyed free-list. Null for
+    // FromRaw-constructed instances (debug-name attachment etc.) — those
+    // shouldn't be passed to Release in the first place.
+    internal readonly VkDescriptorSetLayout_T* Layout;
 
-    internal DescriptorSet(VkDescriptorSet_T* handle) { Handle = handle; }
+    internal DescriptorSet(VkDescriptorSet_T* handle, VkDescriptorSetLayout_T* layout = null)
+    {
+        Handle = handle;
+        Layout = layout;
+    }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_DESCRIPTOR_SET;
     public static DescriptorSet FromRaw(nint handle) => new((VkDescriptorSet_T*)handle);
