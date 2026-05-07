@@ -142,6 +142,18 @@ public sealed unsafe class PhysicalDevice
 
         desc.ConfigureFeatures?.Invoke(ref chain);
 
+        // Vulkan disallows two pNext nodes with the same sType inside a
+        // single chain. The wrapper pre-pushes the 1.2/1.3/1.4 promoted-
+        // feature structs above; a configurer that pushes its own copy
+        // (e.g. to enable a 1.3 bit the wrapper doesn't set, like
+        // maintenance4) would silently violate the rule and the driver
+        // would either crash or reject the chain with an opaque error.
+        // Walk the chain once after the configurer runs and reject the
+        // duplicate up front with a message that names the sType so the
+        // caller knows which struct to drop and which wrapper-managed
+        // ref to mutate instead.
+        ValidateNoDuplicateSTypes((VkBaseOutStructure*)chain.Head);
+
         dci.queueCreateInfoCount    = (uint)desc.Queues.Length;
         dci.pQueueCreateInfos       = (VkDeviceQueueCreateInfo*)Unsafe.AsPointer(ref qcis[0]);
         dci.enabledExtensionCount   = (uint)desc.Extensions.Length;
@@ -181,6 +193,39 @@ public sealed unsafe class PhysicalDevice
         {
             Vk.vkDestroyDevice(raw, null);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Walks the <c>VkDeviceCreateInfo</c> pNext chain and throws
+    /// <see cref="ArgumentException"/> if any sType appears more than
+    /// once. Linear in chain length; chain depth is small (the wrapper's
+    /// three pre-pushed structs plus whatever the configurer adds), so
+    /// the O(n²) inner loop is fine.
+    /// </summary>
+    private static void ValidateNoDuplicateSTypes(VkBaseOutStructure* head)
+    {
+        for (VkBaseOutStructure* a = head; a != null; a = a->pNext)
+        {
+            for (VkBaseOutStructure* b = a->pNext; b != null; b = b->pNext)
+            {
+                if (a->sType != b->sType) continue;
+
+                string hint = a->sType switch
+                {
+                    VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES or
+                    VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES or
+                    VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES =>
+                        " The wrapper pre-pushes the 1.2/1.3/1.4 promoted-feature structs " +
+                        "before invoking ConfigureFeatures; do not Push them again. To toggle " +
+                        "additional bits, walk the existing chain via ChainBuilder or push only " +
+                        "the per-feature extension structs the wrapper does not own.",
+                    _ => string.Empty,
+                };
+
+                throw new ArgumentException(
+                    $"VkDeviceCreateInfo pNext chain contains duplicate sType {a->sType}; the Vulkan spec disallows two structs of the same type in a single chain.{hint}");
+            }
         }
     }
 

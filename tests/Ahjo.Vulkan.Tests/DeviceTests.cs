@@ -189,6 +189,39 @@ public sealed unsafe class DeviceTests
         Assert.True(invoked);
     }
 
+    /// <summary>
+    /// The wrapper pre-pushes <c>VkPhysicalDeviceVulkan1{2,3,4}Features</c>
+    /// onto the device-create chain. A configurer that pushes its own copy
+    /// produces two nodes with the same sType — the Vulkan spec disallows
+    /// this. CreateDevice must reject the chain up front with a clear
+    /// error rather than letting the driver fail on it (or worse, undefined
+    /// behavior).
+    /// </summary>
+    [Fact]
+    public void CreateDevice_DuplicateVulkan13Features_Throws()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        uint gfxFamily = PickGraphicsFamily(instance, out var gpu);
+
+        var ex = Assert.Throws<ArgumentException>(() =>
+        {
+            var d = new DeviceDescription
+            {
+                Queues = [new QueueRequest(gfxFamily, count: 1, priority: 1.0f)],
+                ConfigureFeatures = (ref ChainBuilder<VkDeviceCreateInfo> chain) =>
+                {
+                    ref var dup = ref chain.Push<VkPhysicalDeviceVulkan13Features>();
+                    dup.synchronization2 = 1;
+                },
+            };
+            gpu.CreateDevice(in d);
+        });
+        Assert.Contains("PHYSICAL_DEVICE_VULKAN_1_3_FEATURES", ex.Message);
+        Assert.Contains("ConfigureFeatures", ex.Message);
+    }
+
     [Fact]
     public void Dispose_IsIdempotent()
     {
