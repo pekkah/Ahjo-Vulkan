@@ -65,19 +65,26 @@ public readonly unsafe struct Allocator : IDisposable
                     NativeLibrary.GetExport(loader, "vkGetDeviceProcAddr"),
             };
 
-            var ci = new VmaAllocatorCreateInfo
-            {
-                // bufferDeviceAddress is on by default in the wrapper's 1.4 device
-                // feature chain (PhysicalDevice.CreateDevice). VMA needs this flag
-                // to allocate buffers carrying VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-                // without it, vmaCreateBuffer returns VK_ERROR_INITIALIZATION_FAILED.
-                flags            = (uint)VmaAllocatorCreateFlagBits.VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
-                physicalDevice   = device.PhysicalDevice.Handle,
-                device           = device.Handle,
-                instance         = device.PhysicalDevice.Instance.Handle,
-                pVulkanFunctions = &functions,
-                vulkanApiVersion = VulkanVersion.V1_4.Packed,
-            };
+            // Explicit baseline for every native field — see CreateBuffer
+            // for the rationale. The VMA struct exposes several optional
+            // pointers and a heap-size override that we don't drive; pinning
+            // each to its zero today keeps a future field reorder honest.
+            VmaAllocatorCreateInfo ci = default;
+            // bufferDeviceAddress is on by default in the wrapper's 1.4 device
+            // feature chain (PhysicalDevice.CreateDevice). VMA needs this flag
+            // to allocate buffers carrying VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+            // without it, vmaCreateBuffer returns VK_ERROR_INITIALIZATION_FAILED.
+            ci.flags                          = (uint)VmaAllocatorCreateFlagBits.VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+            ci.physicalDevice                 = device.PhysicalDevice.Handle;
+            ci.device                         = device.Handle;
+            ci.preferredLargeHeapBlockSize    = 0;
+            ci.pAllocationCallbacks           = null;
+            ci.pDeviceMemoryCallbacks         = null;
+            ci.pHeapSizeLimit                 = null;
+            ci.pVulkanFunctions               = &functions;
+            ci.instance                       = device.PhysicalDevice.Instance.Handle;
+            ci.vulkanApiVersion               = VulkanVersion.V1_4.Packed;
+            ci.pTypeExternalMemoryHandleTypes = null;
 
             VmaAllocator_T* raw = null;
             VmaApi.vmaCreateAllocator(&ci, &raw).ThrowIfFailed();
@@ -94,18 +101,30 @@ public readonly unsafe struct Allocator : IDisposable
     /// </summary>
     public Buffer CreateBuffer(in BufferDescription buffer, in AllocationDescription allocation)
     {
-        var bci = new VkBufferCreateInfo
-        {
-            sType       = VkStructureType.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            size        = buffer.Size,
-            usage       = (uint)buffer.Usage,
-            sharingMode = VkSharingMode.VK_SHARING_MODE_EXCLUSIVE,
-        };
-        var aci = new VmaAllocationCreateInfo
-        {
-            usage = (VmaMemoryUsage)allocation.Usage,
-            flags = (uint)allocation.Flags,
-        };
+        // Every native field assigned explicitly so a future binding regen
+        // that reorders / adds fields can't silently inherit a zero from
+        // managed default-init. Costs nothing — the JIT folds the default
+        // assignments — and the call site reads as the wrapper's actual
+        // contract with VMA rather than "whatever zero means today".
+        VkBufferCreateInfo bci = default;
+        bci.sType                 = VkStructureType.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bci.pNext                 = null;
+        bci.flags                 = 0;
+        bci.size                  = buffer.Size;
+        bci.usage                 = (uint)buffer.Usage;
+        bci.sharingMode           = VkSharingMode.VK_SHARING_MODE_EXCLUSIVE;
+        bci.queueFamilyIndexCount = 0;
+        bci.pQueueFamilyIndices   = null;
+
+        VmaAllocationCreateInfo aci = default;
+        aci.flags          = (uint)allocation.Flags;
+        aci.usage          = (VmaMemoryUsage)allocation.Usage;
+        aci.requiredFlags  = 0;
+        aci.preferredFlags = 0;
+        aci.memoryTypeBits = 0;
+        aci.pool           = null;
+        aci.pUserData      = null;
+        aci.priority       = 0f;
 
         VkBuffer_T*       rawBuffer = null;
         VmaAllocation_T*  rawAlloc  = null;
@@ -138,25 +157,35 @@ public readonly unsafe struct Allocator : IDisposable
     /// </summary>
     public Image CreateImage(in ImageDescription image, in AllocationDescription allocation)
     {
-        var ici = new VkImageCreateInfo
-        {
-            sType         = VkStructureType.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-            imageType     = image.ImageType,
-            format        = image.Format,
-            extent        = new VkExtent3D { width = image.Width, height = image.Height, depth = image.Depth },
-            mipLevels     = image.MipLevels,
-            arrayLayers   = image.ArrayLayers,
-            samples       = image.Samples,
-            tiling        = image.Tiling,
-            usage         = (uint)image.Usage,
-            sharingMode   = VkSharingMode.VK_SHARING_MODE_EXCLUSIVE,
-            initialLayout = image.InitialLayout,
-        };
-        var aci = new VmaAllocationCreateInfo
-        {
-            usage = (VmaMemoryUsage)allocation.Usage,
-            flags = (uint)allocation.Flags,
-        };
+        // Same explicit-baseline reasoning as CreateBuffer — every native
+        // field assigned, so a future struct shape change surfaces at
+        // build time rather than as a silent zero on a renamed field.
+        VkImageCreateInfo ici = default;
+        ici.sType                 = VkStructureType.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        ici.pNext                 = null;
+        ici.flags                 = 0;
+        ici.imageType             = image.ImageType;
+        ici.format                = image.Format;
+        ici.extent                = new VkExtent3D { width = image.Width, height = image.Height, depth = image.Depth };
+        ici.mipLevels             = image.MipLevels;
+        ici.arrayLayers           = image.ArrayLayers;
+        ici.samples               = image.Samples;
+        ici.tiling                = image.Tiling;
+        ici.usage                 = (uint)image.Usage;
+        ici.sharingMode           = VkSharingMode.VK_SHARING_MODE_EXCLUSIVE;
+        ici.queueFamilyIndexCount = 0;
+        ici.pQueueFamilyIndices   = null;
+        ici.initialLayout         = image.InitialLayout;
+
+        VmaAllocationCreateInfo aci = default;
+        aci.flags          = (uint)allocation.Flags;
+        aci.usage          = (VmaMemoryUsage)allocation.Usage;
+        aci.requiredFlags  = 0;
+        aci.preferredFlags = 0;
+        aci.memoryTypeBits = 0;
+        aci.pool           = null;
+        aci.pUserData      = null;
+        aci.priority       = 0f;
 
         VkImage_T*        rawImage = null;
         VmaAllocation_T*  rawAlloc = null;
