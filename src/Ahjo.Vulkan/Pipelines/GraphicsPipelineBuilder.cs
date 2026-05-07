@@ -283,6 +283,14 @@ public unsafe ref struct GraphicsPipelineBuilder
         if (_layout == null) throw new InvalidOperationException("GraphicsPipelineBuilder requires WithLayout.");
         if ((_tessControl == null) != (_tessEval == null))
             throw new InvalidOperationException("Tessellation requires both control + evaluation stages (WithTessellationStages).");
+        // WithTessellationStages without WithTessellation(patchControlPoints)
+        // would have left pTessellationState as null below (the gate was
+        // _patchControlPoints > 0), feeding the driver tess shaders with
+        // no patch-size — Vulkan rejects, but the wrapper-side error is
+        // clearer.
+        if (_tessControl != null && _patchControlPoints == 0)
+            throw new InvalidOperationException(
+                "Tessellation pipeline requires WithTessellation(patchControlPoints > 0); pair it with WithTessellationStages.");
         // WithColorBlend(...) is optional — when omitted every color
         // attachment defaults to opaque. When provided, the attachment
         // count must match the rendering color-format count exactly:
@@ -466,7 +474,7 @@ public unsafe ref struct GraphicsPipelineBuilder
                 pStages             = stages,
                 pVertexInputState   = &vertexInput,
                 pInputAssemblyState = &inputAssembly,
-                pTessellationState  = _patchControlPoints > 0 ? &tessellation : null,
+                pTessellationState  = _tessControl != null ? &tessellation : null,
                 pViewportState      = &viewportState,
                 pRasterizationState = &rasterization,
                 pMultisampleState   = &multisample,

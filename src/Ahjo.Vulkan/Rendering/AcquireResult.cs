@@ -18,6 +18,15 @@ public enum AcquireResult
     /// <summary>Surface has changed (typically a resize). Caller must
     /// <see cref="Swapchain.Recreate"/> before any further acquires.</summary>
     OutOfDate,
+    /// <summary>The platform <c>VkSurfaceKHR</c> the swapchain was built
+    /// over is no longer valid (window destroyed, monitor unplugged, …).
+    /// Recovery requires destroying the swapchain AND the surface, then
+    /// re-creating both — a strict superset of the
+    /// <see cref="OutOfDate"/> path. Distinguishing this from
+    /// <see cref="OutOfDate"/> lets the caller branch on the heavier
+    /// recreate without having to inspect the underlying
+    /// <c>VkResult</c>.</summary>
+    SurfaceLost,
     /// <summary>CPU-side timeout elapsed without an image becoming
     /// available.</summary>
     Timeout,

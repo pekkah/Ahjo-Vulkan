@@ -76,6 +76,31 @@ public sealed unsafe class DeviceTests
     }
 
     [Fact]
+    public void CreateDevice_DuplicateFamilyIndex_Throws()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        uint gfxFamily = PickGraphicsFamily(instance, out var gpu);
+
+        // VUID-VkDeviceCreateInfo-queueFamilyIndex-02802 — duplicates rejected.
+        var ex = Assert.Throws<ArgumentException>(() =>
+        {
+            var d = new DeviceDescription
+            {
+                Queues =
+                [
+                    new QueueRequest(gfxFamily, count: 1, priority: 1.0f),
+                    new QueueRequest(gfxFamily, count: 1, priority: 0.5f),
+                ],
+            };
+            gpu.CreateDevice(in d);
+        });
+        Assert.Contains($"family {gfxFamily}", ex.Message);
+        Assert.Contains("merge", ex.Message);
+    }
+
+    [Fact]
     public void CreateDevice_QueueOversubscribed_Throws()
     {
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");

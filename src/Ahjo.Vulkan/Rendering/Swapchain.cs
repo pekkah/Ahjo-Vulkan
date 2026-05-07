@@ -136,8 +136,11 @@ public sealed unsafe class Swapchain : IDisposable
             VkResult.VK_SUCCESS                  => AcquireResult.Success,
             VkResult.VK_SUBOPTIMAL_KHR           => AcquireResult.Suboptimal,
             VkResult.VK_ERROR_OUT_OF_DATE_KHR    => AcquireResult.OutOfDate,
+            VkResult.VK_ERROR_SURFACE_LOST_KHR   => AcquireResult.SurfaceLost,
             VkResult.VK_TIMEOUT                  => AcquireResult.Timeout,
             VkResult.VK_NOT_READY                => AcquireResult.NotReady,
+            VkResult.VK_ERROR_DEVICE_LOST        => throw new VulkanException(r,
+                "vkAcquireNextImageKHR: VK_ERROR_DEVICE_LOST. The VkDevice is no longer usable; tear down and recreate the device + every dependent resource."),
             _                                    => throw new VulkanException(r, "vkAcquireNextImageKHR"),
         };
     }
@@ -171,10 +174,13 @@ public sealed unsafe class Swapchain : IDisposable
         VkResult r = Vk.vkQueuePresentKHR(queue.Handle, &info);
         return r switch
         {
-            VkResult.VK_SUCCESS               => AcquireResult.Success,
-            VkResult.VK_SUBOPTIMAL_KHR        => AcquireResult.Suboptimal,
-            VkResult.VK_ERROR_OUT_OF_DATE_KHR => AcquireResult.OutOfDate,
-            _                                 => throw new VulkanException(r, "vkQueuePresentKHR"),
+            VkResult.VK_SUCCESS                => AcquireResult.Success,
+            VkResult.VK_SUBOPTIMAL_KHR         => AcquireResult.Suboptimal,
+            VkResult.VK_ERROR_OUT_OF_DATE_KHR  => AcquireResult.OutOfDate,
+            VkResult.VK_ERROR_SURFACE_LOST_KHR => AcquireResult.SurfaceLost,
+            VkResult.VK_ERROR_DEVICE_LOST      => throw new VulkanException(r,
+                "vkQueuePresentKHR: VK_ERROR_DEVICE_LOST. The VkDevice is no longer usable; tear down and recreate the device + every dependent resource."),
+            _                                  => throw new VulkanException(r, "vkQueuePresentKHR"),
         };
     }
 

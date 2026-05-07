@@ -237,6 +237,48 @@ public sealed class GraphicsPipelineTests
         Assert.IsType<InvalidOperationException>(caught);
     }
 
+    /// <summary>
+    /// WithTessellationStages without WithTessellation(patchControlPoints)
+    /// previously gated pTessellationState on _patchControlPoints &gt; 0,
+    /// silently feeding the driver tess shaders with no patch info. The
+    /// builder now rejects up front with an actionable message.
+    /// </summary>
+    [Fact]
+    public void Builder_TessellationStages_WithoutPatchControlPoints_Throws()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
+        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+
+        using var vBlob = SpirvBlob.Load(VertSpvPath);
+        using var fBlob = SpirvBlob.Load(FragSpvPath);
+        using var vMod  = device.CreateShaderModule(vBlob.Words);
+        using var fMod  = device.CreateShaderModule(fBlob.Words);
+        using var layout = device.CreatePipelineLayout(default);
+        ReadOnlySpan<VkFormat> colorFormats = [VkFormat.VK_FORMAT_R8G8B8A8_UNORM];
+
+        // Both tess stages set, but WithTessellation(...) never called —
+        // patch control points stays at 0.
+        ShaderModule control = vMod;
+        ShaderModule eval    = vMod;
+        Exception? caught = null;
+        try
+        {
+            device.BuildGraphicsPipeline()
+                .WithStages(in vMod, in fMod)
+                .WithDynamicRendering(colorFormats)
+                .WithLayout(in layout)
+                .WithTessellationStages(in control, in eval)
+                .Build();
+        }
+        catch (Exception ex) { caught = ex; }
+        Assert.IsType<InvalidOperationException>(caught);
+        Assert.Contains("patchControlPoints", caught!.Message);
+    }
+
     private static string VertSpvPath =>
         Path.Combine(AppContext.BaseDirectory, "Shaders", "triangle.vert.spv");
 

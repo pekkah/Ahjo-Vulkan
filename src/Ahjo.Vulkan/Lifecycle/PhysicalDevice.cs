@@ -211,6 +211,19 @@ public sealed unsafe class PhysicalDevice
             if (req.Count > avail)
                 throw new ArgumentException(
                     $"QueueRequest at family {req.FamilyIndex} requests {req.Count} queues but family supports {avail}.");
+
+            // VUID-VkDeviceCreateInfo-queueFamilyIndex-02802: each
+            // VkDeviceQueueCreateInfo's queueFamilyIndex must be unique
+            // within the call. The driver-side error message is opaque
+            // ("queueFamilyIndex is not unique"); raise it here as a
+            // clear ArgumentException pointing at the duplicate so the
+            // caller knows which entries to merge.
+            for (int j = 0; j < i; j++)
+            {
+                if (queues[j].FamilyIndex == req.FamilyIndex)
+                    throw new ArgumentException(
+                        $"QueueRequest entries {j} and {i} both target family {req.FamilyIndex}; merge them into a single request with the combined queue count.");
+            }
         }
     }
 }
