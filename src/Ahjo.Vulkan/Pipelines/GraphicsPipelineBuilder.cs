@@ -89,6 +89,25 @@ public unsafe ref struct GraphicsPipelineBuilder
     // Dynamic state. Defaults to viewport + scissor when the caller doesn't override.
     private ReadOnlySpan<VkDynamicState> _dynamicStates;
 
+    // Specialization constants — one slot per stage; null entries mean
+    // "no specialization" and the corresponding pSpecializationInfo stays
+    // null when the stage is built.
+    private void*                       _vertSpecDataPtr;
+    private int                         _vertSpecDataSize;
+    private VkSpecializationMapEntry[]? _vertSpecEntries;
+    private void*                       _fragSpecDataPtr;
+    private int                         _fragSpecDataSize;
+    private VkSpecializationMapEntry[]? _fragSpecEntries;
+    private void*                       _geomSpecDataPtr;
+    private int                         _geomSpecDataSize;
+    private VkSpecializationMapEntry[]? _geomSpecEntries;
+    private void*                       _tessControlSpecDataPtr;
+    private int                         _tessControlSpecDataSize;
+    private VkSpecializationMapEntry[]? _tessControlSpecEntries;
+    private void*                       _tessEvalSpecDataPtr;
+    private int                         _tessEvalSpecDataSize;
+    private VkSpecializationMapEntry[]? _tessEvalSpecEntries;
+
     // Layout + cache.
     private VkPipelineLayout_T* _layout;
     private VkPipelineCache_T*  _cache;
@@ -161,6 +180,31 @@ public unsafe ref struct GraphicsPipelineBuilder
     public GraphicsPipelineBuilder WithGeometryEntryPoint(ReadOnlySpan<byte> name) { CopyName(name, ref _geomEntry); return this; }
     public GraphicsPipelineBuilder WithTessellationControlEntryPoint(ReadOnlySpan<byte> name) { CopyName(name, ref _tessControlEntry); return this; }
     public GraphicsPipelineBuilder WithTessellationEvaluationEntryPoint(ReadOnlySpan<byte> name) { CopyName(name, ref _tessEvalEntry); return this; }
+
+    /// <summary>
+    /// Specializes the vertex shader's <c>constant_id</c> values from the
+    /// fields of <typeparamref name="T"/>. See
+    /// <see cref="SpecializationInfo{T}"/> for the field-layout rules and
+    /// the caller's lifetime obligations.
+    /// </summary>
+    public GraphicsPipelineBuilder WithVertexSpecialization<T>(SpecializationInfo<T> spec) where T : unmanaged
+    { _vertSpecDataPtr = spec.DataPtr; _vertSpecDataSize = spec.DataSize; _vertSpecEntries = spec.Entries; return this; }
+
+    /// <summary>Specializes the fragment shader's <c>constant_id</c> values.</summary>
+    public GraphicsPipelineBuilder WithFragmentSpecialization<T>(SpecializationInfo<T> spec) where T : unmanaged
+    { _fragSpecDataPtr = spec.DataPtr; _fragSpecDataSize = spec.DataSize; _fragSpecEntries = spec.Entries; return this; }
+
+    /// <summary>Specializes the geometry shader's <c>constant_id</c> values.</summary>
+    public GraphicsPipelineBuilder WithGeometrySpecialization<T>(SpecializationInfo<T> spec) where T : unmanaged
+    { _geomSpecDataPtr = spec.DataPtr; _geomSpecDataSize = spec.DataSize; _geomSpecEntries = spec.Entries; return this; }
+
+    /// <summary>Specializes the tessellation control shader's <c>constant_id</c> values.</summary>
+    public GraphicsPipelineBuilder WithTessellationControlSpecialization<T>(SpecializationInfo<T> spec) where T : unmanaged
+    { _tessControlSpecDataPtr = spec.DataPtr; _tessControlSpecDataSize = spec.DataSize; _tessControlSpecEntries = spec.Entries; return this; }
+
+    /// <summary>Specializes the tessellation evaluation shader's <c>constant_id</c> values.</summary>
+    public GraphicsPipelineBuilder WithTessellationEvaluationSpecialization<T>(SpecializationInfo<T> spec) where T : unmanaged
+    { _tessEvalSpecDataPtr = spec.DataPtr; _tessEvalSpecDataSize = spec.DataSize; _tessEvalSpecEntries = spec.Entries; return this; }
 
     private static void CopyName(ReadOnlySpan<byte> name, ref EntryPointBuffer dst)
     {
@@ -370,17 +414,37 @@ public unsafe ref struct GraphicsPipelineBuilder
         ReadOnlySpan<VkDynamicState> dynamicStates = _dynamicStates.IsEmpty ? defaultDynamic : _dynamicStates;
 
         VkPipeline_T* raw = null;
+        bool hasVertSpec        = _vertSpecEntries        is { Length: > 0 };
+        bool hasFragSpec        = _fragSpecEntries        is { Length: > 0 };
+        bool hasGeomSpec        = _geomSpecEntries        is { Length: > 0 };
+        bool hasTessControlSpec = _tessControlSpecEntries is { Length: > 0 };
+        bool hasTessEvalSpec    = _tessEvalSpecEntries    is { Length: > 0 };
         fixed (byte* pVertEntry        = &_vertEntry[0])
         fixed (byte* pFragEntry        = &_fragEntry[0])
         fixed (byte* pGeomEntry        = &_geomEntry[0])
         fixed (byte* pTessControlEntry = &_tessControlEntry[0])
         fixed (byte* pTessEvalEntry    = &_tessEvalEntry[0])
+        fixed (VkSpecializationMapEntry* pVertSpecEntries        = _vertSpecEntries)
+        fixed (VkSpecializationMapEntry* pFragSpecEntries        = _fragSpecEntries)
+        fixed (VkSpecializationMapEntry* pGeomSpecEntries        = _geomSpecEntries)
+        fixed (VkSpecializationMapEntry* pTessControlSpecEntries = _tessControlSpecEntries)
+        fixed (VkSpecializationMapEntry* pTessEvalSpecEntries    = _tessEvalSpecEntries)
         fixed (VkVertexInputBindingDescription*    pBindings = nativeBindings)
         fixed (VkVertexInputAttributeDescription*  pAttrs    = nativeAttrs)
         fixed (VkFormat*                           pColors   = _colorFormats)
         fixed (VkPipelineColorBlendAttachmentState* pBlend   = blendAttachments)
         fixed (VkDynamicState*                     pDyn      = dynamicStates)
         {
+            // Per-stage VkSpecializationInfo storage. Each stage's slot
+            // is initialized regardless; pSpecializationInfo on the stage
+            // create-info points at the slot only when the stage actually
+            // has entries.
+            VkSpecializationInfo vertSpec        = SpecInfo(_vertSpecEntries,        pVertSpecEntries,        _vertSpecDataSize,        _vertSpecDataPtr);
+            VkSpecializationInfo fragSpec        = SpecInfo(_fragSpecEntries,        pFragSpecEntries,        _fragSpecDataSize,        _fragSpecDataPtr);
+            VkSpecializationInfo geomSpec        = SpecInfo(_geomSpecEntries,        pGeomSpecEntries,        _geomSpecDataSize,        _geomSpecDataPtr);
+            VkSpecializationInfo tessControlSpec = SpecInfo(_tessControlSpecEntries, pTessControlSpecEntries, _tessControlSpecDataSize, _tessControlSpecDataPtr);
+            VkSpecializationInfo tessEvalSpec    = SpecInfo(_tessEvalSpecEntries,    pTessEvalSpecEntries,    _tessEvalSpecDataSize,    _tessEvalSpecDataPtr);
+
             // Up to five stages: vert, frag, optional geom, optional tess
             // control + tess eval. Built inline; size is bounded by the
             // wrapper's currently-supported stage set. Mesh + task shaders
@@ -390,14 +454,14 @@ public unsafe ref struct GraphicsPipelineBuilder
             // be used at a time so the actual ceiling stays at 5).
             var stages = stackalloc VkPipelineShaderStageCreateInfo[MaxStages];
             uint stageCount = 0;
-            stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_VERTEX_BIT,   _vert, pVertEntry);
-            stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_FRAGMENT_BIT, _frag, pFragEntry);
+            stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_VERTEX_BIT,   _vert, pVertEntry, hasVertSpec ? &vertSpec : null);
+            stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_FRAGMENT_BIT, _frag, pFragEntry, hasFragSpec ? &fragSpec : null);
             if (_geom != null)
-                stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_GEOMETRY_BIT, _geom, pGeomEntry);
+                stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_GEOMETRY_BIT, _geom, pGeomEntry, hasGeomSpec ? &geomSpec : null);
             if (_tessControl != null)
             {
-                stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT,    _tessControl, pTessControlEntry);
-                stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT, _tessEval,    pTessEvalEntry);
+                stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT,    _tessControl, pTessControlEntry, hasTessControlSpec ? &tessControlSpec : null);
+                stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT, _tessEval,    pTessEvalEntry,    hasTessEvalSpec    ? &tessEvalSpec    : null);
             }
 
             var vertexInput = new VkPipelineVertexInputStateCreateInfo
@@ -516,13 +580,28 @@ public unsafe ref struct GraphicsPipelineBuilder
     private static VkPipelineShaderStageCreateInfo ShaderStage(
         VkShaderStageFlagBits stage,
         VkShaderModule_T*     module,
-        byte*                 entry)
+        byte*                 entry,
+        VkSpecializationInfo* spec)
         => new()
         {
-            sType  = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            stage  = stage,
-            module = module,
-            pName  = (sbyte*)entry,
+            sType               = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            stage               = stage,
+            module              = module,
+            pName               = (sbyte*)entry,
+            pSpecializationInfo = spec,
+        };
+
+    private static VkSpecializationInfo SpecInfo(
+        VkSpecializationMapEntry[]? entries,
+        VkSpecializationMapEntry*   pEntries,
+        int                         dataSize,
+        void*                       dataPtr)
+        => new()
+        {
+            mapEntryCount = (uint)(entries?.Length ?? 0),
+            pMapEntries   = pEntries,
+            dataSize      = (nuint)dataSize,
+            pData         = dataPtr,
         };
 
     [InlineArray(32)]

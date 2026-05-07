@@ -1,0 +1,20 @@
+#version 450
+
+// Specialization-constant fixture for SpecializationInfo<T> tests.
+// Constant id 0 controls the workgroup x-size; constant id 1 is an
+// arbitrary uint tag round-tripped to the output buffer so the test
+// can check that the second map entry was wired up too.
+
+layout(local_size_x_id = 0) in;
+layout(constant_id = 1) const uint kTag = 0xDEADu;
+
+layout(set = 0, binding = 0) buffer Out {
+    uint values[];
+} buf;
+
+void main() {
+    if (gl_GlobalInvocationID.x == 0u) {
+        buf.values[0] = gl_WorkGroupSize.x;
+        buf.values[1] = kTag;
+    }
+}

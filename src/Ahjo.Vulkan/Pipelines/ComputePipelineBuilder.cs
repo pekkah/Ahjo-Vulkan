@@ -25,11 +25,10 @@ namespace Ahjo.Vulkan;
 /// to produce another pipeline with the same configuration, which is
 /// occasionally useful for cache-warming variants but is not the
 /// dominant path.</para>
-/// <para>Specialization constants are intentionally not on the builder
-/// yet — the typed <c>SpecializationInfo&lt;T&gt;</c> wrapper depends on
-/// the <see cref="Pipelines"/> design landing alongside the graphics
-/// builder (#21) and a dedicated follow-up. Compute pipelines that need
-/// specialization can drop down to the raw bindings until then.</para>
+/// <para>Specialization constants flow through
+/// <see cref="WithSpecialization{T}"/> using the typed
+/// <see cref="SpecializationInfo{T}"/> wrapper — see that type's remarks
+/// for the field-layout rules.</para>
 /// </remarks>
 public unsafe ref struct ComputePipelineBuilder
 {
@@ -40,6 +39,9 @@ public unsafe ref struct ComputePipelineBuilder
     private VkPipelineCache_T*  _cache;
     private EntryPointBuffer    _entry;
     private int                 _entryLen;
+    private void*                      _specDataPtr;
+    private int                        _specDataSize;
+    private VkSpecializationMapEntry[]? _specEntries;
 
     internal ComputePipelineBuilder(Device device)
     {
@@ -94,6 +96,21 @@ public unsafe ref struct ComputePipelineBuilder
     }
 
     /// <summary>
+    /// Specializes the compute shader's <c>constant_id</c> values from the
+    /// fields of <typeparamref name="T"/> — see
+    /// <see cref="SpecializationInfo{T}"/> for layout rules and the
+    /// caller's lifetime obligations.
+    /// </summary>
+    public ComputePipelineBuilder WithSpecialization<T>(SpecializationInfo<T> spec)
+        where T : unmanaged
+    {
+        _specDataPtr  = spec.DataPtr;
+        _specDataSize = spec.DataSize;
+        _specEntries  = spec.Entries;
+        return this;
+    }
+
+    /// <summary>
     /// Issues <c>vkCreateComputePipelines</c>. The builder is not
     /// mutated; the receiver remains usable, but the dominant pattern is
     /// a single chained expression — see the type-level remarks on
@@ -105,14 +122,24 @@ public unsafe ref struct ComputePipelineBuilder
         if (_layout == null) throw new InvalidOperationException("ComputePipelineBuilder requires WithLayout.");
 
         VkPipeline_T* raw = null;
+        bool hasSpec = _specEntries is { Length: > 0 };
         fixed (byte* pEntry = &_entry.e0)
+        fixed (VkSpecializationMapEntry* pSpecEntries = _specEntries)
         {
+            VkSpecializationInfo specInfo = new()
+            {
+                mapEntryCount = (uint)(_specEntries?.Length ?? 0),
+                pMapEntries   = pSpecEntries,
+                dataSize      = (nuint)_specDataSize,
+                pData         = _specDataPtr,
+            };
             var stage = new VkPipelineShaderStageCreateInfo
             {
-                sType  = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                stage  = VkShaderStageFlagBits.VK_SHADER_STAGE_COMPUTE_BIT,
-                module = _module,
-                pName  = (sbyte*)pEntry,
+                sType               = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                stage               = VkShaderStageFlagBits.VK_SHADER_STAGE_COMPUTE_BIT,
+                module              = _module,
+                pName               = (sbyte*)pEntry,
+                pSpecializationInfo = hasSpec ? &specInfo : null,
             };
             var ci = new VkComputePipelineCreateInfo
             {

@@ -25,7 +25,7 @@
     test csproj uses, with the same skip-when-missing behavior.
   -->
   <ItemGroup>
-    <_ShaderSource Include="..\Ahjo.Vulkan.Tests\Shaders\triangle.vert;..\Ahjo.Vulkan.Tests\Shaders\triangle.frag" />
+    <_ShaderSource Include="..\Ahjo.Vulkan.Tests\Shaders\triangle.vert;..\Ahjo.Vulkan.Tests\Shaders\triangle.frag;..\Ahjo.Vulkan.Tests\Shaders\spec_fill.comp" />
   </ItemGroup>
 
   <Target Name="CompileShaders" AfterTargets="Build" Inputs="@(_ShaderSource)" Outputs="@(_ShaderSource->'$(OutputPath)Shaders\%(Filename)%(Extension).spv')">
