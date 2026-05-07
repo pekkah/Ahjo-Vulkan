@@ -28,22 +28,69 @@ public sealed unsafe class PipelineBarrierTests
     }
 
     [Fact]
-    public void BufferBarrier_For_Defaults_Size_To_WholeSize()
+    public void BufferBarrier_DirectConstruction_RemapsZeroSizeToWhole()
     {
+        // Direct construction (not via factory). Size = 0 (default) → ToNative
+        // remaps to VK_WHOLE_SIZE. Queue indices fall through as set (0/0 here).
         var b = new BufferBarrier
         {
             Buffer    = (nint)0x1234,
             SrcStage  = Stage.Copy,         SrcAccess = Access.TransferWrite,
             DstStage  = Stage.VertexShader, DstAccess = Access.UniformRead,
-            // Offset = 0, Size = 0 (default) → ToNative remaps to VK_WHOLE_SIZE.
         };
 
         var n = b.ToNative();
         Assert.Equal(VkStructureType.VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2, n.sType);
         Assert.Equal(~0ul, n.size);
         Assert.Equal(0ul,  n.offset);
+    }
+
+    [Fact]
+    public void BufferBarrier_For_SetsQueueFamiliesToIgnored()
+    {
+        using var fakeBuffer = default(Buffer); // null handle is fine — purely value-mapping.
+        var b = BufferBarrier.For(in fakeBuffer,
+            Stage.Copy,         Access.TransferWrite,
+            Stage.VertexShader, Access.UniformRead);
+
+        var n = b.ToNative();
         Assert.Equal(~0u,  n.srcQueueFamilyIndex);
         Assert.Equal(~0u,  n.dstQueueFamilyIndex);
+        Assert.Equal(~0ul, n.size);
+    }
+
+    [Fact]
+    public void BufferBarrier_Release_ZeroesDstAndCarriesQueueIndices()
+    {
+        using var fakeBuffer = default(Buffer);
+        var b = BufferBarrier.Release(in fakeBuffer,
+            fromQueueFamily: 1, toQueueFamily: 2,
+            Stage.Copy, Access.TransferWrite);
+
+        var n = b.ToNative();
+        Assert.Equal(1u, n.srcQueueFamilyIndex);
+        Assert.Equal(2u, n.dstQueueFamilyIndex);
+        Assert.Equal((ulong)Stage.Copy,            n.srcStageMask);
+        Assert.Equal((ulong)Access.TransferWrite,  n.srcAccessMask);
+        Assert.Equal(0ul, n.dstStageMask);
+        Assert.Equal(0ul, n.dstAccessMask);
+    }
+
+    [Fact]
+    public void BufferBarrier_Acquire_ZeroesSrcAndCarriesQueueIndices()
+    {
+        using var fakeBuffer = default(Buffer);
+        var b = BufferBarrier.Acquire(in fakeBuffer,
+            fromQueueFamily: 1, toQueueFamily: 2,
+            Stage.VertexShader, Access.UniformRead);
+
+        var n = b.ToNative();
+        Assert.Equal(1u, n.srcQueueFamilyIndex);
+        Assert.Equal(2u, n.dstQueueFamilyIndex);
+        Assert.Equal(0ul, n.srcStageMask);
+        Assert.Equal(0ul, n.srcAccessMask);
+        Assert.Equal((ulong)Stage.VertexShader,  n.dstStageMask);
+        Assert.Equal((ulong)Access.UniformRead,  n.dstAccessMask);
     }
 
     [Fact]
@@ -77,20 +124,60 @@ public sealed unsafe class PipelineBarrierTests
         // forgot to set LevelCount/LayerCount" guard in ToNative.
         var b = new ImageBarrier
         {
-            Image     = (nint)0x42,
-            SrcStage  = Stage.TopOfPipe,
-            DstStage  = Stage.ColorAttachmentOutput,
-            DstAccess = Access.ColorAttachmentWrite,
-            OldLayout = VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
-            NewLayout = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            Aspect    = VkImageAspectFlagBits.VK_IMAGE_ASPECT_COLOR_BIT,
+            Image               = (nint)0x42,
+            SrcStage            = Stage.TopOfPipe,
+            DstStage            = Stage.ColorAttachmentOutput,
+            DstAccess           = Access.ColorAttachmentWrite,
+            OldLayout           = VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
+            NewLayout           = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            Aspect              = VkImageAspectFlagBits.VK_IMAGE_ASPECT_COLOR_BIT,
+            SrcQueueFamilyIndex = ImageBarrier.QueueFamilyIgnored,
+            DstQueueFamilyIndex = ImageBarrier.QueueFamilyIgnored,
         };
         var n = b.ToNative();
         Assert.Equal(1u, n.subresourceRange.levelCount);
         Assert.Equal(1u, n.subresourceRange.layerCount);
         Assert.Equal((uint)VkImageAspectFlagBits.VK_IMAGE_ASPECT_COLOR_BIT, n.subresourceRange.aspectMask);
-        Assert.Equal(~0u, n.srcQueueFamilyIndex);
-        Assert.Equal(~0u, n.dstQueueFamilyIndex);
+    }
+
+    [Fact]
+    public void ImageBarrier_Release_ZeroesDstAndCarriesQueueIndices()
+    {
+        using var fakeImage = default(Image);
+        var b = ImageBarrier.Release(in fakeImage,
+            from: VkImageLayout.VK_IMAGE_LAYOUT_GENERAL,
+            to:   VkImageLayout.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            fromQueueFamily: 0, toQueueFamily: 1,
+            Stage.ComputeShader, Access.ShaderStorageWrite);
+
+        var n = b.ToNative();
+        Assert.Equal(0u, n.srcQueueFamilyIndex);
+        Assert.Equal(1u, n.dstQueueFamilyIndex);
+        Assert.Equal(VkImageLayout.VK_IMAGE_LAYOUT_GENERAL,                  n.oldLayout);
+        Assert.Equal(VkImageLayout.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, n.newLayout);
+        Assert.Equal((ulong)Stage.ComputeShader,        n.srcStageMask);
+        Assert.Equal((ulong)Access.ShaderStorageWrite,  n.srcAccessMask);
+        Assert.Equal(0ul, n.dstStageMask);
+        Assert.Equal(0ul, n.dstAccessMask);
+    }
+
+    [Fact]
+    public void ImageBarrier_Acquire_ZeroesSrcAndCarriesQueueIndices()
+    {
+        using var fakeImage = default(Image);
+        var b = ImageBarrier.Acquire(in fakeImage,
+            from: VkImageLayout.VK_IMAGE_LAYOUT_GENERAL,
+            to:   VkImageLayout.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            fromQueueFamily: 0, toQueueFamily: 1,
+            Stage.FragmentShader, Access.ShaderSampledRead);
+
+        var n = b.ToNative();
+        Assert.Equal(0u, n.srcQueueFamilyIndex);
+        Assert.Equal(1u, n.dstQueueFamilyIndex);
+        Assert.Equal(0ul, n.srcStageMask);
+        Assert.Equal(0ul, n.srcAccessMask);
+        Assert.Equal((ulong)Stage.FragmentShader,    n.dstStageMask);
+        Assert.Equal((ulong)Access.ShaderSampledRead, n.dstAccessMask);
     }
 
     // ---- Driver-bound: actually issue the barrier ----
