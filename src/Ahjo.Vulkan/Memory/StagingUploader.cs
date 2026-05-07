@@ -105,10 +105,21 @@ public sealed unsafe class StagingUploader : IDisposable
             _activeChunkIndex++;
         }
 
-        // No existing chunk has room. Grow.
+        // No existing chunk has room. Grow. _chunks.Add can fail (managed
+        // OOM during list-capacity expansion) after the VMA buffer is
+        // already in hand — without the catch the freshly-allocated chunk
+        // would orphan from both _chunks and Dispose().
         ulong  needed = Math.Max(_chunkSize, AlignUp(sizeBytes, _alignment));
         Buffer newBuf = AllocateChunkBuffer(needed);
-        _chunks.Add(new Chunk { Buf = newBuf, Head = sizeBytes });
+        try
+        {
+            _chunks.Add(new Chunk { Buf = newBuf, Head = sizeBytes });
+        }
+        catch
+        {
+            newBuf.Dispose();
+            throw;
+        }
         Span<byte> dst2 = newBuf.AsSpan<byte>().Slice(0, checked((int)sizeBytes));
         MemoryMarshal.AsBytes(data).CopyTo(dst2);
         _activeChunkIndex = _chunks.Count - 1;

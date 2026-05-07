@@ -136,13 +136,23 @@ public readonly unsafe struct Allocator : IDisposable
             flags = (uint)allocation.Flags,
         };
 
-        VkImage_T*       rawImage = null;
-        VmaAllocation_T* rawAlloc = null;
-        VmaApi.vmaCreateImage(Handle, &ici, &aci, &rawImage, &rawAlloc, null).ThrowIfFailed();
+        VkImage_T*        rawImage = null;
+        VmaAllocation_T*  rawAlloc = null;
+        VmaAllocationInfo info     = default;
+        VmaApi.vmaCreateImage(Handle, &ici, &aci, &rawImage, &rawAlloc, &info).ThrowIfFailed();
+
+        // Mirrors Buffer's pMappedData propagation: linear-tiled host-visible
+        // images allocated with AllocationFlags.Mapped expose a persistent
+        // pointer through info.pMappedData, and the wrapper has to pipe it
+        // onto the handle for AsSpan/Map to skip vmaMapMemory. Dropping the
+        // pAllocationInfo parameter (the prior null) would silently strand
+        // the pointer — Image had no field for it either, but adding the
+        // field without populating it would have been a worse trap.
         return new Image(
             rawImage, rawAlloc, this,
             image.Format, image.Width, image.Height, image.Depth,
-            image.MipLevels, image.ArrayLayers, image.Usage);
+            image.MipLevels, image.ArrayLayers, image.Usage,
+            info.pMappedData);
     }
 
     public void Dispose()

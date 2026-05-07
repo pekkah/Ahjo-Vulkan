@@ -153,20 +153,35 @@ public sealed unsafe class PhysicalDevice
         VkDevice_T* raw = null;
         Vk.vkCreateDevice(Handle, chain.Head, null, &raw).ThrowIfFailed();
 
-        Queue[] queues = new Queue[totalQueues];
-        var device = new Device(raw, physicalDevice: this, queues);
-        int qSlot = 0;
-        for (int i = 0; i < desc.Queues.Length; i++)
+        // Anything between vkCreateDevice and the final return that
+        // throws (managed OOM during the queue array, DeviceFunctionTable
+        // construction, …) leaves the live VkDevice with no managed
+        // owner — the Device finalizer would only catch it on GC, by
+        // which point the GPU has stayed busy for an indeterminate time.
+        // Destroy and rethrow so the failure path matches the success
+        // path's resource accounting.
+        try
         {
-            QueueRequest req = desc.Queues[i];
-            for (uint q = 0; q < req.Count; q++)
+            Queue[] queues = new Queue[totalQueues];
+            var device = new Device(raw, physicalDevice: this, queues);
+            int qSlot = 0;
+            for (int i = 0; i < desc.Queues.Length; i++)
             {
-                VkQueue_T* qh = null;
-                Vk.vkGetDeviceQueue(raw, req.FamilyIndex, q, &qh);
-                queues[qSlot++] = new Queue(device, qh, req.FamilyIndex, q);
+                QueueRequest req = desc.Queues[i];
+                for (uint q = 0; q < req.Count; q++)
+                {
+                    VkQueue_T* qh = null;
+                    Vk.vkGetDeviceQueue(raw, req.FamilyIndex, q, &qh);
+                    queues[qSlot++] = new Queue(device, qh, req.FamilyIndex, q);
+                }
             }
+            return device;
         }
-        return device;
+        catch
+        {
+            Vk.vkDestroyDevice(raw, null);
+            throw;
+        }
     }
 
     private void ValidateQueues(ReadOnlySpan<QueueRequest> queues)

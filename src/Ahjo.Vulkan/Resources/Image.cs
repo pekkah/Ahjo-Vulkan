@@ -35,6 +35,16 @@ public readonly unsafe struct Image : IVulkanHandle<Image>, IDisposable
     public readonly uint             ArrayLayers;
     public readonly ImageUsage       Usage;
 
+    /// <summary>
+    /// Persistent mapped pointer when a linear-tiled host-visible image was
+    /// allocated with <see cref="AllocationFlags.Mapped"/>;
+    /// <see langword="null"/> otherwise (the typical case — most images are
+    /// optimal-tiled and device-local). Mirrors <see cref="Buffer.PersistentMapped"/>;
+    /// VMA writes <c>info.pMappedData</c> through <c>vmaCreateImage</c>'s
+    /// allocation-info pointer.
+    /// </summary>
+    internal readonly void* PersistentMapped;
+
     internal Image(
         VkImage_T*       handle,
         VmaAllocation_T* allocation,
@@ -45,7 +55,8 @@ public readonly unsafe struct Image : IVulkanHandle<Image>, IDisposable
         uint             depth,
         uint             mipLevels,
         uint             arrayLayers,
-        ImageUsage       usage)
+        ImageUsage       usage,
+        void*            persistentMapped)
     {
         Handle           = handle;
         AllocationHandle = allocation;
@@ -57,12 +68,13 @@ public readonly unsafe struct Image : IVulkanHandle<Image>, IDisposable
         MipLevels        = mipLevels;
         ArrayLayers      = arrayLayers;
         Usage            = usage;
+        PersistentMapped = persistentMapped;
     }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_IMAGE;
 
     public static Image FromRaw(nint handle) =>
-        new((VkImage_T*)handle, null, default, default, 0, 0, 0, 0, 0, ImageUsage.None);
+        new((VkImage_T*)handle, null, default, default, 0, 0, 0, 0, 0, ImageUsage.None, null);
 
     public ulong RawHandle => (ulong)Handle;
 
