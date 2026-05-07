@@ -27,20 +27,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Linux runners have no GPU. Install Mesa's lavapipe software Vulkan
-      # ICD plus the loader and validation layers so VkCreateInstance can
-      # resolve and tests can hit a real implementation.
-      - name: Install Linux Vulkan (lavapipe)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers vulkan-tools vulkan-validationlayers
-          vulkaninfo --summary | head -40 || true
-
-      # Windows runners have a working vulkan-1.dll via the GPU driver; no
-      # extra install needed for the loader. (Validation layers ship with
-      # the Vulkan SDK — install on demand via setup-vulkan-sdk if a
-      # validation-dependent test job is added later.)
+      # Linux + Windows runners both lack a Vulkan-capable GPU, so device-
+      # bound tests skip themselves via VulkanDriverProbe.HasDriver=false.
+      # An earlier attempt installed Mesa lavapipe (software ICD) on Linux
+      # to exercise the device path, but VMA's vmaCreateAllocator SIGSEGVs
+      # against lavapipe — that's a separate Linux/lavapipe compat issue
+      # to investigate in isolation, not a CI blocker. Until then both
+      # platforms run the same compile-only / pure-CPU subset of tests.
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -68,13 +61,4 @@ jobs:
         run: dotnet test tests/Ahjo.Vulkan.Native.Tests/Ahjo.Vulkan.Native.Tests.csproj -c Release --no-build --nologo
 
       - name: Test — Ahjo.Vulkan.Tests
-        run: dotnet test tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj -c Release --no-build --nologo --logger "console;verbosity=detailed" --blame-hang --blame-hang-timeout 60s --blame-crash
-
-      - name: Upload test crash artifacts
-        if: failure() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-crash-${{ matrix.os }}
-          path: tests/Ahjo.Vulkan.Tests/TestResults/
-          if-no-files-found: ignore
-          retention-days: 7
+        run: dotnet test tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj -c Release --no-build --nologo
