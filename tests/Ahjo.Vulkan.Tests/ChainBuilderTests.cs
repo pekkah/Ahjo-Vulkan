@@ -127,14 +127,28 @@ public sealed unsafe class ChainBuilderTests
             BuildSampleChain();
         }
 
-        var before = GC.GetAllocatedBytesForCurrentThread();
+        // Two measured passes. Tier-1→tier-2 promotion + dynamic-PGO
+        // recompiles can fire on the first measurement-sized loop on
+        // slower CI hardware, charging a small one-shot allocation to
+        // the calling thread that doesn't reflect per-call cost. By
+        // the second pass the JIT is fully settled, so any residual
+        // delta is genuinely per-iteration allocation. The first pass
+        // delta is intentionally not asserted on.
+        var before1 = GC.GetAllocatedBytesForCurrentThread();
         for (var i = 0; i < 100_000; i++)
         {
             BuildSampleChain();
         }
-        var after = GC.GetAllocatedBytesForCurrentThread();
+        _ = GC.GetAllocatedBytesForCurrentThread() - before1;
 
-        Assert.Equal(0, after - before);
+        var before2 = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 100_000; i++)
+        {
+            BuildSampleChain();
+        }
+        var after2 = GC.GetAllocatedBytesForCurrentThread();
+
+        Assert.Equal(0, after2 - before2);
     }
 
     [Fact]
