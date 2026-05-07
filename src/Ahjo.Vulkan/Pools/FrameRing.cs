@@ -110,6 +110,31 @@ public sealed unsafe class FrameRing : IDisposable
         return fc;
     }
 
+    /// <summary>
+    /// After a <see cref="Swapchain.Recreate"/>, replace any per-slot
+    /// <see cref="FrameContext.ImageAcquired"/> binary semaphore that
+    /// <c>vkAcquireNextImageKHR</c> host-signaled but no swapchain-aware
+    /// submit consumed (typical
+    /// <see cref="AcquireResult.Suboptimal"/> → bail-out path). Vulkan
+    /// has no host-reset for binary semaphores, so the recovery is
+    /// destroy + create — handled here via
+    /// <see cref="SemaphorePool.Discard(BinarySemaphore)"/> +
+    /// <see cref="SemaphorePool.AcquireBinary"/>. Slots with no pending
+    /// host-signal are left untouched. Caller marks signals via
+    /// <see cref="FrameContext.MarkImageAcquireSignaled"/>; the
+    /// swapchain-aware <see cref="FrameContext.Submit(Queue, ref CommandRecorder, Stage, Stage)"/>
+    /// clears the flag automatically.
+    /// </summary>
+    public void RecycleStaleAcquireSemaphores()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        for (int i = 0; i < _slots.Length; i++)
+        {
+            if (_slots[i].AcquireSignalPending)
+                _slots[i].RotateImageAcquired();
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -128,10 +153,24 @@ public sealed unsafe class FrameRing : IDisposable
         public  readonly StagingUploader   Staging;
         public  readonly SemaphorePool     SemaphorePool;
         public  readonly FencePool         FencePool;
-        public  readonly BinarySemaphore   ImageAcquired;
+        // Mutable rather than readonly: RecycleStaleAcquireSemaphores
+        // swaps the stuck handle out under FrameRing's control after a
+        // post-OutOfDate Swapchain.Recreate where AcquireNextImage
+        // signaled but no Submit consumed the signal. RenderingDone is
+        // also signaled-then-waited but the wait is queued by Present
+        // before vkDeviceWaitIdle drains, so it is never stuck.
+        public           BinarySemaphore   ImageAcquired;
         public  readonly BinarySemaphore   RenderingDone;
         public  readonly Fence             InFlightHandle;
         public  readonly DescriptorSetPool? DescriptorSets;
+        // True when the most recent AcquireNextImage host-signaled
+        // ImageAcquired and no swapchain-aware Submit has queued a
+        // wait that consumes it. Used by RecycleStaleAcquireSemaphores
+        // to find slots whose ImageAcquired is stuck signaled after a
+        // Swapchain.Recreate (Vulkan offers no host-reset for binary
+        // semaphores, so the recovery is destroy + AcquireBinary
+        // fresh — see Swapchain.Recreate's remarks).
+        private          bool              _acquireSignalPending;
         // True when the slot has been submitted-to-the-queue since its
         // last WaitAndReset — i.e. the in-flight fence has pending GPU
         // work that will signal it. False on a fresh slot, after
@@ -212,7 +251,28 @@ public sealed unsafe class FrameRing : IDisposable
 
         public ref readonly Fence InFlight => ref InFlightHandle;
 
-        public void MarkSubmitted() => _pendingSubmit = true;
+        public void MarkSubmitted()           => _pendingSubmit       = true;
+        public void MarkAcquireSignaled()     => _acquireSignalPending = true;
+        public void MarkAcquireWaitConsumed() => _acquireSignalPending = false;
+        public bool AcquireSignalPending      => _acquireSignalPending;
+
+        /// <summary>
+        /// Replace this slot's <see cref="ImageAcquired"/> with a fresh
+        /// binary semaphore from <see cref="SemaphorePool"/>. The old
+        /// one is destroyed via <see cref="SemaphorePool.Discard(BinarySemaphore)"/>;
+        /// the pending-acquire flag is cleared.
+        /// </summary>
+        public void RotateImageAcquired()
+        {
+            BinarySemaphore stale = ImageAcquired;
+            // Acquire-before-discard so a throw out of AcquireBinary
+            // leaves the slot still owning a valid (if stuck) handle
+            // rather than a destroyed one.
+            BinarySemaphore fresh = SemaphorePool.AcquireBinary();
+            SemaphorePool.Discard(stale);
+            ImageAcquired = fresh;
+            _acquireSignalPending = false;
+        }
 
         /// <summary>
         /// Block on the in-flight fence when there is a pending submit

@@ -72,6 +72,27 @@ public sealed unsafe class Swapchain : IDisposable
     /// <see cref="Surface"/> field MUST equal the surface this swapchain
     /// was originally built against.
     /// </summary>
+    /// <remarks>
+    /// <para><b>Binary-semaphore rotation (VUID-vkAcquireNextImageKHR-semaphore-01779).</b>
+    /// <c>vkDeviceWaitIdle</c> here drains pending queue work, but it
+    /// does <i>not</i> clear a host-side acquire signal that was never
+    /// consumed by a submit — the canonical case is
+    /// <see cref="AcquireNextImage"/> returning
+    /// <see cref="AcquireResult.Suboptimal"/> (or completing successfully
+    /// before the caller realized a resize was pending) followed by the
+    /// caller bailing out to <see cref="Recreate"/> without submitting.
+    /// Vulkan offers no host-reset for binary semaphores, so the only
+    /// way to get back to a clean state is to destroy the stuck
+    /// semaphore and create a fresh one. Use
+    /// <see cref="SemaphorePool.Discard(BinarySemaphore)"/> for the
+    /// destroy step and <see cref="SemaphorePool.AcquireBinary"/> for
+    /// the replacement; per-slot acquire semaphores live on
+    /// <see cref="FrameContext.ImageAcquired"/>, so the rotation
+    /// typically happens once per frames-in-flight after Recreate. A
+    /// binary semaphore that <i>was</i> consumed by a submit is left
+    /// unsignaled by <c>vkDeviceWaitIdle</c> and does not need
+    /// rotation.</para>
+    /// </remarks>
     public void Recreate(in SwapchainDescription desc)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

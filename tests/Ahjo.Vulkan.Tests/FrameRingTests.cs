@@ -386,6 +386,101 @@ public sealed unsafe class FrameRingTests
         }
     }
 
+    /// <summary>
+    /// RecycleStaleAcquireSemaphores is the post-Recreate counterpart
+    /// to the contract on Swapchain.Recreate: only slots flagged via
+    /// MarkImageAcquireSignaled (and not subsequently consumed by a
+    /// swapchain-aware Submit) are rotated. Untouched slots keep their
+    /// existing handle. The rotated slot's handle changes; the
+    /// underlying SemaphorePool stays balanced because Discard +
+    /// AcquireBinary nets to a fresh allocation.
+    /// </summary>
+    [Fact]
+    public void RecycleStaleAcquireSemaphores_RotatesFlaggedSlotsOnly()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+
+        using var ring = new FrameRing(device, framesInFlight: 2, queueFamily: family);
+
+        var f0 = ring.BeginFrame();
+        BinarySemaphore slot0Before = f0.ImageAcquired;
+        f0.MarkImageAcquireSignaled();
+        f0.Dispose();
+
+        var f1 = ring.BeginFrame();
+        BinarySemaphore slot1Before = f1.ImageAcquired;
+        // Slot 1: no MarkImageAcquireSignaled, simulating a slot whose
+        // last AcquireNextImage was OutOfDate (no host signal).
+        f1.Dispose();
+
+        ring.RecycleStaleAcquireSemaphores();
+
+        // Re-enter both slots and read the post-rotate handles.
+        // Need to wait for slot 0's fence — but it was reset by
+        // BeginFrame and never submitted, so reading ImageAcquired
+        // through a fresh BeginFrame on the same slot waits zero.
+        BinarySemaphore slot0After;
+        BinarySemaphore slot1After;
+        unsafe
+        {
+            // Walk slots through BeginFrame so the wait+reset path runs;
+            // FramesInFlight=2 → two BeginFrame calls return slot 0 then slot 1.
+            using (var f = ring.BeginFrame()) slot0After = f.ImageAcquired;
+            using (var f = ring.BeginFrame()) slot1After = f.ImageAcquired;
+
+            Assert.True(slot0Before.Handle != slot0After.Handle,
+                "Slot 0 had a pending acquire signal — its ImageAcquired must be rotated.");
+            Assert.True(slot1Before.Handle == slot1After.Handle,
+                "Slot 1 had no pending acquire signal — its ImageAcquired must be left untouched.");
+        }
+    }
+
+    /// <summary>
+    /// The swapchain-aware Submit clears the pending-acquire flag,
+    /// because the queued semaphore wait will consume the host signal.
+    /// RecycleStaleAcquireSemaphores must therefore be a no-op on a
+    /// slot that signaled-then-submitted in normal frame flow.
+    /// </summary>
+    [Fact]
+    public void RecycleStaleAcquireSemaphores_AfterSubmit_LeavesHandleUntouched()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+        var       queue   = device.GetQueue(family, 0);
+
+        using var ring = new FrameRing(device, framesInFlight: 2, queueFamily: family);
+
+        BinarySemaphore before;
+        using (var fc = ring.BeginFrame())
+        {
+            before = fc.ImageAcquired;
+            fc.MarkImageAcquireSignaled();
+            // Use the swapchain-aware Submit (the four-arg overload) —
+            // it clears the pending-acquire flag because the queued
+            // wait on ImageAcquired consumes the host signal.
+            var rec = fc.CommandBuffers.Begin();
+            try { fc.Submit(queue, ref rec, Stage.ColorAttachmentOutput, Stage.AllGraphics); }
+            finally { rec.Dispose(); }
+        }
+
+        ring.RecycleStaleAcquireSemaphores();
+
+        BinarySemaphore after;
+        using (var fc2 = ring.BeginFrame()) { /* rotates to slot 1 */ }
+        using (var fc0 = ring.BeginFrame()) { after = fc0.ImageAcquired; }
+
+        unsafe
+        {
+            Assert.True(before.Handle == after.Handle,
+                "A signaled-then-submitted slot has its flag cleared by Submit; rotate must be a no-op.");
+        }
+    }
+
     [Fact]
     public void Dispose_Is_Idempotent()
     {

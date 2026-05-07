@@ -124,6 +124,98 @@ public sealed class SyncPoolTests
         pool.Release(u2);
     }
 
+    /// <summary>
+    /// Discard destroys the underlying VkSemaphore and removes it from
+    /// pool tracking — the escape hatch for stuck binary semaphores
+    /// (signaled by AcquireNextImage but never waited-on by submit
+    /// before Recreate, etc.). A subsequent AcquireBinary materializes
+    /// a fresh handle rather than handing back the discarded one.
+    /// </summary>
+    [Fact]
+    public void SemaphorePool_Discard_DestroysAndDropsTracking()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+        using var pool     = new SemaphorePool(device);
+
+        var first = pool.AcquireBinary();
+        Assert.False(first.IsNull);
+        Assert.Equal(1, pool.AllocatedCount);
+
+        pool.Discard(first);
+        Assert.Equal(0, pool.AllocatedCount);
+        Assert.Equal(0, pool.IdleBinaryCount);
+
+        // Fresh acquire must allocate a new handle (free-list is empty
+        // and tracking has no record of the discarded one).
+        var second = pool.AcquireBinary();
+        unsafe { Assert.True(first.Handle != second.Handle); }
+        Assert.Equal(1, pool.AllocatedCount);
+
+        pool.Release(second);
+    }
+
+    [Fact]
+    public void SemaphorePool_Discard_AfterRelease_RemovesFromFreeList()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+        using var pool     = new SemaphorePool(device);
+
+        // Build a free-list with three binaries, then Discard the middle one.
+        var a = pool.AcquireBinary();
+        var b = pool.AcquireBinary();
+        var c = pool.AcquireBinary();
+        pool.Release(a);
+        pool.Release(b);
+        pool.Release(c);
+        Assert.Equal(3, pool.IdleBinaryCount);
+
+        pool.Discard(b);
+        Assert.Equal(2, pool.AllocatedCount);
+        Assert.Equal(2, pool.IdleBinaryCount);
+
+        // The two surviving binaries should still be acquirable from
+        // the free-list (no fresh allocations).
+        var x = pool.AcquireBinary();
+        var y = pool.AcquireBinary();
+        Assert.Equal(2, pool.AllocatedCount);
+        unsafe
+        {
+            // x and y are a and c in some order — neither is b.
+            Assert.True(x.Handle != b.Handle);
+            Assert.True(y.Handle != b.Handle);
+        }
+
+        pool.Release(x);
+        pool.Release(y);
+    }
+
+    [Fact]
+    public void SemaphorePool_Discard_ForeignHandle_Throws()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+        using var poolA    = new SemaphorePool(device);
+        using var poolB    = new SemaphorePool(device);
+
+        var foreign = poolA.AcquireBinary();
+        try
+        {
+            // poolB never produced this handle; Discard must reject
+            // rather than silently destroying poolA's semaphore behind
+            // poolA's back.
+            Assert.Throws<ArgumentException>(() => poolB.Discard(foreign));
+        }
+        finally { poolA.Release(foreign); }
+    }
+
     [Fact]
     public void SemaphorePool_BinaryAndTimeline_AreSeparateFreeLists()
     {

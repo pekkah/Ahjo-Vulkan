@@ -53,6 +53,22 @@ public sealed class FrameContext : IDisposable
     public BinarySemaphore ImageAcquired => Slot.ImageAcquired;
 
     /// <summary>
+    /// Tell the ring that the most recent
+    /// <see cref="Swapchain.AcquireNextImage"/> on this slot's
+    /// <see cref="ImageAcquired"/> signaled it. Call after
+    /// <see cref="AcquireResult.Success"/> or
+    /// <see cref="AcquireResult.Suboptimal"/>; do <i>not</i> call after
+    /// <see cref="AcquireResult.OutOfDate"/> (the spec says the
+    /// semaphore is left untouched on that path). The flag is cleared
+    /// automatically when the swapchain-aware
+    /// <see cref="Submit(Queue, ref CommandRecorder, Stage, Stage)"/>
+    /// queues a wait on the semaphore, or when
+    /// <see cref="FrameRing.RecycleStaleAcquireSemaphores"/> rotates
+    /// the slot's handle after a <see cref="Swapchain.Recreate"/>.
+    /// </summary>
+    public void MarkImageAcquireSignaled() => Slot.MarkAcquireSignaled();
+
+    /// <summary>
     /// Binary semaphore signaled at submit-completion. Reserved for the
     /// swapchain present integration in #24.
     /// </summary>
@@ -99,6 +115,10 @@ public sealed class FrameContext : IDisposable
     {
         ArgumentNullException.ThrowIfNull(queue);
         Slot.MarkSubmitted();
+        // The queued wait will consume the host-side acquire signal as
+        // the GPU reaches it, so from FrameRing's bookkeeping POV the
+        // signal is no longer pending the moment Submit2 returns.
+        Slot.MarkAcquireWaitConsumed();
 
         var wait   = new SemaphoreSubmit(ImageAcquired, imageAcquireWaitStage);
         var signal = new SemaphoreSubmit(RenderingDone, renderingDoneSignalStage);

@@ -88,12 +88,19 @@ internal static unsafe class Program
                     Width   = window.Width,
                     Height  = window.Height,
                 });
+                ring.RecycleStaleAcquireSemaphores();
                 continue;
             }
 
             using var fc = ring.BeginFrame();
 
             var acq = swap.AcquireNextImage(fc.ImageAcquired, TimeSpan.FromSeconds(1), out uint imageIndex);
+            // Suboptimal signals the semaphore per spec (just like
+            // Success); only OutOfDate leaves it untouched. Marking
+            // both signals lets RecycleStaleAcquireSemaphores below find
+            // the stuck handle when we bail out without submitting.
+            if (acq is AcquireResult.Success or AcquireResult.Suboptimal)
+                fc.MarkImageAcquireSignaled();
             if (acq is AcquireResult.OutOfDate or AcquireResult.Suboptimal)
             {
                 device.WaitIdle();
@@ -103,6 +110,7 @@ internal static unsafe class Program
                     Width   = window.Width,
                     Height  = window.Height,
                 });
+                ring.RecycleStaleAcquireSemaphores();
                 continue;
             }
             if (acq != AcquireResult.Success)
@@ -172,6 +180,7 @@ internal static unsafe class Program
                     Width   = window.Width,
                     Height  = window.Height,
                 });
+                ring.RecycleStaleAcquireSemaphores();
             }
 
             frame++;

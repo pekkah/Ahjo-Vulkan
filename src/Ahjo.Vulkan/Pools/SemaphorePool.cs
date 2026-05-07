@@ -86,6 +86,63 @@ public sealed unsafe class SemaphorePool : IDisposable
         _freeTimeline.Push((nint)sem.Handle);
     }
 
+    /// <summary>
+    /// Destroys <paramref name="sem"/> instead of returning it to the
+    /// free-list — the escape hatch for binary semaphores that are
+    /// stuck in a bad state and cannot be safely recycled. The canonical
+    /// case is a binary semaphore that <c>vkAcquireNextImageKHR</c>
+    /// signaled but a submit never waited on (typical
+    /// <c>VK_ERROR_OUT_OF_DATE_KHR</c> path before
+    /// <see cref="Swapchain.Recreate"/>): it is permanently signaled
+    /// from the host side, and Vulkan offers no host-reset for binary
+    /// semaphores. Discard removes the handle from the pool's tracking
+    /// and from any free-list, then immediately calls
+    /// <c>vkDestroySemaphore</c>; the caller follows up with
+    /// <see cref="AcquireBinary"/> to materialize a fresh one.
+    /// </summary>
+    public void Discard(BinarySemaphore sem)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (sem.IsNull) return;
+        DiscardCore((nint)sem.Handle, _freeBinary);
+    }
+
+    /// <summary>Counterpart of <see cref="Discard(BinarySemaphore)"/> for timeline semaphores.</summary>
+    public void Discard(TimelineSemaphore sem)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (sem.IsNull) return;
+        DiscardCore((nint)sem.Handle, _freeTimeline);
+    }
+
+    private void DiscardCore(nint handle, Stack<nint> matchingFreeList)
+    {
+        // Drop from tracking *before* destroy so a throw out of
+        // vkDestroySemaphore can't leave us with a dangling _allHandles
+        // entry that Dispose would later free a second time.
+        if (!_allHandles.Remove(handle))
+            throw new ArgumentException("Semaphore was not produced by this pool.", nameof(handle));
+
+        // Remove from the matching free-list if it was Released back in
+        // before this Discard call. Stack<T> has no Remove; rebuild
+        // without the target.
+        PurgeStack(matchingFreeList, handle);
+
+        Vk.vkDestroySemaphore(_device.Handle, (VkSemaphore_T*)handle, null);
+    }
+
+    private static void PurgeStack(Stack<nint> stack, nint target)
+    {
+        if (stack.Count == 0) return;
+        nint[] snapshot = stack.ToArray();   // top-of-stack first
+        stack.Clear();
+        for (int i = snapshot.Length - 1; i >= 0; i--)
+        {
+            if (snapshot[i] == target) continue;
+            stack.Push(snapshot[i]);
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed) return;

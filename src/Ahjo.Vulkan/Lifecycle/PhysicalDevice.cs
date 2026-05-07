@@ -51,7 +51,7 @@ public sealed unsafe class PhysicalDevice
     }
 
     /// <summary>
-    /// Creates a Vulkan device with the wrapper's 1.4 default feature set
+    /// Creates a Vulkan device with the wrapper's default feature set
     /// (<c>synchronization2</c>, <c>dynamicRendering</c>,
     /// <c>timelineSemaphore</c>, <c>bufferDeviceAddress</c>,
     /// <c>pushDescriptor</c>) plus any additional features the caller pushes
@@ -65,16 +65,39 @@ public sealed unsafe class PhysicalDevice
     /// family supports.
     /// </exception>
     /// <exception cref="VulkanException">
+    /// The selected GPU reports <c>apiVersion &lt; 1.3</c>, or
     /// <c>vkCreateDevice</c> failed (driver mismatch, OOM, feature not
     /// present on the device, etc.).
     /// </exception>
     /// <remarks>
-    /// Assumes a Vulkan 1.4 device. The default feature set lights up every
-    /// 1.4 promotional feature; on a 1.3 device the driver may reject the
-    /// chain with <c>VK_ERROR_FEATURE_NOT_PRESENT</c>.
+    /// <para><b>Vulkan 1.3+ required.</b> The wrapper unconditionally enables
+    /// the 1.3 promotional features <c>synchronization2</c> and
+    /// <c>dynamicRendering</c>, and records through the core 1.3 entry
+    /// points (<c>vkCmdBeginRendering</c> etc.) and structure types
+    /// (<c>VkRenderingInfo</c>, <c>VkPipelineRenderingCreateInfo</c>).
+    /// On a 1.2 device those entry points are unresolved, the feature
+    /// chain is rejected, and record-time calls would fault on null
+    /// function pointers. The version is asserted up front so the
+    /// failure mode is a clear exception rather than a deep crash —
+    /// <c>VK_KHR_dynamic_rendering</c> on 1.2 is not supported as a
+    /// fallback.</para>
+    /// <para>1.4 promotional features (<c>pushDescriptor</c>) are enabled
+    /// when the device is 1.4+; on a 1.3 device the chain still
+    /// includes the 1.4 features struct and the driver will silently
+    /// ignore unsupported bits, which is permitted by the spec when the
+    /// instance/device is 1.4-aware.</para>
     /// </remarks>
     public Device CreateDevice(in DeviceDescription desc)
     {
+        VkPhysicalDeviceProperties props;
+        Vk.vkGetPhysicalDeviceProperties(Handle, &props);
+        if (props.apiVersion < VulkanVersion.V1_3.Packed)
+        {
+            var v = new VulkanVersion(props.apiVersion);
+            throw new VulkanException(VkResult.VK_ERROR_INCOMPATIBLE_DRIVER,
+                $"Ahjo.Vulkan requires a Vulkan 1.3+ device. Selected GPU reports {v.Major}.{v.Minor}.{v.Patch}.");
+        }
+
         ValidateQueues(desc.Queues);
 
         int totalQueues = 0;
