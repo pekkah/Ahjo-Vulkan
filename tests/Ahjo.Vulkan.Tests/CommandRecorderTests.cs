@@ -333,6 +333,281 @@ public sealed unsafe class CommandRecorderTests
     }
 
     [Fact]
+    public void DrawIndexed_Instanced_RendersTriangle()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
+        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+
+        // Closes acceptance #1 of issue #45. triangle.vert hard-codes positions
+        // by gl_VertexIndex, so an index buffer of [0,1,2] paired with
+        // DrawIndexed(3) produces the same triangle a plain Draw(3) would,
+        // and instanceCount=2 redraws on top — the fragment shader's constant
+        // white means we just need to count any non-clear pixel to prove the
+        // indexed + instanced parameters reached vkCmdDrawIndexed.
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+
+        const uint W = 64, H = 64;
+        using var image = device.Allocator.CreateImage(
+            new ImageDescription
+            {
+                ImageType   = VkImageType.VK_IMAGE_TYPE_2D,
+                Format      = VkFormat.VK_FORMAT_R8G8B8A8_UNORM,
+                Width       = W, Height = H, Depth = 1,
+                MipLevels   = 1, ArrayLayers = 1,
+                Samples     = VkSampleCountFlagBits.VK_SAMPLE_COUNT_1_BIT,
+                Tiling      = VkImageTiling.VK_IMAGE_TILING_OPTIMAL,
+                Usage       = ImageUsage.ColorAttachment | ImageUsage.TransferSrc,
+                InitialLayout = VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
+            },
+            new AllocationDescription { Usage = MemoryUsage.AutoPreferDevice });
+        using var view = image.CreateView(device, new ImageViewDescription
+        {
+            ViewType     = VkImageViewType.VK_IMAGE_VIEW_TYPE_2D,
+            Aspect       = VkImageAspectFlagBits.VK_IMAGE_ASPECT_COLOR_BIT,
+            BaseMipLevel = 0, LevelCount = 1, BaseArrayLayer = 0, LayerCount = 1,
+        });
+
+        using var vBlob = SpirvBlob.Load(VertSpvPath);
+        using var fBlob = SpirvBlob.Load(FragSpvPath);
+        using var vMod  = device.CreateShaderModule(vBlob.Words);
+        using var fMod  = device.CreateShaderModule(fBlob.Words);
+        using var layout = device.CreatePipelineLayout(default);
+        ReadOnlySpan<VkFormat> colorFormats = [VkFormat.VK_FORMAT_R8G8B8A8_UNORM];
+        using var pipeline = device.BuildGraphicsPipeline()
+            .WithStages(in vMod, in fMod)
+            .WithDynamicRendering(colorFormats)
+            .WithLayout(in layout)
+            .Build();
+
+        using var index = device.Allocator.CreateBuffer(
+            new BufferDescription { Size = 3 * sizeof(ushort), Usage = BufferUsage.IndexBuffer },
+            new AllocationDescription
+            {
+                Usage = MemoryUsage.AutoPreferHost,
+                Flags = AllocationFlags.HostAccessSequentialWrite | AllocationFlags.Mapped,
+            });
+        Span<ushort> idx = index.AsSpan<ushort>();
+        idx[0] = 0; idx[1] = 1; idx[2] = 2;
+
+        const uint Bytes = W * H * 4;
+        using var readback = device.Allocator.CreateBuffer(
+            new BufferDescription { Size = Bytes, Usage = BufferUsage.TransferDst },
+            new AllocationDescription
+            {
+                Usage = MemoryUsage.AutoPreferHost,
+                Flags = AllocationFlags.HostAccessRandom | AllocationFlags.Mapped,
+            });
+
+        using var cmdPool   = new CommandBufferPool(device, family);
+        using var fencePool = new FencePool(device);
+        var fence = fencePool.Acquire();
+        try
+        {
+            var rec = cmdPool.Begin();
+            try
+            {
+                rec.PipelineBarrier(ImageBarrier.Transition(in image,
+                    from:     VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
+                    to:       VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    srcStage: Stage.TopOfPipe,             srcAccess: Access.None,
+                    dstStage: Stage.ColorAttachmentOutput, dstAccess: Access.ColorAttachmentWrite));
+
+                ColorAttachment[] color = [new ColorAttachment
+                {
+                    View       = view,
+                    Layout     = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    LoadOp     = VkAttachmentLoadOp.VK_ATTACHMENT_LOAD_OP_CLEAR,
+                    StoreOp    = VkAttachmentStoreOp.VK_ATTACHMENT_STORE_OP_STORE,
+                    ClearColor = ClearColor(0, 0, 0, 1),
+                }];
+                rec.BeginRendering(new RenderingInfo
+                {
+                    RenderArea       = new VkRect2D { extent = new VkExtent2D { width = W, height = H } },
+                    LayerCount       = 1,
+                    ColorAttachments = color,
+                });
+                rec.SetViewport(new VkViewport { x = 0, y = 0, width = W, height = H, minDepth = 0, maxDepth = 1 });
+                rec.SetScissor(new VkRect2D { extent = new VkExtent2D { width = W, height = H } });
+                rec.BindPipeline(in pipeline);
+                rec.BindIndexBuffer(in index, offset: 0, VkIndexType.VK_INDEX_TYPE_UINT16);
+                rec.DrawIndexed(indexCount: 3, instanceCount: 2);
+                rec.EndRendering();
+
+                rec.PipelineBarrier(ImageBarrier.Transition(in image,
+                    from:     VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    to:       VkImageLayout.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    srcStage: Stage.ColorAttachmentOutput, srcAccess: Access.ColorAttachmentWrite,
+                    dstStage: Stage.AllTransfer,           dstAccess: Access.TransferRead));
+
+                rec.CopyImageToBuffer(in image,
+                    VkImageLayout.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    in readback,
+                    BufferImageCopy.WholeImage(in image));
+
+                var queue = device.GetQueue(family, 0);
+                queue.Submit2(ref rec, in fence);
+            }
+            finally { rec.Dispose(); }
+
+            Assert.Equal(WaitState.Signaled, fence.Wait(TimeSpan.FromSeconds(5)));
+        }
+        finally { fencePool.Release(fence); }
+
+        Assert.True(CountWhitePixels(readback.AsReadOnlySpan<byte>()) > 0,
+            "DrawIndexed produced no white pixels — the indexed/instanced parameters did not reach vkCmdDrawIndexed.");
+    }
+
+    [Fact]
+    public void DrawIndirect_GpuFilledIndirectBuffer_RendersTriangle()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
+        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+
+        // Closes acceptance #2 of issue #45. The indirect buffer is
+        // device-local — host has no mapping; the only way data lands in it
+        // is the three FillBuffer calls below, which are vkCmdFillBuffer
+        // (i.e. GPU-side writes). The buffer barrier between the fills and
+        // the draw stops the driver from reordering the indirect read past
+        // the writes.
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+
+        const uint W = 64, H = 64;
+        using var image = device.Allocator.CreateImage(
+            new ImageDescription
+            {
+                ImageType   = VkImageType.VK_IMAGE_TYPE_2D,
+                Format      = VkFormat.VK_FORMAT_R8G8B8A8_UNORM,
+                Width       = W, Height = H, Depth = 1,
+                MipLevels   = 1, ArrayLayers = 1,
+                Samples     = VkSampleCountFlagBits.VK_SAMPLE_COUNT_1_BIT,
+                Tiling      = VkImageTiling.VK_IMAGE_TILING_OPTIMAL,
+                Usage       = ImageUsage.ColorAttachment | ImageUsage.TransferSrc,
+                InitialLayout = VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
+            },
+            new AllocationDescription { Usage = MemoryUsage.AutoPreferDevice });
+        using var view = image.CreateView(device, new ImageViewDescription
+        {
+            ViewType     = VkImageViewType.VK_IMAGE_VIEW_TYPE_2D,
+            Aspect       = VkImageAspectFlagBits.VK_IMAGE_ASPECT_COLOR_BIT,
+            BaseMipLevel = 0, LevelCount = 1, BaseArrayLayer = 0, LayerCount = 1,
+        });
+
+        using var vBlob = SpirvBlob.Load(VertSpvPath);
+        using var fBlob = SpirvBlob.Load(FragSpvPath);
+        using var vMod  = device.CreateShaderModule(vBlob.Words);
+        using var fMod  = device.CreateShaderModule(fBlob.Words);
+        using var layout = device.CreatePipelineLayout(default);
+        ReadOnlySpan<VkFormat> colorFormats = [VkFormat.VK_FORMAT_R8G8B8A8_UNORM];
+        using var pipeline = device.BuildGraphicsPipeline()
+            .WithStages(in vMod, in fMod)
+            .WithDynamicRendering(colorFormats)
+            .WithLayout(in layout)
+            .Build();
+
+        using var indirect = device.Allocator.CreateBuffer(
+            new BufferDescription
+            {
+                Size  = (ulong)sizeof(VkDrawIndirectCommand),
+                Usage = BufferUsage.IndirectBuffer | BufferUsage.TransferDst,
+            },
+            new AllocationDescription { Usage = MemoryUsage.AutoPreferDevice });
+
+        const uint Bytes = W * H * 4;
+        using var readback = device.Allocator.CreateBuffer(
+            new BufferDescription { Size = Bytes, Usage = BufferUsage.TransferDst },
+            new AllocationDescription
+            {
+                Usage = MemoryUsage.AutoPreferHost,
+                Flags = AllocationFlags.HostAccessRandom | AllocationFlags.Mapped,
+            });
+
+        using var cmdPool   = new CommandBufferPool(device, family);
+        using var fencePool = new FencePool(device);
+        var fence = fencePool.Acquire();
+        try
+        {
+            var rec = cmdPool.Begin();
+            try
+            {
+                // VkDrawIndirectCommand layout: vertexCount@0, instanceCount@4,
+                // firstVertex@8, firstInstance@12. FillBuffer writes a single
+                // 32-bit pattern per call, so three calls cover the four words
+                // (the trailing two zeros collapse into one 8-byte fill).
+                rec.FillBuffer(in indirect, data: 3u, offset: 0, size: 4);
+                rec.FillBuffer(in indirect, data: 1u, offset: 4, size: 4);
+                rec.FillBuffer(in indirect, data: 0u, offset: 8, size: 8);
+
+                BufferBarrier[] indirectBarrier =
+                [
+                    BufferBarrier.For(in indirect,
+                        srcStage: Stage.AllTransfer,  srcAccess: Access.TransferWrite,
+                        dstStage: Stage.DrawIndirect, dstAccess: Access.IndirectCommandRead),
+                ];
+                rec.PipelineBarrier(default, indirectBarrier, default);
+
+                rec.PipelineBarrier(ImageBarrier.Transition(in image,
+                    from:     VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
+                    to:       VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    srcStage: Stage.TopOfPipe,             srcAccess: Access.None,
+                    dstStage: Stage.ColorAttachmentOutput, dstAccess: Access.ColorAttachmentWrite));
+
+                ColorAttachment[] color = [new ColorAttachment
+                {
+                    View       = view,
+                    Layout     = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    LoadOp     = VkAttachmentLoadOp.VK_ATTACHMENT_LOAD_OP_CLEAR,
+                    StoreOp    = VkAttachmentStoreOp.VK_ATTACHMENT_STORE_OP_STORE,
+                    ClearColor = ClearColor(0, 0, 0, 1),
+                }];
+                rec.BeginRendering(new RenderingInfo
+                {
+                    RenderArea       = new VkRect2D { extent = new VkExtent2D { width = W, height = H } },
+                    LayerCount       = 1,
+                    ColorAttachments = color,
+                });
+                rec.SetViewport(new VkViewport { x = 0, y = 0, width = W, height = H, minDepth = 0, maxDepth = 1 });
+                rec.SetScissor(new VkRect2D { extent = new VkExtent2D { width = W, height = H } });
+                rec.BindPipeline(in pipeline);
+                rec.DrawIndirect(in indirect, offset: 0, drawCount: 1, stride: (uint)sizeof(VkDrawIndirectCommand));
+                rec.EndRendering();
+
+                rec.PipelineBarrier(ImageBarrier.Transition(in image,
+                    from:     VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    to:       VkImageLayout.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    srcStage: Stage.ColorAttachmentOutput, srcAccess: Access.ColorAttachmentWrite,
+                    dstStage: Stage.AllTransfer,           dstAccess: Access.TransferRead));
+
+                rec.CopyImageToBuffer(in image,
+                    VkImageLayout.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    in readback,
+                    BufferImageCopy.WholeImage(in image));
+
+                var queue = device.GetQueue(family, 0);
+                queue.Submit2(ref rec, in fence);
+            }
+            finally { rec.Dispose(); }
+
+            Assert.Equal(WaitState.Signaled, fence.Wait(TimeSpan.FromSeconds(5)));
+        }
+        finally { fencePool.Release(fence); }
+
+        Assert.True(CountWhitePixels(readback.AsReadOnlySpan<byte>()) > 0,
+            "DrawIndirect produced no white pixels — the GPU-written indirect command did not reach vkCmdDrawIndirect.");
+    }
+
+    private static int CountWhitePixels(ReadOnlySpan<byte> rgba)
+    {
+        int hits = 0;
+        for (int i = 0; i + 2 < rgba.Length; i += 4)
+            if (rgba[i] == 255 && rgba[i + 1] == 255 && rgba[i + 2] == 255) hits++;
+        return hits;
+    }
+
+    [Fact]
     public void BindVertexBuffers_RejectsMismatchedOffsets()
     {
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
