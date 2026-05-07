@@ -140,7 +140,12 @@ public sealed unsafe class PhysicalDevice
         ref var f14 = ref chain.Push<VkPhysicalDeviceVulkan14Features>();
         f14.pushDescriptor = 1;
 
-        desc.ConfigureFeatures?.Invoke(ref chain);
+        // Hand the configurer ref access to the wrapper's pre-pushed
+        // structs so it can flip additional 1.2/1.3/1.4 bits in-place
+        // without producing a duplicate-sType chain (issue 53). The
+        // duplicate-sType validator below still catches callers that
+        // push their own copy through `chain`.
+        desc.ConfigureFeatures?.Invoke(ref chain, ref f12, ref f13, ref f14);
 
         // Vulkan disallows two pNext nodes with the same sType inside a
         // single chain. The wrapper pre-pushes the 1.2/1.3/1.4 promoted-
@@ -217,9 +222,10 @@ public sealed unsafe class PhysicalDevice
                     VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES or
                     VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES =>
                         " The wrapper pre-pushes the 1.2/1.3/1.4 promoted-feature structs " +
-                        "before invoking ConfigureFeatures; do not Push them again. To toggle " +
-                        "additional bits, walk the existing chain via ChainBuilder or push only " +
-                        "the per-feature extension structs the wrapper does not own.",
+                        "before invoking ConfigureFeatures and hands them to the configurer " +
+                        "as ref parameters (features12/features13/features14) — flip extra " +
+                        "bits on those refs instead of pushing a second copy. Push only the " +
+                        "per-feature extension structs the wrapper does not own.",
                     _ => string.Empty,
                 };
 
