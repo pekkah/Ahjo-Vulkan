@@ -18,4 +18,25 @@
     <ProjectReference Include="..\..\src\Ahjo.Vulkan\Ahjo.Vulkan.csproj" />
   </ItemGroup>
 
+  <!--
+    GraphicsPipelineBuilderBenchmarks needs a real vert + frag VkShaderModule
+    pair; reuse the test project's triangle shaders rather than duplicating
+    the .vert/.frag sources here. Compiles via the same glslc fallback the
+    test csproj uses, with the same skip-when-missing behavior.
+  -->
+  <ItemGroup>
+    <_ShaderSource Include="..\Ahjo.Vulkan.Tests\Shaders\triangle.vert;..\Ahjo.Vulkan.Tests\Shaders\triangle.frag" />
+  </ItemGroup>
+
+  <Target Name="CompileShaders" AfterTargets="Build" Inputs="@(_ShaderSource)" Outputs="@(_ShaderSource->'$(OutputPath)Shaders\%(Filename)%(Extension).spv')">
+    <PropertyGroup>
+      <_GlslcExe Condition="'$(_GlslcExe)' == '' and '$(VULKAN_SDK)' != ''">$(VULKAN_SDK)\Bin\glslc.exe</_GlslcExe>
+      <_GlslcExe Condition="'$(_GlslcExe)' == ''">glslc</_GlslcExe>
+    </PropertyGroup>
+    <MakeDir Directories="$(OutputPath)Shaders" />
+    <Exec Command="&quot;$(_GlslcExe)&quot; &quot;%(_ShaderSource.FullPath)&quot; -o &quot;$(OutputPath)Shaders\%(_ShaderSource.Filename)%(_ShaderSource.Extension).spv&quot;"
+          IgnoreExitCode="false"
+          ContinueOnError="WarnAndContinue" />
+  </Target>
+
 </Project>
