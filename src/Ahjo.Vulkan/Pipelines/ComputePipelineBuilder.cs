@@ -15,6 +15,16 @@ namespace Ahjo.Vulkan;
 /// builder as an inline <see cref="EntryPointBuffer"/> so the
 /// <c>const char*</c> handed to Vulkan stays valid for the duration of
 /// <see cref="Build"/>.</para>
+/// <para><b>Aliasing.</b> Each <c>WithX</c> returns the builder by
+/// value, so an aliased reference (<c>var b1 = builder.WithA(...);
+/// builder.WithB(...);</c>) yields two independent copies that diverge
+/// silently. The intended pattern is a single chained expression
+/// <c>device.BuildComputePipeline().WithA(...).WithB(...).Build()</c>;
+/// do not stash intermediate copies. <see cref="Build"/> does not
+/// invalidate the receiver — the same builder can be re-<see cref="Build"/>'d
+/// to produce another pipeline with the same configuration, which is
+/// occasionally useful for cache-warming variants but is not the
+/// dominant path.</para>
 /// <para>Specialization constants are intentionally not on the builder
 /// yet — the typed <c>SpecializationInfo&lt;T&gt;</c> wrapper depends on
 /// the <see cref="Pipelines"/> design landing alongside the graphics
@@ -84,8 +94,10 @@ public unsafe ref struct ComputePipelineBuilder
     }
 
     /// <summary>
-    /// Issues <c>vkCreateComputePipelines</c>. The builder is left in an
-    /// indeterminate state after this call; callers should not reuse it.
+    /// Issues <c>vkCreateComputePipelines</c>. The builder is not
+    /// mutated; the receiver remains usable, but the dominant pattern is
+    /// a single chained expression — see the type-level remarks on
+    /// aliasing.
     /// </summary>
     public ComputePipeline Build()
     {
