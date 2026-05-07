@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Ahjo.Vulkan.Native;
 
 namespace Ahjo.Vulkan;
@@ -23,6 +24,34 @@ public readonly unsafe struct PipelineLayout : IVulkanHandle<PipelineLayout>, ID
     public ulong RawHandle => (ulong)Handle;
     public bool IsNull => Handle == null;
 
+    // Push-constant ranges declared at create time, keyed by raw handle.
+    // PipelineLayout is a `readonly struct` constrained to `unmanaged` by
+    // IVulkanHandle, so it can't carry a managed-reference field — the
+    // ranges live in this side-table, populated by Device.CreatePipelineLayout
+    // and read by CommandRecorder.PushConstants's debug-only range-fits
+    // assertion. Layout creation/disposal is not on a hot path; the
+    // dictionary lock and the small heap allocation per layout are
+    // acceptable. FromRaw'd layouts have no entry here — the assertion
+    // gracefully no-ops in that case.
+    private static readonly Dictionary<nint, PushConstantRange[]> s_pushRanges = new();
+    private static readonly object s_pushRangesLock = new();
+
+    internal static void RegisterPushRanges(VkPipelineLayout_T* handle, PushConstantRange[] ranges)
+    {
+        lock (s_pushRangesLock) s_pushRanges[(nint)handle] = ranges;
+    }
+
+    internal static PushConstantRange[]? TryGetPushRanges(VkPipelineLayout_T* handle)
+    {
+        lock (s_pushRangesLock)
+            return s_pushRanges.TryGetValue((nint)handle, out var ranges) ? ranges : null;
+    }
+
+    private static void UnregisterPushRanges(VkPipelineLayout_T* handle)
+    {
+        lock (s_pushRangesLock) s_pushRanges.Remove((nint)handle);
+    }
+
     /// <summary>
     /// Builds a <see cref="DescriptorTemplate{T}"/> for the per-frame
     /// <c>vkCmdPushDescriptorSetWithTemplate</c> path. The descriptor-set
@@ -43,6 +72,7 @@ public readonly unsafe struct PipelineLayout : IVulkanHandle<PipelineLayout>, ID
     public void Dispose()
     {
         if (Handle == null) return;
+        UnregisterPushRanges(Handle);
         Vk.vkDestroyPipelineLayout(DeviceHandle, Handle, null);
     }
 }

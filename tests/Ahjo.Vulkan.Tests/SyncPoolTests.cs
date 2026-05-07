@@ -148,10 +148,16 @@ public sealed class SyncPoolTests
         Assert.Equal(0, pool.AllocatedCount);
         Assert.Equal(0, pool.IdleBinaryCount);
 
-        // Fresh acquire must allocate a new handle (free-list is empty
-        // and tracking has no record of the discarded one).
+        // Fresh acquire must allocate a new handle: the free-list is
+        // empty and tracking has no record of the discarded one, so
+        // AllocatedCount rises from 0 back to 1. We deliberately do NOT
+        // assert pointer inequality on first.Handle vs second.Handle —
+        // the Vulkan spec doesn't promise that vkCreateSemaphore returns
+        // a different address after a destroy, and at least one common
+        // driver reuses the just-freed slot, which made this assertion
+        // flake under load. AllocatedCount is the contract.
         var second = pool.AcquireBinary();
-        unsafe { Assert.True(first.Handle != second.Handle); }
+        Assert.False(second.IsNull);
         Assert.Equal(1, pool.AllocatedCount);
 
         pool.Release(second);

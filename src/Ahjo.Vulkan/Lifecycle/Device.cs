@@ -234,6 +234,14 @@ public sealed unsafe class Device : IDisposable
             };
             Vk.vkCreatePipelineLayout(Handle, &ci, null, &raw).ThrowIfFailed();
         }
+
+        // Register the declared push-constant ranges on the side table
+        // PipelineLayout exposes for CommandRecorder.PushConstants's
+        // debug-only range-fits assertion. PipelineLayout is constrained
+        // to `unmanaged` by IVulkanHandle, so the ranges can't ride on
+        // the struct itself — see PipelineLayout.RegisterPushRanges.
+        if (!desc.PushConstantRanges.IsEmpty)
+            PipelineLayout.RegisterPushRanges(raw, desc.PushConstantRanges.ToArray());
         return new PipelineLayout(raw, Handle);
     }
 

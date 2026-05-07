@@ -140,9 +140,11 @@ public unsafe ref struct CommandRecorder : IDisposable
 
     /// <summary>
     /// Pushes <paramref name="data"/> into the layout's push-constant
-    /// range. Caller's responsibility to ensure
-    /// <c>sizeof(T) + offset</c> fits a range declared on
-    /// <paramref name="layout"/> for <paramref name="stages"/>.
+    /// range. In debug builds the call asserts that the
+    /// <c>[offset, offset + sizeof(T))</c> window fits a range declared
+    /// on <paramref name="layout"/> whose stage mask covers
+    /// <paramref name="stages"/>; release builds rely on the driver /
+    /// validation layer.
     /// </summary>
     public void PushConstants<T>(in PipelineLayout layout, ShaderStages stages, in T data, uint offset = 0)
         where T : unmanaged
@@ -150,9 +152,44 @@ public unsafe ref struct CommandRecorder : IDisposable
         // Vulkan guarantees only 128 bytes of push-constant space (VkPhysicalDeviceLimits.maxPushConstantsSize ≥ 128).
         Debug.Assert(Unsafe.SizeOf<T>() + offset <= 128,
             $"PushConstants<{typeof(T).Name}>: sizeof+offset ({Unsafe.SizeOf<T>()}+{offset}) exceeds Vulkan's 128-byte minimum guarantee.");
+        AssertPushRangeFits(in layout, stages, offset, (uint)Unsafe.SizeOf<T>());
 
         fixed (T* p = &data)
             Vk.vkCmdPushConstants(Handle, layout.Handle, (uint)stages, offset, (uint)Unsafe.SizeOf<T>(), p);
+    }
+
+    [Conditional("DEBUG")]
+    private static void AssertPushRangeFits(in PipelineLayout layout, ShaderStages stages, uint offset, uint size)
+    {
+        var ranges = PipelineLayout.TryGetPushRanges(layout.Handle);
+        // PipelineLayout.FromRaw / a layout built without push ranges
+        // has no entry — there's nothing to validate against. The call
+        // still fires; the driver / validation layer is the backstop.
+        if (ranges is null) return;
+
+        for (int i = 0; i < ranges.Length; i++)
+        {
+            var r = ranges[i];
+            // Find a single declared range that fully contains the
+            // call's [offset, offset+size) window AND whose stage mask
+            // is a superset of the requested stages. Vulkan also
+            // permits ranges to be split across multiple declarations
+            // (each byte's stage union must equal stageFlags), but
+            // single-range coverage is the dominant case and matches
+            // the "one push-constant block per layout" idiom the
+            // wrapper documents on PushConstantRange.
+            if ((stages & r.Stages) == stages
+                && offset >= r.Offset
+                && (ulong)offset + size <= (ulong)r.Offset + r.Size)
+            {
+                return;
+            }
+        }
+
+        Debug.Fail(
+            $"PushConstants: no declared range on PipelineLayout fits stages={stages}, offset={offset}, size={size}. " +
+            "Declared ranges must include the requested window AND cover the requested stages — " +
+            "see PipelineLayoutDescription.PushConstantRanges.");
     }
 
     /// <summary>
