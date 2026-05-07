@@ -90,6 +90,38 @@ public sealed unsafe class SwapchainTests
         Assert.True(swap.ImageCount >= 2);
     }
 
+    /// <summary>
+    /// <see cref="Swapchain.Recreate"/> defaults to <c>vkDeviceWaitIdle</c>
+    /// when no sync callback is provided; pass a callback (typically
+    /// <c>FrameRing.WaitForInFlightFences</c>) to skip the device-wide
+    /// stall in favor of waiting only on the per-frame fences that
+    /// actually reference swapchain images. The callback must run; this
+    /// test proves it does.
+    /// </summary>
+    [Fact]
+    public void Recreate_InvokesSyncCallback_InsteadOfWaitIdle()
+    {
+        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out _);
+
+        var desc = new SwapchainDescription { Surface = surface, Width = window.Width, Height = window.Height };
+        using var swap = new Swapchain(device, in desc);
+
+        int callbackInvocations = 0;
+        window.Resize(800, 600);
+        var resizedDesc = new SwapchainDescription { Surface = surface, Width = window.Width, Height = window.Height };
+        swap.Recreate(in resizedDesc, () => callbackInvocations++);
+
+        Assert.Equal(1, callbackInvocations);
+        Assert.True(swap.ImageCount >= 2);
+    }
+
     [Fact]
     public void Swapchain_Recreate_With_Different_Surface_Throws()
     {

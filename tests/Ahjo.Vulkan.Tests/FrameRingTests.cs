@@ -481,6 +481,66 @@ public sealed unsafe class FrameRingTests
         }
     }
 
+    /// <summary>
+    /// WaitForInFlightFences is the per-frame-fence drain offered as an
+    /// alternative to <c>vkDeviceWaitIdle</c> for the
+    /// <see cref="Swapchain.Recreate"/> sync hook (issue 53). It must
+    /// (a) return promptly when no slot has a pending submit and
+    /// (b) actually block on signaled fences — proven here by submitting
+    /// real GPU work, calling the drain, and observing
+    /// <see cref="Fence.IsSignaled"/> on the in-flight fence afterwards.
+    /// </summary>
+    [Fact]
+    public void WaitForInFlightFences_NoPendingSubmits_ReturnsImmediately()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+
+        using var ring = new FrameRing(device, framesInFlight: 2, queueFamily: family);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        ring.WaitForInFlightFences();
+        sw.Stop();
+        Assert.True(sw.Elapsed < TimeSpan.FromMilliseconds(250),
+            $"Drain on a fresh ring must be near-instant; took {sw.Elapsed}.");
+    }
+
+    [Fact]
+    public void WaitForInFlightFences_AfterSubmit_DrainsPendingWork()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+        var       queue   = device.GetQueue(family, 0);
+
+        using var ring = new FrameRing(device, framesInFlight: 2, queueFamily: family);
+
+        Fence inFlight;
+        using (var frame = ring.BeginFrame())
+        {
+            inFlight = frame.InFlight;
+            var rec = frame.CommandBuffers.Begin();
+            try
+            {
+                using var bigBuf = device.Allocator.CreateBuffer(
+                    new BufferDescription { Size = 4 * 1024 * 1024, Usage = BufferUsage.TransferDst },
+                    new AllocationDescription { Usage = MemoryUsage.AutoPreferDevice });
+                rec.FillBuffer(in bigBuf, 0xDEADBEEFu);
+                frame.Submit(queue, ref rec);
+            }
+            finally { rec.Dispose(); }
+        }
+
+        // Drain via the new path; the slot's fence must be signaled when
+        // it returns. Re-waiting on a signaled fence is a no-op, so the
+        // next BeginFrame on this slot still works without surprises.
+        ring.WaitForInFlightFences();
+        Assert.True(inFlight.IsSignaled);
+    }
+
     [Fact]
     public void Dispose_Is_Idempotent()
     {

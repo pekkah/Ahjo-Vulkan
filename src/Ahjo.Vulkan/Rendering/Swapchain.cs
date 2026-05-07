@@ -72,12 +72,32 @@ public sealed unsafe class Swapchain : IDisposable
     /// <see cref="Surface"/> field MUST equal the surface this swapchain
     /// was originally built against.
     /// </summary>
+    /// <param name="desc">New swapchain parameters.</param>
+    /// <param name="syncBeforeDestroy">
+    /// Optional caller-supplied hook that drains GPU work referencing the
+    /// old swapchain. <see langword="null"/> (default) preserves the
+    /// historical behavior of calling <c>vkDeviceWaitIdle</c>, which is
+    /// correct in isolation but defeats the point of having frames in
+    /// flight. Frame-loop callers should pass
+    /// <see cref="FrameRing.WaitForInFlightFences"/> (or any equivalent
+    /// per-frame-fence drain) so the wait covers exactly the submits
+    /// that touch the swapchain. The wrapper has no way to verify the
+    /// callback is sufficient — a callback that misses a pending submit
+    /// will surface as a driver-side device-lost on the next frame.
+    /// </param>
     /// <remarks>
+    /// <para><b>Why an optional callback rather than a hard
+    /// <see cref="FrameRing"/> dependency.</b> The swapchain is usable
+    /// without a frame ring (single-frame tools, screenshot harnesses,
+    /// some test paths) — those callers want the conservative
+    /// <c>vkDeviceWaitIdle</c> default. Engines built on
+    /// <see cref="FrameRing"/> wire the callback once at startup and
+    /// stop blocking the entire device on every resize.</para>
     /// <para><b>Binary-semaphore rotation (VUID-vkAcquireNextImageKHR-semaphore-01779).</b>
-    /// <c>vkDeviceWaitIdle</c> here drains pending queue work, but it
-    /// does <i>not</i> clear a host-side acquire signal that was never
-    /// consumed by a submit — the canonical case is
-    /// <see cref="AcquireNextImage"/> returning
+    /// The drain here (whether <c>vkDeviceWaitIdle</c> or the per-frame
+    /// fences) flushes pending queue work, but it does <i>not</i> clear
+    /// a host-side acquire signal that was never consumed by a submit —
+    /// the canonical case is <see cref="AcquireNextImage"/> returning
     /// <see cref="AcquireResult.Suboptimal"/> (or completing successfully
     /// before the caller realized a resize was pending) followed by the
     /// caller bailing out to <see cref="Recreate"/> without submitting.
@@ -90,10 +110,9 @@ public sealed unsafe class Swapchain : IDisposable
     /// <see cref="FrameContext.ImageAcquired"/>, so the rotation
     /// typically happens once per frames-in-flight after Recreate. A
     /// binary semaphore that <i>was</i> consumed by a submit is left
-    /// unsignaled by <c>vkDeviceWaitIdle</c> and does not need
-    /// rotation.</para>
+    /// unsignaled by the drain and does not need rotation.</para>
     /// </remarks>
-    public void Recreate(in SwapchainDescription desc)
+    public void Recreate(in SwapchainDescription desc, SwapchainSyncCallback? syncBeforeDestroy = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (desc.Surface.Handle != _surface.Handle)
@@ -101,7 +120,10 @@ public sealed unsafe class Swapchain : IDisposable
                 "Recreate must use the same Surface this Swapchain was constructed with.",
                 nameof(desc));
 
-        Vk.vkDeviceWaitIdle(_device.Handle).ThrowIfFailed();
+        if (syncBeforeDestroy is null)
+            Vk.vkDeviceWaitIdle(_device.Handle).ThrowIfFailed();
+        else
+            syncBeforeDestroy();
 
         VkSwapchainKHR_T* old = _handle;
         DestroyViews();

@@ -135,6 +135,31 @@ public sealed unsafe class FrameRing : IDisposable
         }
     }
 
+    /// <summary>
+    /// Block until every slot with an outstanding submit has its in-flight
+    /// fence signaled. Designed for the
+    /// <see cref="Swapchain.Recreate"/> drain step — passing this method
+    /// as <see cref="SwapchainSyncCallback"/> waits on exactly the
+    /// submits the ring is tracking instead of stalling the whole device
+    /// via <c>vkDeviceWaitIdle</c>. Slots with no pending submit (fresh
+    /// or already-drained) are skipped, matching
+    /// <see cref="Slot.WaitAndReset"/>'s logic.
+    /// </summary>
+    /// <remarks>
+    /// Does not reset the fences — the next <see cref="BeginFrame"/> on a
+    /// drained slot still calls <see cref="Slot.WaitAndReset"/>, which
+    /// re-waits (a no-op on a signaled fence) and resets. The
+    /// double-wait is intentional: it keeps the per-slot reset
+    /// bookkeeping in one place and avoids the surprise of
+    /// <c>WaitForInFlightFences</c> silently advancing slot state.
+    /// </remarks>
+    public void WaitForInFlightFences()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        for (int i = 0; i < _slots.Length; i++)
+            _slots[i].WaitForPendingSubmit();
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -255,6 +280,21 @@ public sealed unsafe class FrameRing : IDisposable
         public void MarkAcquireSignaled()     => _acquireSignalPending = true;
         public void MarkAcquireWaitConsumed() => _acquireSignalPending = false;
         public bool AcquireSignalPending      => _acquireSignalPending;
+
+        /// <summary>
+        /// Block on the in-flight fence iff a submit is pending for this
+        /// slot. Used by <see cref="WaitForInFlightFences"/> to drain
+        /// before <c>Swapchain.Recreate</c> destroys the old swapchain.
+        /// Does not touch <c>_pendingSubmit</c> or reset the fence —
+        /// rotation bookkeeping stays exclusive to <c>WaitAndReset</c>.
+        /// </summary>
+        public void WaitForPendingSubmit()
+        {
+            if (!_pendingSubmit) return;
+            if (InFlightHandle.Wait(Timeout.InfiniteTimeSpan) != WaitState.Signaled)
+                throw new VulkanException(VkResult.VK_TIMEOUT,
+                    "FrameRing slot fence never signaled while draining for swapchain recreate.");
+        }
 
         /// <summary>
         /// Replace this slot's <see cref="ImageAcquired"/> with a fresh
