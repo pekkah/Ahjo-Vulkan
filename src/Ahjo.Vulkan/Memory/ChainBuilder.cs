@@ -43,6 +43,7 @@ public unsafe ref struct ChainBuilder<TRoot>
 {
     private readonly Span<byte> _buffer;
     private int _cursor;
+    private int _rootOffset;
     private int _tailOffset;
     private bool _hasRoot;
 
@@ -50,6 +51,7 @@ public unsafe ref struct ChainBuilder<TRoot>
     {
         _buffer = buffer;
         _cursor = 0;
+        _rootOffset = -1;
         _tailOffset = -1;
         _hasRoot = false;
     }
@@ -67,6 +69,7 @@ public unsafe ref struct ChainBuilder<TRoot>
         }
         ref var slot = ref Reserve<TRoot>(out var offset);
         WriteHeader(offset, TRoot.RootSType);
+        _rootOffset = offset;
         _tailOffset = offset;
         _hasRoot = true;
         return ref slot;
@@ -109,7 +112,12 @@ public unsafe ref struct ChainBuilder<TRoot>
             {
                 return null;
             }
-            return (TRoot*)Unsafe.AsPointer(ref _buffer[0]);
+            // Read off _rootOffset rather than assuming the root sits at
+            // _buffer[0]. Today Reserve places the root at offset 0
+            // (it's the first allocation), but if a leading sentinel /
+            // header is ever added before Root, _buffer[0] would no
+            // longer name the head node.
+            return (TRoot*)Unsafe.AsPointer(ref _buffer[_rootOffset]);
         }
     }
 

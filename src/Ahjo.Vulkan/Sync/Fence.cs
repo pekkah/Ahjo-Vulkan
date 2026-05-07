@@ -38,6 +38,16 @@ public readonly unsafe struct Fence : IVulkanHandle<Fence>
     /// <see langword="false"/> on <c>VK_NOT_READY</c>. Any other code
     /// throws.
     /// </summary>
+    /// <remarks>
+    /// Cannot reuse <see cref="WaitStateExtensions.ToWaitState"/>: that
+    /// mapping is for the wait APIs (vkWaitForFences / vkWaitSemaphores),
+    /// whose success-set is <c>SUCCESS</c> / <c>TIMEOUT</c> /
+    /// <c>ERROR_DEVICE_LOST</c> with <c>VK_NOT_READY</c> intentionally
+    /// excluded. <c>vkGetFenceStatus</c>'s success-set is
+    /// <c>SUCCESS</c> / <c>NOT_READY</c> / <c>ERROR_DEVICE_LOST</c>;
+    /// folding both into one mapper would silently treat a wrong-API
+    /// <c>NOT_READY</c> as a timeout and vice versa.
+    /// </remarks>
     public bool IsSignaled
     {
         get

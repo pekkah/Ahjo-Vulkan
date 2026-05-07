@@ -35,6 +35,16 @@ public sealed class SpirvBlob : IDisposable
     }
 
     /// <summary>SPIR-V words, valid until <see cref="Dispose"/>.</summary>
+    /// <remarks>
+    /// SPIR-V requires 4-byte word alignment. <see cref="MemoryMarshal.Cast{T,U}(System.Span{T})"/>
+    /// over a GC-heap <c>byte[]</c> assumes the array's element-zero
+    /// pointer is <c>uint</c>-aligned. CoreCLR's allocator places every
+    /// reference-typed object on at least an 8-byte boundary (the object
+    /// header is 8 bytes on 64-bit, 4 on 32-bit) and the <c>byte[]</c>
+    /// data starts immediately after that header — so the first byte is
+    /// always 4-byte aligned regardless of platform. The cast is safe
+    /// for the lifetime of the rented buffer.
+    /// </remarks>
     public ReadOnlySpan<uint> Words
     {
         get

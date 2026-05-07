@@ -157,10 +157,13 @@ internal static unsafe class DescriptorTemplateBuilder
             BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
         // GetFields() doesn't guarantee declaration order; sort by byte
         // offset, which matches declaration order for sequential layout
-        // and is the order Vulkan reads anyway.
-        Array.Sort(fields, static (a, b) =>
-            Marshal.OffsetOf(a.DeclaringType!, a.Name).ToInt64()
-                .CompareTo(Marshal.OffsetOf(b.DeclaringType!, b.Name).ToInt64()));
+        // and is the order Vulkan reads anyway. OffsetOf hits a P/Invoke;
+        // cache once per field instead of recomputing 4× inside the
+        // sort comparer.
+        var offsets = new long[fields.Length];
+        for (int i = 0; i < fields.Length; i++)
+            offsets[i] = Marshal.OffsetOf(fields[i].DeclaringType!, fields[i].Name).ToInt64();
+        Array.Sort(offsets, fields);
 
         if (fields.Length != bindings.Length)
             throw new ArgumentException(

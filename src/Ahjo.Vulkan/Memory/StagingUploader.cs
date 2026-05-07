@@ -20,6 +20,16 @@ namespace Ahjo.Vulkan;
 /// <see cref="ChunkSize"/>, a one-off chunk is allocated to fit it and
 /// added to the pool. The chunk stays in the pool for future frames —
 /// pathological, but never fails.</para>
+/// <para><b>Thread safety.</b> Single-threaded by design — the
+/// per-slot <see cref="FrameRing"/> contract guarantees one
+/// recording thread per <see cref="StagingUploader"/> instance. No
+/// internal locking; concurrent <see cref="Upload{T}"/> calls would
+/// race on <c>_chunks</c> (a <see cref="List{T}"/> whose internal
+/// array can move under a concurrent <c>Add</c>) and on
+/// <c>_activeChunkIndex</c>, and the spans returned via
+/// <see cref="StagedUpload.Source"/> would alias overlapping byte
+/// ranges. Each frame slot owns its own uploader; cross-slot uploads
+/// require routing through the slot's owning thread.</para>
 /// </remarks>
 public sealed unsafe class StagingUploader : IDisposable
 {

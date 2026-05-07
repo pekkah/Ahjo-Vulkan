@@ -17,6 +17,15 @@ public enum ShaderStages : uint
     Compute             = 0x00000020,
     Task                = 0x00000040,
     Mesh                = 0x00000080,
+    /// <summary>
+    /// Pre-mesh classic graphics pipeline:
+    /// vert | tessC | tessE | geom | frag. Mirrors Vulkan's
+    /// <c>VK_SHADER_STAGE_ALL_GRAPHICS</c> exactly — the spec defines it
+    /// as 0x1F and explicitly excludes <see cref="Task"/> / <see cref="Mesh"/>
+    /// (a mesh pipeline replaces the vert/tess/geom front end). Use
+    /// <c>Vertex | … | Fragment | Task | Mesh</c> explicitly when targeting
+    /// mesh shaders alongside fragment.
+    /// </summary>
     AllGraphics         = 0x0000001F,
     All                 = 0x7FFFFFFF,
 }

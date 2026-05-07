@@ -25,8 +25,17 @@ public readonly record struct PushConstantRange
     /// <summary>
     /// Range sized to <c>sizeof(T)</c>. Default <paramref name="offset"/>
     /// is 0 — the dominant case (a single push-constant block per layout).
+    /// Throws when <paramref name="offset"/> is not a multiple of 4 —
+    /// Vulkan's <c>VUID-VkPushConstantRange-offset-00295</c> requires
+    /// 4-byte alignment, and catching it here is friendlier than the
+    /// driver's <c>VK_ERROR_*</c> at <c>vkCreatePipelineLayout</c>.
     /// </summary>
     public static PushConstantRange For<T>(ShaderStages stages, uint offset = 0)
         where T : unmanaged
-        => new() { Stages = stages, Offset = offset, Size = (uint)Unsafe.SizeOf<T>() };
+    {
+        if ((offset & 3) != 0)
+            throw new ArgumentException(
+                $"Push-constant offset must be a multiple of 4 (got {offset}).", nameof(offset));
+        return new PushConstantRange { Stages = stages, Offset = offset, Size = (uint)Unsafe.SizeOf<T>() };
+    }
 }
