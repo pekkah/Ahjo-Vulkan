@@ -59,16 +59,33 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// Ends recording (if not already ended) and returns the buffer to
     /// the pool. Safe to call from a <c>using</c>.
     /// </summary>
+    /// <remarks>
+    /// vkEndCommandBuffer can fail (out-of-memory, validation reject); if
+    /// it does, the buffer must still be retired or the pool's tracking
+    /// drifts — _outstanding stays elevated, the cb is in neither _idle
+    /// nor _spent, and the next <see cref="CommandBufferPool.ResetForFrame"/>
+    /// trips its outstanding assert. The pool can't recover a cb it has
+    /// no record of, so a future <see cref="CommandBufferPool.Begin"/>
+    /// would also never hand it back out. The try/finally pushes the
+    /// retire onto the failure path, the original exception still
+    /// propagates.
+    /// </remarks>
     public void Dispose()
     {
         if (Handle == null || _retired) return;
-        if (!_ended)
+        try
         {
-            Vk.vkEndCommandBuffer(Handle).ThrowIfFailed();
-            _ended = true;
+            if (!_ended)
+            {
+                Vk.vkEndCommandBuffer(Handle).ThrowIfFailed();
+                _ended = true;
+            }
         }
-        _pool.Retire(Handle);
-        _retired = true;
+        finally
+        {
+            _pool.Retire(Handle);
+            _retired = true;
+        }
     }
 
     // ---- Dynamic state ----

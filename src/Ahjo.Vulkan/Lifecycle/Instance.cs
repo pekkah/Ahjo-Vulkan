@@ -115,8 +115,24 @@ public sealed unsafe class Instance : IDisposable
             var functions = new InstanceFunctionTable(raw);
 
             VkDebugUtilsMessengerEXT_T* messenger = null;
-            if (desc.EnableValidation && functions.CreateDebugUtilsMessenger != null)
+            if (desc.EnableValidation)
             {
+                // VK_EXT_debug_utils is auto-added when EnableValidation is
+                // true (see CopyAndMaybeAppend above), so a null entry-point
+                // here means the loader has the extension declared but the
+                // function pointer didn't resolve — typically a validation-
+                // layer-less SDK install. Silently dropping the messenger
+                // would let validation = true succeed without ever running
+                // a callback after instance creation; surface the gap loud
+                // so the caller fixes the install.
+                if (functions.CreateDebugUtilsMessenger == null)
+                {
+                    Vk.vkDestroyInstance(raw, null);
+                    throw new VulkanException(VkResult.VK_ERROR_EXTENSION_NOT_PRESENT,
+                        "EnableValidation = true but vkCreateDebugUtilsMessengerEXT could not be resolved. " +
+                        "Install the Vulkan SDK validation layers, or set EnableValidation = false.");
+                }
+
                 var mci = new VkDebugUtilsMessengerCreateInfoEXT
                 {
                     sType = VkStructureType.VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
