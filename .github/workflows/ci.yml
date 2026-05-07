@@ -68,4 +68,4 @@ jobs:
         run: dotnet test tests/Ahjo.Vulkan.Native.Tests/Ahjo.Vulkan.Native.Tests.csproj -c Release --no-build --nologo
 
       - name: Test — Ahjo.Vulkan.Tests
-        run: dotnet test tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj -c Release --no-build --nologo
+        run: dotnet test tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj -c Release --no-build --nologo --logger "console;verbosity=detailed" --blame-hang --blame-hang-timeout 60s --blame-crash
