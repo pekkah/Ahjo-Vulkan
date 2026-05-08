@@ -595,6 +595,201 @@ public unsafe ref struct CommandRecorder : IDisposable
     }
 
     /// <summary>
+    /// Generate a full mip chain for <paramref name="image"/> via
+    /// successive <c>vkCmdBlitImage2</c> downsamples from level i-1 to
+    /// level i. On entry mip 0 must be in
+    /// <c>VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL</c>; on exit every mip is
+    /// in <paramref name="finalLayout"/>. The image must have been
+    /// created with <see cref="ImageUsage.TransferSrc"/> +
+    /// <see cref="ImageUsage.TransferDst"/>.
+    /// </summary>
+    /// <param name="image">Multi-mip image to fill.</param>
+    /// <param name="finalLayout">
+    /// Layout every mip lands in. Typical values are
+    /// <c>VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL</c> for sampled
+    /// textures and <c>VK_IMAGE_LAYOUT_GENERAL</c> for storage images.
+    /// </param>
+    /// <param name="filter">
+    /// Blit filter. Defaults to <see cref="VkFilter.VK_FILTER_LINEAR"/>;
+    /// use <see cref="VkFilter.VK_FILTER_NEAREST"/> on integer formats
+    /// or formats that don't advertise
+    /// <c>VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT</c> /
+    /// <c>VK_FORMAT_FEATURE_BLIT_SRC_BIT</c>. Probe via
+    /// <see cref="PhysicalDevice.SupportsOptimalTilingFeature"/>.
+    /// </param>
+    /// <param name="aspect">
+    /// Subresource aspect — color (default), depth, or stencil.
+    /// </param>
+    /// <remarks>
+    /// <para>For an image with <c>MipLevels = 1</c> the helper just
+    /// transitions mip 0 into <paramref name="finalLayout"/>.</para>
+    /// <para>Per-axis mip dimensions use <c>max(1, dim &gt;&gt; i)</c>,
+    /// which is the spec's downsample formula and matches the engine's
+    /// non-power-of-two behaviour.</para>
+    /// <para>All barriers are <c>stackalloc</c>'d; barrier count is
+    /// bounded by mip count + 2 (per-iteration src-layout transition
+    /// plus the final batched transitions).</para>
+    /// </remarks>
+    public void GenerateMips(
+        in Image              image,
+        VkImageLayout         finalLayout,
+        VkFilter              filter = VkFilter.VK_FILTER_LINEAR,
+        VkImageAspectFlagBits aspect = VkImageAspectFlagBits.VK_IMAGE_ASPECT_COLOR_BIT)
+    {
+        uint mipLevels   = image.MipLevels   == 0 ? 1u : image.MipLevels;
+        uint arrayLayers = image.ArrayLayers == 0 ? 1u : image.ArrayLayers;
+
+        // Single-mip image: only thing left is to put mip 0 into the
+        // requested final layout.
+        if (mipLevels <= 1)
+        {
+            ImageBarrier soleBarrier = new()
+            {
+                Image               = (nint)image.Handle,
+                SrcStage            = Stage.Copy,
+                SrcAccess           = Access.TransferWrite,
+                DstStage            = Stage.AllCommands,
+                DstAccess           = Access.MemoryRead | Access.MemoryWrite,
+                OldLayout           = VkImageLayout.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                NewLayout           = finalLayout,
+                SrcQueueFamilyIndex = ImageBarrier.QueueFamilyIgnored,
+                DstQueueFamilyIndex = ImageBarrier.QueueFamilyIgnored,
+                Aspect              = aspect,
+                BaseMipLevel        = 0,
+                LevelCount          = 1,
+                BaseArrayLayer      = 0,
+                LayerCount          = arrayLayers,
+            };
+            PipelineBarrier(in soleBarrier);
+            return;
+        }
+
+        // Step 1: mips 1..N-1 start in UNDEFINED and need to move to
+        // TRANSFER_DST so the loop's blit destinations are valid.
+        ImageBarrier dstInit = new()
+        {
+            Image               = (nint)image.Handle,
+            SrcStage            = Stage.None,
+            SrcAccess           = Access.None,
+            DstStage            = Stage.Copy,
+            DstAccess           = Access.TransferWrite,
+            OldLayout           = VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
+            NewLayout           = VkImageLayout.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            SrcQueueFamilyIndex = ImageBarrier.QueueFamilyIgnored,
+            DstQueueFamilyIndex = ImageBarrier.QueueFamilyIgnored,
+            Aspect              = aspect,
+            BaseMipLevel        = 1,
+            LevelCount          = mipLevels - 1,
+            BaseArrayLayer      = 0,
+            LayerCount          = arrayLayers,
+        };
+        PipelineBarrier(in dstInit);
+
+        // Step 2: per-mip downsample loop.
+        int srcW = (int)image.Width;
+        int srcH = (int)image.Height;
+        int srcD = (int)(image.Depth == 0 ? 1u : image.Depth);
+
+        for (uint i = 1; i < mipLevels; i++)
+        {
+            int dstW = Math.Max(1, srcW >> 1);
+            int dstH = Math.Max(1, srcH >> 1);
+            int dstD = Math.Max(1, srcD >> 1);
+
+            // Move mip (i-1) from TRANSFER_DST → TRANSFER_SRC so the
+            // upcoming blit can sample it.
+            ImageBarrier srcSwap = new()
+            {
+                Image               = (nint)image.Handle,
+                SrcStage            = Stage.Copy,
+                SrcAccess           = Access.TransferWrite,
+                DstStage            = Stage.Blit,
+                DstAccess           = Access.TransferRead,
+                OldLayout           = VkImageLayout.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                NewLayout           = VkImageLayout.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                SrcQueueFamilyIndex = ImageBarrier.QueueFamilyIgnored,
+                DstQueueFamilyIndex = ImageBarrier.QueueFamilyIgnored,
+                Aspect              = aspect,
+                BaseMipLevel        = i - 1,
+                LevelCount          = 1,
+                BaseArrayLayer      = 0,
+                LayerCount          = arrayLayers,
+            };
+            PipelineBarrier(in srcSwap);
+
+            ImageBlitRegion region = new()
+            {
+                SrcAspect         = aspect,
+                SrcMipLevel       = i - 1,
+                SrcBaseArrayLayer = 0,
+                SrcLayerCount     = arrayLayers,
+                SrcOffset0        = default,
+                SrcOffset1        = new VkOffset3D { x = srcW, y = srcH, z = srcD },
+                DstAspect         = aspect,
+                DstMipLevel       = i,
+                DstBaseArrayLayer = 0,
+                DstLayerCount     = arrayLayers,
+                DstOffset0        = default,
+                DstOffset1        = new VkOffset3D { x = dstW, y = dstH, z = dstD },
+            };
+            BlitImage(
+                in image, VkImageLayout.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                in image, VkImageLayout.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                MemoryMarshal.CreateReadOnlySpan(ref region, 1),
+                filter);
+
+            srcW = dstW;
+            srcH = dstH;
+            srcD = dstD;
+        }
+
+        // Step 3: mips 0..N-2 ended in TRANSFER_SRC; mip N-1 ended in
+        // TRANSFER_DST. Move both subranges to the final layout. Issue
+        // them as two separate barrier calls — batching into a single
+        // vkCmdPipelineBarrier2 would require a stackalloc'd span that
+        // ref-safety analysis can't reconcile with the recorder's
+        // ref-struct receiver, and the extra barrier on a one-shot
+        // mip-gen path is negligible.
+        ImageBarrier finalSrcBarrier = new()
+        {
+            Image               = (nint)image.Handle,
+            SrcStage            = Stage.Blit,
+            SrcAccess           = Access.TransferRead,
+            DstStage            = Stage.AllCommands,
+            DstAccess           = Access.MemoryRead | Access.MemoryWrite,
+            OldLayout           = VkImageLayout.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            NewLayout           = finalLayout,
+            SrcQueueFamilyIndex = ImageBarrier.QueueFamilyIgnored,
+            DstQueueFamilyIndex = ImageBarrier.QueueFamilyIgnored,
+            Aspect              = aspect,
+            BaseMipLevel        = 0,
+            LevelCount          = mipLevels - 1,
+            BaseArrayLayer      = 0,
+            LayerCount          = arrayLayers,
+        };
+        PipelineBarrier(in finalSrcBarrier);
+
+        ImageBarrier finalDstBarrier = new()
+        {
+            Image               = (nint)image.Handle,
+            SrcStage            = Stage.Copy,
+            SrcAccess           = Access.TransferWrite,
+            DstStage            = Stage.AllCommands,
+            DstAccess           = Access.MemoryRead | Access.MemoryWrite,
+            OldLayout           = VkImageLayout.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            NewLayout           = finalLayout,
+            SrcQueueFamilyIndex = ImageBarrier.QueueFamilyIgnored,
+            DstQueueFamilyIndex = ImageBarrier.QueueFamilyIgnored,
+            Aspect              = aspect,
+            BaseMipLevel        = mipLevels - 1,
+            LevelCount          = 1,
+            BaseArrayLayer      = 0,
+            LayerCount          = arrayLayers,
+        };
+        PipelineBarrier(in finalDstBarrier);
+    }
+
+    /// <summary>
     /// One <c>vkCmdBlitImage2</c>. <paramref name="filter"/> defaults to
     /// linear — the right call for downscale / upscale of color targets.
     /// Use nearest for integer formats or single-texel reads.
