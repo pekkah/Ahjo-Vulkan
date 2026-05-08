@@ -25,5 +25,9 @@ public readonly unsafe struct SamplerDescriptorWrite
         _layoutPad = 0;
     }
 
+    public SamplerDescriptorWrite(in Sampler sampler) : this(sampler.Handle) { }
+
     public static SamplerDescriptorWrite Of(VkSampler_T* sampler) => new(sampler);
+
+    public static SamplerDescriptorWrite Of(in Sampler sampler) => new(sampler.Handle);
 }

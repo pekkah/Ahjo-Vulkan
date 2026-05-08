@@ -311,6 +311,60 @@ public sealed unsafe class Device : IDisposable
     }
 
     /// <summary>
+    /// Creates a <see cref="Sampler"/> from <paramref name="desc"/>. Validates
+    /// <see cref="SamplerDescription.AnisotropyEnable"/> against the physical
+    /// device's <c>samplerAnisotropy</c> feature, and clamps
+    /// <see cref="SamplerDescription.MaxAnisotropy"/> to
+    /// <c>VkPhysicalDeviceLimits.maxSamplerAnisotropy</c>. Throws
+    /// <see cref="ArgumentException"/> when anisotropy is requested on a
+    /// device that does not advertise the feature, since the driver would
+    /// reject the create with an opaque error.
+    /// </summary>
+    public Sampler CreateSampler(in SamplerDescription desc)
+    {
+        float maxAnisotropy = 1f;
+        if (desc.AnisotropyEnable)
+        {
+            VkPhysicalDeviceFeatures features;
+            Vk.vkGetPhysicalDeviceFeatures(PhysicalDevice.Handle, &features);
+            if (features.samplerAnisotropy == 0)
+                throw new ArgumentException(
+                    "SamplerDescription.AnisotropyEnable is true but the physical device does not advertise samplerAnisotropy.",
+                    nameof(desc));
+
+            VkPhysicalDeviceProperties props;
+            Vk.vkGetPhysicalDeviceProperties(PhysicalDevice.Handle, &props);
+            float limit = props.limits.maxSamplerAnisotropy;
+            float requested = desc.MaxAnisotropy <= 0f ? limit : desc.MaxAnisotropy;
+            maxAnisotropy = requested > limit ? limit : requested;
+        }
+
+        var ci = new VkSamplerCreateInfo
+        {
+            sType                   = VkStructureType.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+            magFilter               = desc.MagFilter,
+            minFilter               = desc.MinFilter,
+            mipmapMode              = desc.MipmapMode,
+            addressModeU            = desc.AddressModeU,
+            addressModeV            = desc.AddressModeV,
+            addressModeW            = desc.AddressModeW,
+            mipLodBias              = desc.MipLodBias,
+            anisotropyEnable        = desc.AnisotropyEnable ? 1u : 0u,
+            maxAnisotropy           = maxAnisotropy,
+            compareEnable           = desc.CompareEnable ? 1u : 0u,
+            compareOp               = desc.CompareOp,
+            minLod                  = desc.MinLod,
+            maxLod                  = desc.MaxLod,
+            borderColor             = desc.BorderColor,
+            unnormalizedCoordinates = desc.UnnormalizedCoordinates ? 1u : 0u,
+        };
+
+        VkSampler_T* raw = null;
+        Vk.vkCreateSampler(Handle, &ci, null, &raw).ThrowIfFailed();
+        return new Sampler(raw, Handle);
+    }
+
+    /// <summary>
     /// Builds a <see cref="PipelineLayout"/> from descriptor-set layouts +
     /// push-constant ranges.
     /// </summary>
