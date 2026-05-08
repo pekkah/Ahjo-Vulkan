@@ -201,6 +201,64 @@ public sealed unsafe class PhysicalDeviceTests
         Assert.False(gpu.IsNull);
     }
 
+    /// <summary>
+    /// <c>VK_FORMAT_R8G8B8A8_UNORM</c> with optimal tiling is required by
+    /// the spec to support sampling and color-attachment use. The probe
+    /// must surface non-zero <c>optimalTilingFeatures</c> for it on every
+    /// conformant device.
+    /// </summary>
+    [Fact]
+    public void GetFormatProperties_Rgba8Unorm_OptimalTilingNonZero()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        var gpu = instance.PickPhysicalDevice(static (in PhysicalDeviceInfo _) => true);
+
+        VkFormatProperties props = gpu.GetFormatProperties(VkFormat.VK_FORMAT_R8G8B8A8_UNORM);
+        Assert.NotEqual(0u, props.optimalTilingFeatures);
+    }
+
+    /// <summary>
+    /// The engine's runtime mip-generation path needs both
+    /// <c>BlitSrc</c> + <c>SampledImageFilterLinear</c> on the source
+    /// format to use linear filtering during downsample blits. Probe both
+    /// flags at once to mirror the engine's call shape.
+    /// </summary>
+    [Fact]
+    public void SupportsOptimalTilingFeature_LinearFilterableBlitSrc_Rgba8Unorm()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        var gpu = instance.PickPhysicalDevice(static (in PhysicalDeviceInfo _) => true);
+
+        bool ok = gpu.SupportsOptimalTilingFeature(
+            VkFormat.VK_FORMAT_R8G8B8A8_UNORM,
+            VkFormatFeatureFlagBits.VK_FORMAT_FEATURE_BLIT_SRC_BIT |
+            VkFormatFeatureFlagBits.VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
+
+        Assert.True(ok, "VK_FORMAT_R8G8B8A8_UNORM must support BLIT_SRC + SAMPLED_IMAGE_FILTER_LINEAR with optimal tiling on a conformant device.");
+    }
+
+    /// <summary>
+    /// <c>VK_FORMAT_UNDEFINED</c> is a sentinel — no optimal-tiling
+    /// features are valid on it; the probe must report no support.
+    /// </summary>
+    [Fact]
+    public void SupportsOptimalTilingFeature_Undefined_ReturnsFalse()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        var gpu = instance.PickPhysicalDevice(static (in PhysicalDeviceInfo _) => true);
+
+        bool ok = gpu.SupportsOptimalTilingFeature(
+            VkFormat.VK_FORMAT_UNDEFINED,
+            VkFormatFeatureFlagBits.VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT);
+        Assert.False(ok);
+    }
+
     [Fact]
     public void Pick_TwoCalls_ReturnSameInstance()
     {

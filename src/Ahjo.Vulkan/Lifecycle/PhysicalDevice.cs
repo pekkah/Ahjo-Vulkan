@@ -34,6 +34,36 @@ public sealed unsafe class PhysicalDevice
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_PHYSICAL_DEVICE;
 
     /// <summary>
+    /// Wraps <c>vkGetPhysicalDeviceFormatProperties</c>. Returns the
+    /// linear / optimal / buffer feature bitmasks the device advertises
+    /// for <paramref name="format"/>. Used to decide whether a candidate
+    /// format supports a given operation (linear-filterable blit source,
+    /// renderable color attachment, etc.) before committing to it.
+    /// </summary>
+    public VkFormatProperties GetFormatProperties(VkFormat format)
+    {
+        VkFormatProperties props;
+        Vk.vkGetPhysicalDeviceFormatProperties(Handle, format, &props);
+        return props;
+    }
+
+    /// <summary>
+    /// Convenience predicate over <see cref="GetFormatProperties"/>:
+    /// <see langword="true"/> when the device's
+    /// <c>optimalTilingFeatures</c> mask for <paramref name="format"/>
+    /// covers every bit in <paramref name="feature"/>. Pass an OR of
+    /// flags to require multiple features at once
+    /// (e.g. <c>BlitSrc | SampledImageFilterLinear</c> for runtime mip
+    /// generation).
+    /// </summary>
+    public bool SupportsOptimalTilingFeature(VkFormat format, VkFormatFeatureFlagBits feature)
+    {
+        VkFormatProperties props;
+        Vk.vkGetPhysicalDeviceFormatProperties(Handle, format, &props);
+        return ((VkFormatFeatureFlagBits)props.optimalTilingFeatures & feature) == feature;
+    }
+
+    /// <summary>
     /// Wraps <c>vkGetPhysicalDeviceSurfaceSupportKHR</c>. Returns
     /// <see langword="true"/> when the queue family at
     /// <paramref name="queueFamilyIndex"/> on this physical device can
