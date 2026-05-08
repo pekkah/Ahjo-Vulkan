@@ -16,11 +16,16 @@ namespace Ahjo.Vulkan;
 /// loop, <see cref="Recreate"/> on
 /// <see cref="AcquireResult.OutOfDate"/> / window resize, and
 /// <see cref="Dispose"/> when tearing down (after the device is idle).</para>
-/// <para><b>Sharing mode.</b> Always
-/// <c>VK_SHARING_MODE_EXCLUSIVE</c>. Multi-queue-family sharing on a
-/// swapchain is rare in practice — engines that need it can drive
-/// queue-family ownership transfers explicitly via
-/// <see cref="ImageBarrier"/>.</para>
+/// <para><b>Sharing mode.</b> Auto-detected per swapchain create. The
+/// wrapper resolves the device's first graphics-capable queue family
+/// and the first family that can present to the swapchain's
+/// <see cref="Surface"/>. When they differ — most desktop hardware
+/// unifies them, but split-family configurations exist (Mesa lavapipe,
+/// some Apple Silicon setups, simulator stacks) — the swapchain is
+/// created with <c>VK_SHARING_MODE_CONCURRENT</c> listing both family
+/// indices in <c>pQueueFamilyIndices</c>, and present can flow
+/// without queue-ownership transfers. Unified-family hardware keeps
+/// the spec-default <c>VK_SHARING_MODE_EXCLUSIVE</c>.</para>
 /// </remarks>
 public sealed unsafe class Swapchain : IDisposable
 {
@@ -252,26 +257,41 @@ public sealed unsafe class Swapchain : IDisposable
         // ---- Usage ----
         _imageUsage = desc.ImageUsage == 0 ? ImageUsage.ColorAttachment : desc.ImageUsage;
 
-        var ci = new VkSwapchainCreateInfoKHR
+        // Resolve graphics + present families and decide sharing mode.
+        // On unified-family hardware (the dominant desktop case) gfx ==
+        // present, the family-index list collapses to one entry, and we
+        // ship Exclusive. On split-family hardware Concurrent listing
+        // both indices skips the queue-ownership transfer barriers the
+        // wrapper does not emit.
+        Span<uint> shareFamilies = stackalloc uint[2];
+        VkSharingMode sharingMode = ResolveSharingMode(gpu, shareFamilies, out uint familyCount);
+
+        VkSwapchainCreateInfoKHR ci;
+        fixed (uint* pFamilies = shareFamilies)
         {
-            sType            = VkStructureType.VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-            surface          = _surface.Handle,
-            minImageCount    = count,
-            imageFormat      = _format.format,
-            imageColorSpace  = _format.colorSpace,
-            imageExtent      = _extent,
-            imageArrayLayers = 1,
-            imageUsage       = (uint)_imageUsage,
-            imageSharingMode = VkSharingMode.VK_SHARING_MODE_EXCLUSIVE,
-            preTransform     = caps.currentTransform,
-            compositeAlpha   = VkCompositeAlphaFlagBitsKHR.VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-            presentMode      = _presentMode,
-            clipped          = 1,
-            oldSwapchain     = oldSwapchain,
-        };
-        VkSwapchainKHR_T* raw = null;
-        Vk.vkCreateSwapchainKHR(_device.Handle, &ci, null, &raw).ThrowIfFailed();
-        _handle = raw;
+            ci = new VkSwapchainCreateInfoKHR
+            {
+                sType                 = VkStructureType.VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+                surface               = _surface.Handle,
+                minImageCount         = count,
+                imageFormat           = _format.format,
+                imageColorSpace       = _format.colorSpace,
+                imageExtent           = _extent,
+                imageArrayLayers      = 1,
+                imageUsage            = (uint)_imageUsage,
+                imageSharingMode      = sharingMode,
+                queueFamilyIndexCount = sharingMode == VkSharingMode.VK_SHARING_MODE_CONCURRENT ? familyCount : 0u,
+                pQueueFamilyIndices   = sharingMode == VkSharingMode.VK_SHARING_MODE_CONCURRENT ? pFamilies : null,
+                preTransform          = caps.currentTransform,
+                compositeAlpha        = VkCompositeAlphaFlagBitsKHR.VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+                presentMode           = _presentMode,
+                clipped               = 1,
+                oldSwapchain          = oldSwapchain,
+            };
+            VkSwapchainKHR_T* raw = null;
+            Vk.vkCreateSwapchainKHR(_device.Handle, &ci, null, &raw).ThrowIfFailed();
+            _handle = raw;
+        }
 
         LoadImagesAndViews();
     }
@@ -313,6 +333,73 @@ public sealed unsafe class Swapchain : IDisposable
         for (int i = 0; i < _views.Length; i++) _views[i].Dispose();
         _views  = [];
         _images = [];
+    }
+
+    /// <summary>
+    /// Walks the physical device's queue families, picks the first
+    /// graphics-capable family and the first family that can present to
+    /// <see cref="_surface"/>, and decides between
+    /// <c>VK_SHARING_MODE_EXCLUSIVE</c> (same family) and
+    /// <c>VK_SHARING_MODE_CONCURRENT</c> (different families). On
+    /// Concurrent, fills <paramref name="shareFamilies"/> with the two
+    /// indices and returns the count via <paramref name="familyCount"/>.
+    /// </summary>
+    private VkSharingMode ResolveSharingMode(
+        VkPhysicalDevice_T* gpu,
+        Span<uint>          shareFamilies,
+        out uint            familyCount)
+    {
+        uint count = 0;
+        Vk.vkGetPhysicalDeviceQueueFamilyProperties(gpu, &count, null);
+        if (count == 0)
+        {
+            familyCount = 0;
+            return VkSharingMode.VK_SHARING_MODE_EXCLUSIVE;
+        }
+
+        Span<VkQueueFamilyProperties> qfp = count <= 16
+            ? stackalloc VkQueueFamilyProperties[(int)count]
+            : new VkQueueFamilyProperties[count];
+        fixed (VkQueueFamilyProperties* p = qfp)
+            Vk.vkGetPhysicalDeviceQueueFamilyProperties(gpu, &count, p);
+
+        uint graphicsFamily = uint.MaxValue;
+        uint presentFamily  = uint.MaxValue;
+        for (uint i = 0; i < count; i++)
+        {
+            if (graphicsFamily == uint.MaxValue &&
+                ((VkQueueFlagBits)qfp[(int)i].queueFlags & VkQueueFlagBits.VK_QUEUE_GRAPHICS_BIT) != 0)
+            {
+                graphicsFamily = i;
+            }
+
+            if (presentFamily == uint.MaxValue)
+            {
+                uint supports = 0;
+                Vk.vkGetPhysicalDeviceSurfaceSupportKHR(gpu, i, _surface.Handle, &supports).ThrowIfFailed();
+                if (supports != 0) presentFamily = i;
+            }
+
+            if (graphicsFamily != uint.MaxValue && presentFamily != uint.MaxValue) break;
+        }
+
+        // Either family un-resolvable (no graphics queue, or no
+        // present-capable family on this surface) means the swapchain
+        // can't function as a presentation source — fall back to
+        // Exclusive and let the driver/validation layer flag the
+        // missing capability with a clearer message than a sharing-
+        // mode mismatch would produce.
+        if (graphicsFamily == uint.MaxValue || presentFamily == uint.MaxValue ||
+            graphicsFamily == presentFamily)
+        {
+            familyCount = 0;
+            return VkSharingMode.VK_SHARING_MODE_EXCLUSIVE;
+        }
+
+        shareFamilies[0] = graphicsFamily;
+        shareFamilies[1] = presentFamily;
+        familyCount = 2;
+        return VkSharingMode.VK_SHARING_MODE_CONCURRENT;
     }
 
     private VkSurfaceFormatKHR NegotiateFormat(VkPhysicalDevice_T* gpu, in SwapchainDescription desc)
