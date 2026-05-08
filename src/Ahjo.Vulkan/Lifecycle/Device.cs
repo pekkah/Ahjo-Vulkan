@@ -321,6 +321,7 @@ public sealed unsafe class Device : IDisposable
             setLayouts[i] = (nint)desc.SetLayouts[i].Handle;
 
         Span<VkPushConstantRange> ranges = stackalloc VkPushConstantRange[desc.PushConstantRanges.Length];
+        uint maxPushBytes = 0;
         for (int i = 0; i < desc.PushConstantRanges.Length; i++)
         {
             ref readonly var r = ref desc.PushConstantRanges[i];
@@ -330,6 +331,26 @@ public sealed unsafe class Device : IDisposable
                 offset     = r.Offset,
                 size       = r.Size,
             };
+            uint end = r.Offset + r.Size;
+            if (end > maxPushBytes) maxPushBytes = end;
+        }
+
+        // Validate against the device's reported push-constant ceiling so
+        // a 256+ B layout fails at create time with a clear message,
+        // rather than getting accepted and then exploding at the call
+        // site. Vulkan guarantees ≥128 B; desktop GPUs typically expose
+        // 256 B and the engine's CullPushConstants is 224 B, which the
+        // old per-call literal assert rejected outright.
+        if (maxPushBytes > 0)
+        {
+            VkPhysicalDeviceProperties props;
+            Vk.vkGetPhysicalDeviceProperties(PhysicalDevice.Handle, &props);
+            uint deviceLimit = props.limits.maxPushConstantsSize;
+            if (maxPushBytes > deviceLimit)
+                throw new ArgumentException(
+                    $"PipelineLayoutDescription declares push-constant range ending at {maxPushBytes} bytes, " +
+                    $"which exceeds the device's maxPushConstantsSize ({deviceLimit}).",
+                    nameof(desc));
         }
 
         VkPipelineLayout_T* raw = null;
