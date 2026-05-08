@@ -11,14 +11,6 @@ on:
 # natively ship with a Node 24 runtime.
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  # Vulkan SDK ships the Khronos validation layer DLL + JSON. Pin to a
-  # specific release so cache invalidation is explicit. Bump in lockstep
-  # with VulkanHeadersVersion in Directory.Build.props when reasonable.
-  VULKAN_SDK_VERSION: "1.4.321.0"
-  # SwiftShader has no tagged releases; pin a commit hash. Bump by hand
-  # after a local CI run confirms the new revision builds + passes the
-  # driver-gated test subset.
-  SWIFTSHADER_COMMIT: "f9d5d49a3c599a315e3493dc1e9b5309cffb3305"
 
 jobs:
   build-test:
@@ -35,12 +27,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Windows: provision SwiftShader (software Vulkan ICD) + LunarG
-      # validation layer below so the driver-gated test subset actually
-      # runs. Linux runner stays compile-only / pure-CPU subset for now —
-      # an earlier attempt installed Mesa lavapipe but VMA's
-      # vmaCreateAllocator SIGSEGVs against it. That's a separate
-      # Linux/lavapipe compat issue tracked outside CI.
+      # Windows runner stays compile-only / pure-CPU subset — no Vulkan
+      # ICD provisioned (a SwiftShader build was tried but at 39+ min on
+      # the hosted runner it's not viable; mock ICD wouldn't satisfy VMA).
+      # Linux runner installs Mesa lavapipe, the Mesa software Vulkan ICD,
+      # so the driver-gated test subset runs there. The earlier
+      # vmaCreateAllocator-on-lavapipe SIGSEGV was a wrapper bug — the
+      # allocator passed vulkanApiVersion=1.4 to a 1.3 device, causing VMA
+      # to import 1.4 entry points the loader returned null for; fixed in
+      # Allocator.Create by clamping to the device's reported apiVersion.
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -58,89 +53,13 @@ jobs:
           path: native/downloaded
           key: vulkan-headers-${{ matrix.os }}-${{ hashFiles('Directory.Build.props') }}
 
-      # ── Vulkan ICD + validation layer (Windows only) ─────────────────
-      # The two cache steps below are the hot path: a cache hit skips
-      # both the SDK silent-install and the ~10 minute SwiftShader build.
-      # Cold-cache cost is amortised across runs because the cache key
-      # only changes when VULKAN_SDK_VERSION / SWIFTSHADER_COMMIT do.
-
-      - name: Cache LunarG Vulkan SDK
-        if: matrix.os == 'windows-latest'
-        id: cache-vksdk
-        uses: actions/cache@v4
-        with:
-          path: C:\VulkanSDK\${{ env.VULKAN_SDK_VERSION }}
-          key: vulkan-sdk-windows-${{ env.VULKAN_SDK_VERSION }}
-
-      - name: Install LunarG Vulkan SDK (validation layer)
-        if: matrix.os == 'windows-latest' && steps.cache-vksdk.outputs.cache-hit != 'true'
-        shell: pwsh
+      - name: Install Mesa lavapipe (Linux software Vulkan ICD)
+        if: matrix.os == 'ubuntu-latest'
         run: |
-          $ver = "${{ env.VULKAN_SDK_VERSION }}"
-          $url = "https://sdk.lunarg.com/sdk/download/$ver/windows/vulkansdk-windows-X64-$ver.exe"
-          $exe = Join-Path $env:RUNNER_TEMP "VulkanSDK.exe"
-          Write-Host "Downloading $url"
-          Invoke-WebRequest -Uri $url -OutFile $exe
-          # QtIFW silent install — non-interactive, accepts default
-          # component selection (which includes VK_LAYER_KHRONOS_validation).
-          $proc = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList @(
-            "--root", "C:\VulkanSDK\$ver",
-            "--accept-licenses",
-            "--default-answer",
-            "--confirm-command",
-            "install"
-          )
-          if ($proc.ExitCode -ne 0) { throw "Vulkan SDK install failed: exit $($proc.ExitCode)" }
-
-      - name: Cache SwiftShader build
-        if: matrix.os == 'windows-latest'
-        id: cache-swiftshader
-        uses: actions/cache@v4
-        with:
-          path: build/swiftshader/out
-          key: swiftshader-windows-${{ env.SWIFTSHADER_COMMIT }}
-
-      - name: Build SwiftShader (software Vulkan ICD)
-        if: matrix.os == 'windows-latest' && steps.cache-swiftshader.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          $sha = "${{ env.SWIFTSHADER_COMMIT }}"
-          $src = "build/swiftshader/src"
-          $cm  = "build/swiftshader/cmake"
-          $out = "build/swiftshader/out"
-          New-Item -ItemType Directory -Force -Path "build/swiftshader" | Out-Null
-          # Shallow clone is not enough — we need to checkout an arbitrary
-          # commit. Init + fetch a single object keeps the clone small.
-          git init $src
-          git -C $src remote add origin https://github.com/google/SwiftShader.git
-          git -C $src fetch --depth 1 origin $sha
-          git -C $src checkout FETCH_HEAD
-          cmake -S $src -B $cm -A x64 `
-                -DSWIFTSHADER_BUILD_TESTS=OFF `
-                -DSWIFTSHADER_BUILD_BENCHMARKS=OFF `
-                -DSWIFTSHADER_BUILD_PVR=OFF
-          cmake --build $cm --config Release --target vk_swiftshader --parallel
-          New-Item -ItemType Directory -Force -Path $out | Out-Null
-          # Visual Studio generator emits artifacts under <build>/Windows/.
-          Copy-Item "$cm/Windows/vk_swiftshader.dll"      "$out/"
-          Copy-Item "$cm/Windows/vk_swiftshader_icd.json" "$out/"
-
-      - name: Configure Vulkan environment (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $icd = Join-Path $env:GITHUB_WORKSPACE "build/swiftshader/out/vk_swiftshader_icd.json"
-          $layers = "C:\VulkanSDK\${{ env.VULKAN_SDK_VERSION }}\Bin"
-          if (-not (Test-Path $icd))    { throw "SwiftShader ICD manifest missing: $icd" }
-          if (-not (Test-Path $layers)) { throw "Validation layer dir missing: $layers" }
-          # VK_DRIVER_FILES (Vulkan loader 1.3.207+) is the modern var;
-          # VK_ICD_FILENAMES is its predecessor — set both so older
-          # loaders also pick up SwiftShader.
-          "VK_DRIVER_FILES=$icd"     >> $env:GITHUB_ENV
-          "VK_ICD_FILENAMES=$icd"    >> $env:GITHUB_ENV
-          "VK_ADD_LAYER_PATH=$layers" >> $env:GITHUB_ENV
-
-      # ── /Vulkan ICD + validation layer ───────────────────────────────
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
+          # Sanity-check the ICD is discoverable before tests run.
+          vulkaninfo --summary | head -40 || true
 
       - name: Restore dotnet tools
         run: dotnet tool restore
