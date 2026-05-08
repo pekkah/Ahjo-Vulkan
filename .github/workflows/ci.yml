@@ -68,7 +68,10 @@ jobs:
         run: dotnet build Ahjo.Vulkan.slnx -c Release --nologo
 
       - name: Test — Ahjo.Vulkan.Native.Tests
-        run: dotnet test tests/Ahjo.Vulkan.Native.Tests/Ahjo.Vulkan.Native.Tests.csproj -c Release --no-build --nologo
+        run: dotnet test tests/Ahjo.Vulkan.Native.Tests/Ahjo.Vulkan.Native.Tests.csproj -c Release --no-build --nologo -l "console;verbosity=detailed"
 
+      # Detailed console logging prints each test name as it starts so a
+      # native crash (SIGSEGV/AV) names the offending test in the log
+      # instead of just surfacing as exit 139 with no context.
       - name: Test — Ahjo.Vulkan.Tests
-        run: dotnet test tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj -c Release --no-build --nologo
+        run: dotnet test tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj -c Release --no-build --nologo -l "console;verbosity=detailed"
