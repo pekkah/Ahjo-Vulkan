@@ -275,9 +275,12 @@ public unsafe ref struct CommandRecorder : IDisposable
     public void PushConstants<T>(in PipelineLayout layout, ShaderStages stages, in T data, uint offset = 0)
         where T : unmanaged
     {
-        // Vulkan guarantees only 128 bytes of push-constant space (VkPhysicalDeviceLimits.maxPushConstantsSize ≥ 128).
-        Debug.Assert(Unsafe.SizeOf<T>() + offset <= 128,
-            $"PushConstants<{typeof(T).Name}>: sizeof+offset ({Unsafe.SizeOf<T>()}+{offset}) exceeds Vulkan's 128-byte minimum guarantee.");
+        // The push-constant size ceiling lives on the layout (its declared
+        // ranges) and on the device (maxPushConstantsSize, ≥128 by spec
+        // but typically 256 on desktop). AssertPushRangeFits validates the
+        // [offset, offset+sizeof) window against the declared range; the
+        // device limit is enforced once at PipelineLayout creation time
+        // so per-call asserts don't have to re-fetch it.
         AssertPushRangeFits(in layout, stages, offset, (uint)Unsafe.SizeOf<T>());
 
         fixed (T* p = &data)
