@@ -35,6 +35,69 @@ public sealed unsafe class Queue
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_QUEUE;
 
     /// <summary>
+    /// Wraps <c>vkQueueWaitIdle</c>. Blocks the calling thread until every
+    /// previously-submitted batch on this queue has finished. Cheaper than
+    /// <see cref="Device.WaitIdle"/> when only one queue's work needs to
+    /// drain; the spec is explicit that <c>vkQueueWaitIdle</c> is
+    /// equivalent to a fence on every prior submit, waited to completion.
+    /// </summary>
+    public void WaitIdle()
+    {
+        Vk.vkQueueWaitIdle(Handle).ThrowIfFailed();
+    }
+
+    /// <summary>
+    /// One-shot record/submit/wait helper. Acquires a primary command
+    /// buffer from <paramref name="pool"/> (already begun with
+    /// <c>ONE_TIME_SUBMIT</c>), runs <paramref name="record"/>, ends and
+    /// submits via <see cref="Submit2(ref CommandRecorder, in Fence)"/>
+    /// with no waits / signals / fence, then calls <see cref="WaitIdle"/>.
+    /// The buffer is returned to the pool's outstanding-set on exit (via
+    /// <see cref="CommandRecorder.Dispose"/>) regardless of whether the
+    /// recording delegate or the submit threw.
+    /// </summary>
+    /// <remarks>
+    /// <para>This is the canonical pattern for one-off GPU work that the
+    /// caller needs to observe synchronously: asset uploads, mip
+    /// generation, IBL convolution, BRDF/sheen LUT bakes, particle
+    /// state init, environment hot-swap. Per-call overhead after pool
+    /// warmup is the begin/end pair plus the queue submit and wait —
+    /// no managed allocation.</para>
+    /// <para><b>Mid-frame implications.</b> <see cref="WaitIdle"/> drains
+    /// every other submit on this queue, including the in-flight frame
+    /// when called mid-frame. Engines that hot-swap assets between
+    /// frames rely on this — a mid-frame replace works because
+    /// ImmediateSubmit waits for any prior in-flight work that might
+    /// still reference the resource being replaced. Use a sparing
+    /// hand on hot paths; per-draw or per-pass invocation will tank
+    /// throughput.</para>
+    /// </remarks>
+    public void ImmediateSubmit(CommandBufferPool pool, ImmediateRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(pool);
+        ArgumentNullException.ThrowIfNull(record);
+
+        CommandRecorder recorder = pool.Begin();
+        try
+        {
+            record(ref recorder);
+            // Submit2(ref recorder, in Fence) ends the recorder for us.
+            // default(Fence) lowers to a null VkFence — fire-and-forget,
+            // since WaitIdle below provides the synchronisation.
+            Submit2(ref recorder, default);
+            WaitIdle();
+        }
+        finally
+        {
+            // Retire the buffer no matter what: a record-time throw, a
+            // submit failure, or a wait-idle device-lost must still leave
+            // the pool's accounting consistent so the next frame's reset
+            // doesn't trip its outstanding assert.
+            recorder.Dispose();
+        }
+    }
+
+    /// <summary>
     /// Submits a single command buffer via <c>vkQueueSubmit2</c>. Calls
     /// <see cref="CommandRecorder.End"/> first if the recorder is still
     /// open. Pass <c>default(Fence)</c> for fire-and-forget; otherwise
