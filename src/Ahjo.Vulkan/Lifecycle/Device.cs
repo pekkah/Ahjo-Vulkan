@@ -1,4 +1,8 @@
+using System.Buffers;
 using System.Diagnostics;
+using System.IO;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Ahjo.Vulkan.Native;
 
 namespace Ahjo.Vulkan;
@@ -196,6 +200,114 @@ public sealed unsafe class Device : IDisposable
             throw new ArgumentException(
                 $"SPIR-V byte length must be a multiple of 4 (got {spirvBytes.Length}).", nameof(spirvBytes));
         return CreateShaderModule(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>(spirvBytes));
+    }
+
+    /// <summary>
+    /// Creates an empty <see cref="PipelineCache"/>. The cache will fill
+    /// as pipelines are built against it; persist via
+    /// <see cref="PipelineCache.Save"/> on shutdown.
+    /// </summary>
+    public PipelineCache CreatePipelineCache()
+    {
+        var ci = new VkPipelineCacheCreateInfo
+        {
+            sType = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
+        };
+        VkPipelineCache_T* raw = null;
+        Vk.vkCreatePipelineCache(Handle, &ci, null, &raw).ThrowIfFailed();
+        return new PipelineCache(raw, Handle);
+    }
+
+    /// <summary>
+    /// Loads a <see cref="PipelineCache"/> from <paramref name="path"/> if
+    /// the file exists and its header matches this device (vendor ID,
+    /// device ID, cache UUID); otherwise creates an empty cache.
+    /// Mismatches are logged to <see cref="Console.Error"/> so the
+    /// "user copied a cache from another machine" / "driver UUID
+    /// rotated" cases surface visibly.
+    /// </summary>
+    public PipelineCache LoadOrCreatePipelineCache(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        byte[]? rented = null;
+        int     dataLen = 0;
+        try
+        {
+            if (File.Exists(path))
+            {
+                long len = new FileInfo(path).Length;
+                if (len > 0 && len <= int.MaxValue)
+                {
+                    rented  = ArrayPool<byte>.Shared.Rent((int)len);
+                    dataLen = (int)len;
+                    using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    int read = 0;
+                    while (read < dataLen)
+                    {
+                        int n = fs.Read(rented, read, dataLen - read);
+                        if (n == 0) { dataLen = read; break; }
+                        read += n;
+                    }
+
+                    if (!HeaderMatchesDevice(rented.AsSpan(0, dataLen)))
+                    {
+                        Console.Error.WriteLine(
+                            $"PipelineCache: header in '{path}' does not match this device (vendor/device/UUID); discarding and starting empty.");
+                        ArrayPool<byte>.Shared.Return(rented);
+                        rented  = null;
+                        dataLen = 0;
+                    }
+                }
+            }
+
+            var ci = new VkPipelineCacheCreateInfo
+            {
+                sType           = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
+                initialDataSize = (nuint)dataLen,
+            };
+            fixed (byte* pData = rented)
+            {
+                ci.pInitialData = dataLen > 0 ? pData : null;
+                VkPipelineCache_T* raw = null;
+                Vk.vkCreatePipelineCache(Handle, &ci, null, &raw).ThrowIfFailed();
+                return new PipelineCache(raw, Handle);
+            }
+        }
+        finally
+        {
+            if (rented is not null) ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    private bool HeaderMatchesDevice(ReadOnlySpan<byte> data)
+    {
+        // VkPipelineCacheHeaderVersionOne layout:
+        //   uint32 headerSize          (==32)
+        //   uint32 headerVersion       (==VK_PIPELINE_CACHE_HEADER_VERSION_ONE)
+        //   uint32 vendorID
+        //   uint32 deviceID
+        //   uint8  pipelineCacheUUID[16]
+        if (data.Length < sizeof(uint) * 4 + 16) return false;
+
+        ref readonly byte b0 = ref data[0];
+        uint headerSize    = Unsafe.ReadUnaligned<uint>(in b0);
+        uint headerVersion = Unsafe.ReadUnaligned<uint>(in Unsafe.Add(ref Unsafe.AsRef(in b0), sizeof(uint)));
+        uint vendorID      = Unsafe.ReadUnaligned<uint>(in Unsafe.Add(ref Unsafe.AsRef(in b0), sizeof(uint) * 2));
+        uint deviceID      = Unsafe.ReadUnaligned<uint>(in Unsafe.Add(ref Unsafe.AsRef(in b0), sizeof(uint) * 3));
+        ReadOnlySpan<byte> uuid = data.Slice(sizeof(uint) * 4, 16);
+
+        if (headerSize != (uint)(sizeof(uint) * 4 + 16)) return false;
+        if (headerVersion != (uint)VkPipelineCacheHeaderVersion.VK_PIPELINE_CACHE_HEADER_VERSION_ONE) return false;
+
+        VkPhysicalDeviceProperties props;
+        Vk.vkGetPhysicalDeviceProperties(PhysicalDevice.Handle, &props);
+        if (props.vendorID != vendorID) return false;
+        if (props.deviceID != deviceID) return false;
+
+        ref readonly byte uuid0 = ref props.pipelineCacheUUID.e0;
+        ReadOnlySpan<byte> deviceUuid = MemoryMarshal.CreateReadOnlySpan(in uuid0, 16);
+        return uuid.SequenceEqual(deviceUuid);
     }
 
     /// <summary>

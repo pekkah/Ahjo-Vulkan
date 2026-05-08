@@ -97,6 +97,38 @@ public sealed class ShaderModuleTests
     }
 
     [Fact]
+    public void CreateShaderModule_FromCompiledTriangleSpv_RoundTrips()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        // The csproj's CompileShaders target invokes glslc on every
+        // Shaders/*.{vert,frag,comp} input and drops the output as
+        // Shaders/<name>.spv next to the test DLL. With ContinueOnError =
+        // WarnAndContinue the build still succeeds when glslc isn't on
+        // PATH, leaving the .spv missing — skip cleanly here so the rest
+        // of the suite still runs on hosts without the Vulkan SDK.
+        string shadersDir = Path.Combine(AppContext.BaseDirectory, "Shaders");
+        string vertSpv    = Path.Combine(shadersDir, "triangle.vert.spv");
+        string fragSpv    = Path.Combine(shadersDir, "triangle.frag.spv");
+        Assert.SkipUnless(File.Exists(vertSpv) && File.Exists(fragSpv),
+            $"Compiled SPIR-V missing (glslc not on PATH at build time): {vertSpv}, {fragSpv}");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+
+        using var vertBlob = SpirvBlob.Load(vertSpv);
+        using var fragBlob = SpirvBlob.Load(fragSpv);
+
+        // Real driver acceptance — vkCreateShaderModule parses the SPIR-V
+        // header (magic 0x07230203, version, generator, bound) and
+        // structurally validates the words. Bogus blobs throw.
+        using var vert = device.CreateShaderModule(vertBlob.Words);
+        using var frag = device.CreateShaderModule(fragBlob.Words);
+        Assert.False(vert.IsNull);
+        Assert.False(frag.IsNull);
+    }
+
+    [Fact]
     public void SpirvBlob_AfterDispose_WordsThrows()
     {
         string path = Path.Combine(Path.GetTempPath(), $"spirv-test-{Guid.NewGuid():N}.spv");

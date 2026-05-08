@@ -44,6 +44,39 @@ public sealed unsafe class Queue
         => Submit2(ref recorder, in fence, default, default);
 
     /// <summary>
+    /// Submits a pre-recorded, already-ended command buffer by raw handle
+    /// (typically <see cref="CommandRecorder.RawHandle"/>) via
+    /// <c>vkQueueSubmit2</c>. Use when the recording thread and the
+    /// submitting thread differ — <see cref="CommandRecorder"/> is a
+    /// <c>ref struct</c> and cannot legally cross threads, but the
+    /// underlying <c>VkCommandBuffer</c> pointer can.
+    /// </summary>
+    /// <remarks>
+    /// The caller must have ended recording (e.g. via
+    /// <see cref="CommandRecorder.End"/>) before crossing threads — this
+    /// overload does not call <c>vkEndCommandBuffer</c>. The recorder
+    /// must also remain undisposed on the recording thread for the
+    /// duration of the submit so the pool's outstanding-set tracks the
+    /// in-flight buffer correctly.
+    /// </remarks>
+    public void Submit2(nint commandBuffer, in Fence fence)
+    {
+        var cb = (VkCommandBuffer_T*)commandBuffer;
+        var cbInfo = new VkCommandBufferSubmitInfo
+        {
+            sType         = VkStructureType.VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+            commandBuffer = cb,
+        };
+        var submit = new VkSubmitInfo2
+        {
+            sType                  = VkStructureType.VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+            commandBufferInfoCount = 1,
+            pCommandBufferInfos    = &cbInfo,
+        };
+        Vk.vkQueueSubmit2(Handle, 1, &submit, fence.Handle).ThrowIfFailed();
+    }
+
+    /// <summary>
     /// Submits a single command buffer with optional wait + signal
     /// binary semaphores. Pass empty spans (or use the no-semaphore
     /// overload) for fire-and-forget submits.

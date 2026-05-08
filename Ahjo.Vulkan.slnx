@@ -7,6 +7,7 @@
   <Project Path="tests/Ahjo.Vulkan.Native.Tests/Ahjo.Vulkan.Native.Tests.csproj" />
   <Project Path="tests/Ahjo.Vulkan.Vma.Native.Tests/Ahjo.Vulkan.Vma.Native.Tests.csproj" />
   <Project Path="tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj" />
+  <Project Path="samples/AotSmoke/AotSmoke.csproj" />
   <Project Path="samples/HeadlessTriangle/HeadlessTriangle.csproj" />
   <Project Path="samples/HelloTriangle/HelloTriangle.csproj" />
 </Solution>

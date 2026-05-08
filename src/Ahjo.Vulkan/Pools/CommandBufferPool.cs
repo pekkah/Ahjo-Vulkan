@@ -42,6 +42,13 @@ public sealed unsafe class CommandBufferPool : IDisposable
     /// <summary>The queue family this pool was created against.</summary>
     public uint QueueFamilyIndex { get; }
 
+    /// <summary>
+    /// Owning device. Exposed internally so <see cref="CommandRecorder"/>
+    /// can reach the per-device extension function table for debug
+    /// markers etc. without re-resolving entry points per call.
+    /// </summary>
+    internal Device Device => _device;
+
     /// <summary>Total <c>VkCommandBuffer</c>s ever allocated through this pool.</summary>
     public int AllocatedCount => _allocated;
 

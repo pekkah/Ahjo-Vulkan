@@ -83,3 +83,28 @@ jobs:
           echo "::group::Blame Sequence files"
           find TestResults -type f \( -name 'Sequence_*.xml' -o -name '*.txt' -o -name '*.dmp.txt' \) -print -exec cat {} \; 2>/dev/null || true
           echo "::endgroup::"
+
+      # Issue 28 — Native AOT smoke. Publishing under PublishAot=true
+      # is the load-bearing check: trim warnings + ILC errors fail the
+      # build, so any reflection / dynamic-codegen creep in the
+      # wrapper is caught here. The published exe also runs — on
+      # windows-latest there's no Vulkan ICD, so the smoke prints
+      # "no driver, AOT publish verified, skipping smoke run" and
+      # exits 0. Local developers with a driver get the full
+      # round-trip (image render → PNG dump).
+      - name: Setup MSVC dev environment
+        if: matrix.os == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: AOT publish — AotSmoke
+        if: matrix.os == 'windows-latest'
+        run: dotnet publish samples/AotSmoke/AotSmoke.csproj -c Release -r win-x64 --nologo -p:IlcUseEnvironmentalTools=true
+
+      - name: AOT smoke run
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $exe = "samples/AotSmoke/bin/x64/Release/net10.0/win-x64/publish/AotSmoke.exe"
+          if (-not (Test-Path $exe)) { throw "AOT smoke binary missing: $exe" }
+          & $exe
+          if ($LASTEXITCODE -ne 0) { throw "AOT smoke exited with code $LASTEXITCODE" }

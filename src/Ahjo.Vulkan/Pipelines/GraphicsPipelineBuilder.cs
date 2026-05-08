@@ -332,6 +332,18 @@ public unsafe ref struct GraphicsPipelineBuilder
     }
 
     /// <summary>
+    /// Wires a wrapper-managed <see cref="PipelineCache"/> into the build.
+    /// The driver merges newly-compiled pipelines into the cache as they
+    /// finish; persist via <see cref="PipelineCache.Save"/> on shutdown
+    /// for fast restarts.
+    /// </summary>
+    public GraphicsPipelineBuilder WithCache(in PipelineCache cache)
+    {
+        _cache = cache.Handle;
+        return this;
+    }
+
+    /// <summary>
     /// Issues <c>vkCreateGraphicsPipelines</c>. Builder fields, including
     /// the inline entry-point buffers, are <c>fixed</c>'d for the duration
     /// of the native call so the <c>const char*</c> pointers stay valid.

@@ -96,6 +96,18 @@ public unsafe ref struct ComputePipelineBuilder
     }
 
     /// <summary>
+    /// Wires a wrapper-managed <see cref="PipelineCache"/> into the build.
+    /// The driver merges newly-compiled pipelines into the cache as they
+    /// finish; persist via <see cref="PipelineCache.Save"/> on shutdown
+    /// for fast restarts.
+    /// </summary>
+    public ComputePipelineBuilder WithCache(in PipelineCache cache)
+    {
+        _cache = cache.Handle;
+        return this;
+    }
+
+    /// <summary>
     /// Specializes the compute shader's <c>constant_id</c> values from the
     /// fields of <typeparamref name="T"/> — see
     /// <see cref="SpecializationInfo{T}"/> for layout rules and the

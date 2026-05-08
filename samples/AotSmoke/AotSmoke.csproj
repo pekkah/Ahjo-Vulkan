@@ -1,0 +1,67 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Ahjo.Vulkan.Samples.AotSmoke</RootNamespace>
+    <AssemblyName>AotSmoke</AssemblyName>
+    <IsPackable>false</IsPackable>
+
+    <!--
+      Issue 28: prove the wrapper compiles + runs under Native AOT. The
+      smoke run mirrors HeadlessTriangle (allocator + buffer + image +
+      pipeline + cmd recorder + fence wait + PNG dump) so any reflection
+      / dynamic-codegen creep in the wrapper surfaces at publish time
+      rather than after a downstream consumer adopts AOT.
+    -->
+    <PublishAot>true</PublishAot>
+
+    <!--
+      Surface trim and AOT analyzers loud — every warning here is a
+      compatibility regression we want to address rather than suppress.
+    -->
+    <IsTrimmable>true</IsTrimmable>
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+    <TreatWarningsAsErrors Condition="'$(CI)' == 'true'">true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan\Ahjo.Vulkan.csproj" />
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan.Utilities\Ahjo.Vulkan.Utilities.csproj" />
+  </ItemGroup>
+
+  <!--
+    Reuse HeadlessTriangle's shader sources via a link so we don't
+    duplicate the GLSL. The CompileShaders target produces .spv next to
+    this exe under ./Shaders/, matching what Program.cs expects.
+  -->
+  <ItemGroup>
+    <_ShaderSource Include="..\HeadlessTriangle\Shaders\triangle.vert" Link="Shaders\triangle.vert" />
+    <_ShaderSource Include="..\HeadlessTriangle\Shaders\triangle.frag" Link="Shaders\triangle.frag" />
+  </ItemGroup>
+
+  <Target Name="CompileShaders" AfterTargets="Build" Inputs="@(_ShaderSource)" Outputs="@(_ShaderSource->'$(OutputPath)Shaders\%(Filename)%(Extension).spv')">
+    <PropertyGroup>
+      <_GlslcExe Condition="'$(_GlslcExe)' == '' and '$(VULKAN_SDK)' != ''">$(VULKAN_SDK)\Bin\glslc.exe</_GlslcExe>
+      <_GlslcExe Condition="'$(_GlslcExe)' == ''">glslc</_GlslcExe>
+    </PropertyGroup>
+    <MakeDir Directories="$(OutputPath)Shaders" />
+    <Exec Command="&quot;$(_GlslcExe)&quot; &quot;%(_ShaderSource.FullPath)&quot; -o &quot;$(OutputPath)Shaders\%(_ShaderSource.Filename)%(_ShaderSource.Extension).spv&quot;"
+          IgnoreExitCode="false"
+          ContinueOnError="WarnAndContinue" />
+  </Target>
+
+  <!--
+    Ensure the compiled .spv files ride along into the publish directory.
+    CompileShaders writes into $(OutputPath)Shaders\ at build time, but
+    ResolvePublishItems doesn't see those outputs as Content so by default
+    they don't get copied. Mirror them after Publish so the AOT smoke
+    binary finds them next to itself at $(PublishDir)Shaders\.
+  -->
+  <Target Name="CopyShadersToPublish" AfterTargets="Publish">
+    <Copy SourceFiles="@(_ShaderSource->'$(OutputPath)Shaders\%(Filename)%(Extension).spv')"
+          DestinationFolder="$(PublishDir)Shaders\"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(OutputPath)Shaders\%(_ShaderSource.Filename)%(_ShaderSource.Extension).spv')" />
+  </Target>
+
+</Project>

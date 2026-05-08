@@ -44,6 +44,18 @@ public unsafe ref struct CommandRecorder : IDisposable
     public bool IsNull => Handle == null;
 
     /// <summary>
+    /// Raw <c>VkCommandBuffer</c> as a platform-sized integer. Lets callers
+    /// hand the recorded buffer to a different thread for submission, since
+    /// the recorder itself is a <c>ref struct</c> and can't cross threads.
+    /// The pool's external-sync rules still apply — the recorder must
+    /// remain undisposed (i.e. the buffer stays in the pool's outstanding
+    /// set) for the duration of any cross-thread submit, otherwise
+    /// <see cref="CommandBufferPool.ResetForFrame"/> on the recording
+    /// thread can race ahead.
+    /// </summary>
+    public nint RawHandle => (nint)Handle;
+
+    /// <summary>
     /// Calls <c>vkEndCommandBuffer</c>. Idempotent. Does not retire the
     /// command buffer — the recorder is still owned by the caller and
     /// must be <see cref="Dispose"/>'d eventually.
@@ -86,6 +98,92 @@ public unsafe ref struct CommandRecorder : IDisposable
             _pool.Retire(Handle);
             _retired = true;
         }
+    }
+
+    // ---- Debug markers (VK_EXT_debug_utils) ----
+
+    /// <summary>
+    /// Pushes a debug label onto the command buffer's marker stack via
+    /// <c>vkCmdBeginDebugUtilsLabelEXT</c>. RenderDoc / Nsight render the
+    /// labeled region as a collapsible group with the supplied
+    /// <paramref name="color"/> swatch. No-op when
+    /// <c>VK_EXT_debug_utils</c> is not loaded on the device's instance.
+    /// Pair with <see cref="EndLabel"/>; prefer <see cref="LabelScope"/>
+    /// for clean nesting via <c>using</c>.
+    /// </summary>
+    public void BeginLabel(ReadOnlySpan<byte> name, in Color color = default)
+    {
+        var fn = _pool.Device.Functions.CmdBeginDebugUtilsLabel;
+        if (fn == null || name.IsEmpty) return;
+
+        fixed (byte* pName = name)
+        {
+            var label = new VkDebugUtilsLabelEXT
+            {
+                sType      = VkStructureType.VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+                pLabelName = (sbyte*)pName,
+            };
+            label.color[0] = color.R;
+            label.color[1] = color.G;
+            label.color[2] = color.B;
+            label.color[3] = color.A;
+            fn(Handle, &label);
+        }
+    }
+
+    /// <summary>
+    /// Pops the most-recently-pushed debug label via
+    /// <c>vkCmdEndDebugUtilsLabelEXT</c>. No-op when
+    /// <c>VK_EXT_debug_utils</c> is not loaded.
+    /// </summary>
+    public void EndLabel()
+    {
+        var fn = _pool.Device.Functions.CmdEndDebugUtilsLabel;
+        if (fn == null) return;
+        fn(Handle);
+    }
+
+    /// <summary>
+    /// Inserts a single-shot debug marker via
+    /// <c>vkCmdInsertDebugUtilsLabelEXT</c>. Unlike
+    /// <see cref="BeginLabel"/> / <see cref="EndLabel"/>, this does not
+    /// open a scope — captures show it as a flag on the timeline at the
+    /// recorded position.
+    /// </summary>
+    public void InsertLabel(ReadOnlySpan<byte> name, in Color color = default)
+    {
+        var fn = _pool.Device.Functions.CmdInsertDebugUtilsLabel;
+        if (fn == null || name.IsEmpty) return;
+
+        fixed (byte* pName = name)
+        {
+            var label = new VkDebugUtilsLabelEXT
+            {
+                sType      = VkStructureType.VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+                pLabelName = (sbyte*)pName,
+            };
+            label.color[0] = color.R;
+            label.color[1] = color.G;
+            label.color[2] = color.B;
+            label.color[3] = color.A;
+            fn(Handle, &label);
+        }
+    }
+
+    /// <summary>
+    /// Opens a debug-label scope and returns a <see cref="DisposableLabel"/>
+    /// that calls <see cref="EndLabel"/> when disposed — typically via
+    /// <c>using var scope = rec.LabelScope("PassName"u8);</c>. Nests
+    /// cleanly. No-op when <c>VK_EXT_debug_utils</c> is not loaded.
+    /// </summary>
+    public DisposableLabel LabelScope(ReadOnlySpan<byte> name, in Color color = default)
+    {
+        BeginLabel(name, in color);
+        // Capture the End fn pointer at scope-open time. If the extension
+        // wasn't loaded, _end stays null and Dispose is a no-op — the
+        // matching BeginLabel call was also a no-op so the marker stack
+        // stays balanced.
+        return new DisposableLabel(Handle, _pool.Device.Functions.CmdEndDebugUtilsLabel);
     }
 
     // ---- Dynamic state ----
