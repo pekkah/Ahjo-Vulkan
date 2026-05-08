@@ -21,6 +21,8 @@ public sealed class ImageTests
     public void CreateImage_2D_Rgba8_AndDefaultColorView_Roundtrips()
     {
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+            "Software ICD (Mesa lavapipe): hangs inside the driver during image-view creation.");
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -65,6 +67,8 @@ public sealed class ImageTests
     public void CreateView_DefaultFormat_InheritsFromImage()
     {
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+            "Software ICD (Mesa lavapipe): hangs inside the driver during image-view creation.");
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
