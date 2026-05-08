@@ -388,6 +388,68 @@ public unsafe ref struct CommandRecorder : IDisposable
             Vk.vkCmdPushDescriptorSetWithTemplate(Handle, template.Handle, layout.Handle, template.Set, p);
     }
 
+    /// <summary>
+    /// Issues <c>vkCmdPushDescriptorSet</c> with a span of
+    /// <see cref="DescriptorWrite"/> records — the non-templated
+    /// counterpart of <see cref="PushDescriptors{T}"/>. Use when the
+    /// per-pass binding shape doesn't fit a fixed struct template
+    /// (heterogeneous bindings, bindless single-element writes,
+    /// per-pass image-view rotation).
+    /// </summary>
+    /// <remarks>
+    /// <para>The layout backing <paramref name="set"/> must have been
+    /// created with
+    /// <see cref="DescriptorSetLayoutDescription.PushDescriptor"/>.
+    /// Allocates zero per call when <paramref name="writes"/> contains
+    /// <c>≤ 8</c> entries; longer runs rent from
+    /// <see cref="ArrayPool{T}"/>.</para>
+    /// </remarks>
+    public void PushDescriptorSet(
+        VkPipelineBindPoint           bindPoint,
+        in PipelineLayout             layout,
+        uint                          set,
+        ReadOnlySpan<DescriptorWrite> writes)
+    {
+        if (writes.IsEmpty) return;
+
+        const int StackThreshold = 8;
+        int count = writes.Length;
+        if (count <= StackThreshold)
+        {
+            Span<VkWriteDescriptorSet> raws = stackalloc VkWriteDescriptorSet[count];
+            FlushPush(Handle, bindPoint, layout.Handle, set, writes, raws);
+            return;
+        }
+
+        VkWriteDescriptorSet[] rented =
+            System.Buffers.ArrayPool<VkWriteDescriptorSet>.Shared.Rent(count);
+        try
+        {
+            FlushPush(Handle, bindPoint, layout.Handle, set, writes, rented.AsSpan(0, count));
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<VkWriteDescriptorSet>.Shared.Return(rented);
+        }
+    }
+
+    private static void FlushPush(
+        VkCommandBuffer_T*            cb,
+        VkPipelineBindPoint           bindPoint,
+        VkPipelineLayout_T*           layout,
+        uint                          set,
+        ReadOnlySpan<DescriptorWrite> writes,
+        Span<VkWriteDescriptorSet>    raws)
+    {
+        fixed (DescriptorWrite* _ = writes)
+        {
+            // dstSet is ignored by vkCmdPushDescriptorSet; pass null.
+            DescriptorWriteBuilder.BuildWrites(writes, setHandle: null, raws);
+            fixed (VkWriteDescriptorSet* pRaws = raws)
+                Vk.vkCmdPushDescriptorSet(cb, bindPoint, layout, set, (uint)writes.Length, pRaws);
+        }
+    }
+
     // ---- Draw / Dispatch ----
 
     public void Draw(uint vertexCount, uint instanceCount = 1, uint firstVertex = 0, uint firstInstance = 0)
