@@ -45,6 +45,9 @@ public readonly unsafe struct ImageDescriptorWrite
         Layout  = layout;
     }
 
+    public ImageDescriptorWrite(in Sampler sampler, in ImageView view, VkImageLayout layout)
+        : this(sampler.Handle, in view, layout) { }
+
     /// <summary>
     /// Image-only entry — for <c>SAMPLED_IMAGE</c>, <c>STORAGE_IMAGE</c>,
     /// or <c>INPUT_ATTACHMENT</c>. The driver ignores the (null) sampler
@@ -61,4 +64,11 @@ public readonly unsafe struct ImageDescriptorWrite
     /// </summary>
     public static ImageDescriptorWrite Of(VkSampler_T* sampler, in ImageView view, VkImageLayout layout)
         => new(sampler, in view, layout);
+
+    /// <summary>
+    /// Combined-image-sampler entry over the wrapper's <see cref="Sampler"/>
+    /// type — for <c>COMBINED_IMAGE_SAMPLER</c>.
+    /// </summary>
+    public static ImageDescriptorWrite Of(in Sampler sampler, in ImageView view, VkImageLayout layout)
+        => new(sampler.Handle, in view, layout);
 }
