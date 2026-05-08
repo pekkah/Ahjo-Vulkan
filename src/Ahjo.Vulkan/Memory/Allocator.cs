@@ -184,7 +184,7 @@ public readonly unsafe struct Allocator : IDisposable
         VkImageCreateInfo ici = default;
         ici.sType                 = VkStructureType.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         ici.pNext                 = null;
-        ici.flags                 = 0;
+        ici.flags                 = (uint)image.Flags;
         ici.imageType             = image.ImageType;
         ici.format                = image.Format;
         ici.extent                = new VkExtent3D { width = image.Width, height = image.Height, depth = image.Depth };
