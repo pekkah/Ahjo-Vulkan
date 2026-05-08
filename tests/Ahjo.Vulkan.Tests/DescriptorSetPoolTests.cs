@@ -90,6 +90,116 @@ public sealed unsafe class DescriptorSetPoolTests
         finally { Vk.vkDestroyDescriptorSetLayout(device.Handle, layout, null); }
     }
 
+    /// <summary>
+    /// Issue 60: allocating past <c>maxSets</c> against a chain (default
+    /// growth on) succeeds — the pool transparently allocates a fresh
+    /// <c>VkDescriptorPool</c> with the same template. Sub-pool count
+    /// rises to 2 once the first sub-pool is exhausted.
+    /// </summary>
+    [Fact]
+    public void Pool_AcquireBeyondMaxSets_GrowsAndSucceeds()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+        VkDescriptorSetLayout_T* layout = CreateUniformBufferLayout(device);
+        try
+        {
+            ReadOnlySpan<VkDescriptorPoolSize> sizes =
+            [
+                new VkDescriptorPoolSize { type = VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, descriptorCount = 4 },
+            ];
+            using var pool = new DescriptorSetPool(device, maxSets: 4, sizes);
+            Assert.Equal(1, pool.PoolCount);
+
+            DescriptorSet[] sets = new DescriptorSet[10];
+            for (int i = 0; i < sets.Length; i++)
+            {
+                sets[i] = pool.Acquire(layout);
+                Assert.False(sets[i].IsNull);
+            }
+
+            Assert.Equal(10, pool.AllocatedCount);
+            // 4 per sub-pool, 10 sets → at least three sub-pools.
+            Assert.True(pool.PoolCount >= 3,
+                $"Expected ≥3 sub-pools after 10 allocations on a maxSets=4 pool; saw {pool.PoolCount}.");
+        }
+        finally { Vk.vkDestroyDescriptorSetLayout(device.Handle, layout, null); }
+    }
+
+    /// <summary>
+    /// Reset on a grown chain wipes every sub-pool and lets the caller
+    /// re-allocate the same workload without duplicate-allocation fault.
+    /// Sub-pool count stays put — Reset does not destroy the grown
+    /// pools, since the next frame will refill them.
+    /// </summary>
+    [Fact]
+    public void Pool_GrownChain_ResetThenReallocate_Succeeds()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+        VkDescriptorSetLayout_T* layout = CreateUniformBufferLayout(device);
+        try
+        {
+            ReadOnlySpan<VkDescriptorPoolSize> sizes =
+            [
+                new VkDescriptorPoolSize { type = VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, descriptorCount = 4 },
+            ];
+            using var pool = new DescriptorSetPool(device, maxSets: 4, sizes);
+
+            for (int i = 0; i < 10; i++) pool.Acquire(layout);
+            int chainAfterFirstFill = pool.PoolCount;
+            Assert.True(chainAfterFirstFill >= 3);
+
+            pool.Reset();
+            Assert.Equal(0, pool.AllocatedCount);
+            Assert.Equal(chainAfterFirstFill, pool.PoolCount);
+
+            for (int i = 0; i < 10; i++)
+            {
+                var s = pool.Acquire(layout);
+                Assert.False(s.IsNull);
+            }
+            Assert.Equal(10, pool.AllocatedCount);
+        }
+        finally { Vk.vkDestroyDescriptorSetLayout(device.Handle, layout, null); }
+    }
+
+    /// <summary>
+    /// With growth disabled the pool surfaces the original Vulkan
+    /// failure (typically <c>OUT_OF_POOL_MEMORY</c>) rather than
+    /// silently growing. Use this opt-out on debug builds where
+    /// hitting the budget should be loud and audited.
+    /// </summary>
+    [Fact]
+    public void Pool_GrowDisabled_AcquireBeyondBudget_Throws()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+        VkDescriptorSetLayout_T* layout = CreateUniformBufferLayout(device);
+        try
+        {
+            ReadOnlySpan<VkDescriptorPoolSize> sizes =
+            [
+                new VkDescriptorPoolSize { type = VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, descriptorCount = 2 },
+            ];
+            using var pool = new DescriptorSetPool(device, maxSets: 2, sizes, growOnExhaustion: false);
+
+            // Two acquires fit; the third should throw because growth is
+            // off and the pool is exhausted.
+            pool.Acquire(layout);
+            pool.Acquire(layout);
+            Assert.Throws<VulkanException>(() => pool.Acquire(layout));
+            Assert.Equal(1, pool.PoolCount);
+        }
+        finally { Vk.vkDestroyDescriptorSetLayout(device.Handle, layout, null); }
+    }
+
     [Fact]
     public void Pool_Acquire_AfterDispose_Throws()
     {
