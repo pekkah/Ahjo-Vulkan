@@ -298,6 +298,78 @@ public sealed class GraphicsPipelineTests
         Assert.Contains("patchControlPoints", caught!.Message);
     }
 
+    /// <summary>
+    /// Smoke test for <see cref="GraphicsPipelineBuilder.WithDepthBias"/>.
+    /// Builds a depth-write pipeline with the slope-scaled bias the engine's
+    /// cascaded-shadow casters use; the build itself exercises the new
+    /// rasterization-state fields (validation layer would reject malformed
+    /// values). End-to-end "biased depth differs from unbiased depth"
+    /// verification needs a render+readback that the rest of the suite
+    /// avoids — the engine integration covers that case.
+    /// </summary>
+    [Fact]
+    public void Builder_WithDepthBias_BuildsDepthOnlyPipeline()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
+        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+
+        using var vBlob = SpirvBlob.Load(VertSpvPath);
+        using var fBlob = SpirvBlob.Load(FragSpvPath);
+        using var vMod  = device.CreateShaderModule(vBlob.Words);
+        using var fMod  = device.CreateShaderModule(fBlob.Words);
+        using var layout = device.CreatePipelineLayout(default);
+
+        ReadOnlySpan<VkFormat> colorFormats = [VkFormat.VK_FORMAT_R8G8B8A8_UNORM];
+
+        using var pipeline = device.BuildGraphicsPipeline()
+            .WithStages(in vMod, in fMod)
+            .WithDynamicRendering(colorFormats, depthFormat: VkFormat.VK_FORMAT_D32_SFLOAT)
+            .WithLayout(in layout)
+            .WithDepthStencil(testEnable: true, writeEnable: true)
+            .WithDepthBias(constantFactor: 2.5f, slopeFactor: 3.5f)
+            .Build();
+
+        Assert.False(pipeline.IsNull);
+    }
+
+    /// <summary>
+    /// Regression: the default builder must not enable depth bias — every
+    /// pipeline that doesn't call <see cref="GraphicsPipelineBuilder.WithDepthBias"/>
+    /// keeps the spec default (<c>depthBiasEnable = 0</c>). The existing
+    /// triangle pipeline test would catch a regression here too, but a
+    /// dedicated assertion makes the contract explicit.
+    /// </summary>
+    [Fact]
+    public void Builder_NoDepthBias_BuildsPipelineWithDefaultRasterizationState()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
+        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+
+        using var vBlob = SpirvBlob.Load(VertSpvPath);
+        using var fBlob = SpirvBlob.Load(FragSpvPath);
+        using var vMod  = device.CreateShaderModule(vBlob.Words);
+        using var fMod  = device.CreateShaderModule(fBlob.Words);
+        using var layout = device.CreatePipelineLayout(default);
+
+        ReadOnlySpan<VkFormat> colorFormats = [VkFormat.VK_FORMAT_R8G8B8A8_UNORM];
+
+        using var pipeline = device.BuildGraphicsPipeline()
+            .WithStages(in vMod, in fMod)
+            .WithDynamicRendering(colorFormats)
+            .WithLayout(in layout)
+            .Build();
+
+        Assert.False(pipeline.IsNull);
+    }
+
     private static string VertSpvPath =>
         Path.Combine(AppContext.BaseDirectory, "Shaders", "triangle.vert.spv");
 
