@@ -219,6 +219,8 @@ public sealed unsafe class CopyCommandTests
     public void BufferImage_RoundTrip_Through_Image()
     {
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+            "Mesa lavapipe SIGSEGVs inside the driver during the buffer↔image copy submission.");
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);

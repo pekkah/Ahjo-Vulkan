@@ -58,8 +58,52 @@ internal static unsafe class VulkanDriverProbe
         return false;
     });
 
+    // Distinguishes a software ICD (Mesa lavapipe / SwiftShader) from a
+    // hardware driver. Tests that submit GPU work and depend on real
+    // image/buffer copy semantics use this to skip on lavapipe, where
+    // certain command-buffer paths SIGSEGV inside the driver. Hardware
+    // drivers report DISCRETE_GPU / INTEGRATED_GPU / VIRTUAL_GPU; CPU
+    // is the only deviceType the spec mandates for a software ICD.
+    private static readonly Lazy<bool> _isSoftwareDriver = new(() =>
+    {
+        if (!_hasDriver.Value) return false;
+
+        VkInstance_T* instance = null;
+        var ai = new VkApplicationInfo
+        {
+            sType = VkStructureType.VK_STRUCTURE_TYPE_APPLICATION_INFO,
+            apiVersion = (1u << 22) | (3u << 12),
+        };
+        var ci = new VkInstanceCreateInfo
+        {
+            sType = VkStructureType.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+            pApplicationInfo = &ai,
+        };
+        if (Vk.vkCreateInstance(&ci, null, &instance) != VkResult.VK_SUCCESS) return false;
+        try
+        {
+            uint gpuCount = 0;
+            if (Vk.vkEnumeratePhysicalDevices(instance, &gpuCount, null) != VkResult.VK_SUCCESS || gpuCount == 0)
+                return false;
+
+            VkPhysicalDevice_T* gpu = null;
+            uint one = 1;
+            if (Vk.vkEnumeratePhysicalDevices(instance, &one, &gpu) is not (VkResult.VK_SUCCESS or VkResult.VK_INCOMPLETE))
+                return false;
+
+            VkPhysicalDeviceProperties props;
+            Vk.vkGetPhysicalDeviceProperties(gpu, &props);
+            return props.deviceType == VkPhysicalDeviceType.VK_PHYSICAL_DEVICE_TYPE_CPU;
+        }
+        finally
+        {
+            Vk.vkDestroyInstance(instance, null);
+        }
+    });
+
     public static bool HasDriver => _hasDriver.Value;
     public static bool HasValidationLayer => _hasValidationLayer.Value;
+    public static bool IsSoftwareDriver => _isSoftwareDriver.Value;
 
     private static bool Match(sbyte* name, ReadOnlySpan<byte> target)
     {
