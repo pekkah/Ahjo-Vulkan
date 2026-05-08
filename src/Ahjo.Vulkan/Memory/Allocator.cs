@@ -72,11 +72,19 @@ public readonly unsafe struct Allocator : IDisposable
             // entry points the loader returns null for, then SIGSEGV the
             // first time it dispatches through one. Symptom seen on Mesa
             // lavapipe (advertises 1.3) when the wrapper hardcoded 1.4 here;
-            // see VMA issue 397 for the same shape on Android 14. Clamp to
-            // min(headers, device) so the import set matches reality.
+            // see VMA issue 397 for the same shape on Android 14.
+            //
+            // Clamp at 1.2 (not the device's reported version) — the 1.3
+            // promotions VMA optionally imports (vkGetDeviceImageMemoryRequirements,
+            // vkGetDeviceBufferMemoryRequirements) are convenience APIs the
+            // wrapper doesn't depend on, and lavapipe-1.3.275's exposure of
+            // them appears unstable. 1.2 still gives VMA core BDA support
+            // (vkGetBufferDeviceAddress was promoted in 1.2) which the
+            // wrapper does need. On a sub-1.2 device we degrade to whatever
+            // the device reports.
             VkPhysicalDeviceProperties props;
             Vk.vkGetPhysicalDeviceProperties(device.PhysicalDevice.Handle, &props);
-            uint apiVersion = Math.Min(VulkanVersion.V1_4.Packed, props.apiVersion);
+            uint apiVersion = Math.Min(VulkanVersion.V1_2.Packed, props.apiVersion);
 
             // Explicit baseline for every native field — see CreateBuffer
             // for the rationale. The VMA struct exposes several optional
