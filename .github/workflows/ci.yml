@@ -21,21 +21,27 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-          - os: ubuntu-latest
+          # Linux job temporarily disabled (issue 32). Mesa lavapipe is
+          # the only viable software ICD on hosted Ubuntu runners, but
+          # multiple lavapipe-1.3.275 paths SIGSEGV/hang under our test
+          # workload (queue submit, image-view creation, vertex-buffer
+          # bind setup) — three distinct crash categories surfaced in
+          # CI iteration. The wrapper-side fixes that came out of that
+          # iteration (Allocator.Create vulkanApiVersion clamp,
+          # VulkanDriverProbe.IsSoftwareDriver, per-test gates) all
+          # stay in code so re-enabling lavapipe is a one-line change
+          # if a future Mesa version stabilises. Re-add when revisiting
+          # issue 32 with either a fixed Mesa, a self-hosted GPU
+          # runner, or a pre-built SwiftShader artifact.
+          # - os: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       # Windows runner stays compile-only / pure-CPU subset — no Vulkan
-      # ICD provisioned (a SwiftShader build was tried but at 39+ min on
-      # the hosted runner it's not viable; mock ICD wouldn't satisfy VMA).
-      # Linux runner installs Mesa lavapipe, the Mesa software Vulkan ICD,
-      # so the driver-gated test subset runs there. The earlier
-      # vmaCreateAllocator-on-lavapipe SIGSEGV was a wrapper bug — the
-      # allocator passed vulkanApiVersion=1.4 to a 1.3 device, causing VMA
-      # to import 1.4 entry points the loader returned null for; fixed in
-      # Allocator.Create by clamping to the device's reported apiVersion.
+      # ICD provisioned. SwiftShader build was tried but at 39+ min on
+      # the hosted runner it's not viable; mock ICD wouldn't satisfy VMA.
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -52,14 +58,6 @@ jobs:
         with:
           path: native/downloaded
           key: vulkan-headers-${{ matrix.os }}-${{ hashFiles('Directory.Build.props') }}
-
-      - name: Install Mesa lavapipe (Linux software Vulkan ICD)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
-          # Sanity-check the ICD is discoverable before tests run.
-          vulkaninfo --summary | head -40 || true
 
       - name: Restore dotnet tools
         run: dotnet tool restore
