@@ -64,6 +64,10 @@ public unsafe ref struct GraphicsPipelineBuilder
     private VkCullModeFlagBits _cullMode;
     private VkFrontFace        _frontFace;
     private VkPolygonMode      _polygonMode;
+    private bool               _depthBiasEnable;
+    private float              _depthBiasConstantFactor;
+    private float              _depthBiasSlopeFactor;
+    private float              _depthBiasClamp;
 
     // Multisample.
     private VkSampleCountFlagBits _samples;
@@ -247,6 +251,31 @@ public unsafe ref struct GraphicsPipelineBuilder
         _cullMode    = cullMode;
         _frontFace   = frontFace;
         _polygonMode = polygonMode;
+        return this;
+    }
+
+    /// <summary>
+    /// Enables depth bias on the rasterizer. <paramref name="constantFactor"/>
+    /// maps to <c>depthBiasConstantFactor</c>, <paramref name="slopeFactor"/>
+    /// to <c>depthBiasSlopeFactor</c>, and <paramref name="clamp"/> to
+    /// <c>depthBiasClamp</c>. Default-unset behaviour leaves
+    /// <c>depthBiasEnable = false</c> on every pipeline that doesn't call
+    /// this — existing pipelines see no change.
+    /// </summary>
+    /// <remarks>
+    /// Typical engine uses: positive (slope, constant) on cascaded shadow
+    /// casters to bias caster geometry away from the receiver and dodge
+    /// self-shadow acne; a small negative <paramref name="constantFactor"/>
+    /// on a main pass that follows a Z-prepass with a <c>LessOrEqual</c>
+    /// depth function, to keep the prepass-vs-main equality stable at
+    /// silhouettes.
+    /// </remarks>
+    public GraphicsPipelineBuilder WithDepthBias(float constantFactor, float slopeFactor, float clamp = 0f)
+    {
+        _depthBiasEnable         = true;
+        _depthBiasConstantFactor = constantFactor;
+        _depthBiasSlopeFactor    = slopeFactor;
+        _depthBiasClamp          = clamp;
         return this;
     }
 
@@ -513,6 +542,10 @@ public unsafe ref struct GraphicsPipelineBuilder
                 polygonMode             = _polygonMode,
                 cullMode                = (uint)_cullMode,
                 frontFace               = _frontFace,
+                depthBiasEnable         = _depthBiasEnable ? 1u : 0u,
+                depthBiasConstantFactor = _depthBiasConstantFactor,
+                depthBiasClamp          = _depthBiasClamp,
+                depthBiasSlopeFactor    = _depthBiasSlopeFactor,
                 lineWidth               = 1.0f,
             };
 
