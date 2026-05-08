@@ -39,8 +39,9 @@ public readonly unsafe struct Allocator : IDisposable
     /// Builds a VMA allocator over <paramref name="device"/>. Loads the
     /// platform Vulkan loader, threads <c>vkGetInstanceProcAddr</c> +
     /// <c>vkGetDeviceProcAddr</c> into <see cref="VmaVulkanFunctions"/>,
-    /// and feeds VMA the physical/logical/instance handles plus
-    /// <c>vmaApiVersion = 1.4</c>.
+    /// and feeds VMA the physical/logical/instance handles plus the
+    /// device's reported <c>apiVersion</c> (capped at the wrapper's
+    /// header ceiling of 1.4).
     /// </summary>
     public static Allocator Create(Device device)
     {
@@ -65,6 +66,18 @@ public readonly unsafe struct Allocator : IDisposable
                     NativeLibrary.GetExport(loader, "vkGetDeviceProcAddr"),
             };
 
+            // VMA uses vulkanApiVersion to gate which version-promoted entry
+            // points it imports through vkGetDeviceProcAddr. Passing a higher
+            // version than the device actually supports makes VMA import
+            // entry points the loader returns null for, then SIGSEGV the
+            // first time it dispatches through one. Symptom seen on Mesa
+            // lavapipe (advertises 1.3) when the wrapper hardcoded 1.4 here;
+            // see VMA issue 397 for the same shape on Android 14. Clamp to
+            // min(headers, device) so the import set matches reality.
+            VkPhysicalDeviceProperties props;
+            Vk.vkGetPhysicalDeviceProperties(device.PhysicalDevice.Handle, &props);
+            uint apiVersion = Math.Min(VulkanVersion.V1_4.Packed, props.apiVersion);
+
             // Explicit baseline for every native field — see CreateBuffer
             // for the rationale. The VMA struct exposes several optional
             // pointers and a heap-size override that we don't drive; pinning
@@ -83,7 +96,7 @@ public readonly unsafe struct Allocator : IDisposable
             ci.pHeapSizeLimit                 = null;
             ci.pVulkanFunctions               = &functions;
             ci.instance                       = device.PhysicalDevice.Instance.Handle;
-            ci.vulkanApiVersion               = VulkanVersion.V1_4.Packed;
+            ci.vulkanApiVersion               = apiVersion;
             ci.pTypeExternalMemoryHandleTypes = null;
 
             VmaAllocator_T* raw = null;
