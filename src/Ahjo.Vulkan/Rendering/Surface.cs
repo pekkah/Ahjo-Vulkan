@@ -31,7 +31,44 @@ public readonly unsafe struct Surface : IVulkanHandle<Surface>, IDisposable
     }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_SURFACE_KHR;
+
+    /// <summary>
+    /// Borrowing constructor from a raw <c>VkSurfaceKHR</c> handle. The
+    /// resulting <see cref="Surface"/> has <see cref="InstanceHandle"/> =
+    /// <see langword="null"/> and a no-op <see cref="Dispose"/> — use when
+    /// the original creator still owns the surface and the wrapper is
+    /// only inspecting it. For ownership transfer (the SDL/GLFW handoff
+    /// case) use <see cref="WrapExternal"/> instead.
+    /// </summary>
     public static Surface FromRaw(nint handle) => new((VkSurfaceKHR_T*)handle, null);
+
+    /// <summary>
+    /// Owning constructor over an externally-created <c>VkSurfaceKHR</c>.
+    /// Used when SDL3 / GLFW / another library creates the surface (and
+    /// returns a raw <c>uint64</c> handle) and the engine wants the
+    /// wrapper to take responsibility for destroy. <see cref="Dispose"/>
+    /// calls <c>vkDestroySurfaceKHR</c>.
+    /// </summary>
+    /// <param name="instance">
+    /// The <see cref="Instance"/> the surface was created against.
+    /// Required for <c>vkDestroySurfaceKHR</c>.
+    /// </param>
+    /// <param name="handle">Raw <c>VkSurfaceKHR</c> handle (a pointer-sized integer).</param>
+    /// <remarks>
+    /// The caller transfers ownership: do not call
+    /// <c>vkDestroySurfaceKHR</c> manually after wrapping. Disposing two
+    /// <see cref="Surface"/> values that wrap the same raw handle is
+    /// undefined behaviour, just as it would be for any other Vulkan
+    /// destroy entry-point.
+    /// </remarks>
+    public static Surface WrapExternal(Instance instance, nint handle)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        if (handle == 0)
+            throw new ArgumentException("Surface handle is null.", nameof(handle));
+        return new Surface((VkSurfaceKHR_T*)handle, instance.Handle);
+    }
+
     public ulong RawHandle => (ulong)Handle;
     public bool  IsNull    => Handle == null;
 
