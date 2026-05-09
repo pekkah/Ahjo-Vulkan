@@ -10,4 +10,5 @@
   <Project Path="samples/AotSmoke/AotSmoke.csproj" />
   <Project Path="samples/HeadlessTriangle/HeadlessTriangle.csproj" />
   <Project Path="samples/HelloTriangle/HelloTriangle.csproj" />
+  <Project Path="samples/HelloCube/HelloCube.csproj" />
 </Solution>
