@@ -158,6 +158,10 @@ public sealed class SamplerTests
 
     private static unsafe Device CreateGraphicsDeviceWithAnisotropy(Instance instance, out bool anisotropySupported)
     {
+        // The wrapper's CreateDevice now queries the physical device and
+        // enables samplerAnisotropy on the pre-pushed VkPhysicalDeviceFeatures2
+        // when supported, so callers no longer have to push their own copy
+        // — see PhysicalDevice.CreateDevice's "3D-game baseline" block.
         uint family = uint.MaxValue;
         bool supported = false;
         var gpu = instance.PickPhysicalDevice((in PhysicalDeviceInfo info) =>
@@ -175,21 +179,9 @@ public sealed class SamplerTests
         });
         anisotropySupported = supported;
 
-        var desc = new DeviceDescription
+        return gpu.CreateDevice(new DeviceDescription
         {
             Queues = [new QueueRequest(family, count: 1, priority: 1.0f)],
-            ConfigureFeatures = supported
-                ? (
-                    ref ChainBuilder<VkDeviceCreateInfo> chain,
-                    ref VkPhysicalDeviceVulkan12Features _,
-                    ref VkPhysicalDeviceVulkan13Features _,
-                    ref VkPhysicalDeviceVulkan14Features _) =>
-                {
-                    ref var f2 = ref chain.Push<VkPhysicalDeviceFeatures2>();
-                    f2.features.samplerAnisotropy = 1;
-                }
-                : null,
-        };
-        return gpu.CreateDevice(in desc);
+        });
     }
 }

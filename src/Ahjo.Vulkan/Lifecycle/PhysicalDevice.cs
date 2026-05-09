@@ -161,9 +161,41 @@ public sealed unsafe class PhysicalDevice
         var chain = ChainBuilder.For<VkDeviceCreateInfo>(chainBuf);
         ref VkDeviceCreateInfo dci = ref chain.Root();
 
+        // 1.0-era core feature flags ride on VkPhysicalDeviceFeatures2.
+        // The wrapper queries the device first and only enables the
+        // intersection of the "3D-game baseline" with what's actually
+        // advertised — vkCreateDevice rejects requests for unsupported
+        // features, so we cannot just flip every bit unconditionally.
+        // Bits explicitly handled here:
+        //   samplerAnisotropy   - anisotropic mip filtering on textures
+        //   depthClamp          - clamp instead of clip in shadow passes
+        //   fillModeNonSolid    - wireframe debug rendering
+        //   independentBlend    - per-attachment blend state for MRT
+        //   imageCubeArray      - cubemap arrays
+        // Coverage on desktop Vulkan-1.2+ drivers is essentially universal
+        // for these; anything the device lacks stays at zero and the
+        // configurer can opt back in (or read the resulting struct to see
+        // what landed).
+        VkPhysicalDeviceFeatures supported;
+        Vk.vkGetPhysicalDeviceFeatures(Handle, &supported);
+
+        ref var f2 = ref chain.Push<VkPhysicalDeviceFeatures2>();
+        f2.features.samplerAnisotropy = supported.samplerAnisotropy;
+        f2.features.depthClamp        = supported.depthClamp;
+        f2.features.fillModeNonSolid  = supported.fillModeNonSolid;
+        f2.features.independentBlend  = supported.independentBlend;
+        f2.features.imageCubeArray    = supported.imageCubeArray;
+
         ref var f12 = ref chain.Push<VkPhysicalDeviceVulkan12Features>();
-        f12.bufferDeviceAddress = 1;
-        f12.timelineSemaphore   = 1;
+        f12.bufferDeviceAddress         = 1;
+        f12.timelineSemaphore           = 1;
+        // Required to use VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL (and the
+        // matching stencil/read-only variants) on depth-only / stencil-only
+        // images. Without it any depth-attachment workflow has to fall back
+        // to the legacy combined VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        // and barriers carrying the modern layouts are silently invalid —
+        // a frequent foot-gun for first-time 3D-game-style samples.
+        f12.separateDepthStencilLayouts = 1;
         ref var f13 = ref chain.Push<VkPhysicalDeviceVulkan13Features>();
         f13.synchronization2 = 1;
         f13.dynamicRendering = 1;
@@ -171,11 +203,11 @@ public sealed unsafe class PhysicalDevice
         f14.pushDescriptor = 1;
 
         // Hand the configurer ref access to the wrapper's pre-pushed
-        // structs so it can flip additional 1.2/1.3/1.4 bits in-place
-        // without producing a duplicate-sType chain (issue 53). The
-        // duplicate-sType validator below still catches callers that
-        // push their own copy through `chain`.
-        desc.ConfigureFeatures?.Invoke(ref chain, ref f12, ref f13, ref f14);
+        // structs so it can flip additional bits in-place without
+        // producing a duplicate-sType chain (issue 53). The duplicate-
+        // sType validator below still catches callers that push their
+        // own copy through `chain`.
+        desc.ConfigureFeatures?.Invoke(ref chain, ref f2, ref f12, ref f13, ref f14);
 
         // Vulkan disallows two pNext nodes with the same sType inside a
         // single chain. The wrapper pre-pushes the 1.2/1.3/1.4 promoted-

@@ -184,6 +184,7 @@ public sealed unsafe class DeviceTests
             Queues = [new QueueRequest(gfxFamily, count: 1, priority: 1.0f)],
             ConfigureFeatures = (
                 ref ChainBuilder<VkDeviceCreateInfo> _,
+                ref VkPhysicalDeviceFeatures2        _,
                 ref VkPhysicalDeviceVulkan12Features _,
                 ref VkPhysicalDeviceVulkan13Features _,
                 ref VkPhysicalDeviceVulkan14Features _) => invoked = true,
@@ -195,12 +196,13 @@ public sealed unsafe class DeviceTests
 
     /// <summary>
     /// The configurer receives ref access to the wrapper's pre-pushed
-    /// 1.2/1.3/1.4 feature structs (issue 53). The wrapper's defaults
-    /// must be visible (<c>synchronization2</c>, <c>dynamicRendering</c>,
+    /// feature structs (issue 53). The wrapper's defaults must be visible
+    /// (<c>synchronization2</c>, <c>dynamicRendering</c>,
     /// <c>bufferDeviceAddress</c>, <c>timelineSemaphore</c>,
-    /// <c>pushDescriptor</c>) so a caller can confirm what's already on
-    /// before flipping additional bits — the canonical use case is
-    /// "enable maintenance4 on top of the wrapper's set".
+    /// <c>separateDepthStencilLayouts</c>, <c>pushDescriptor</c>) so a
+    /// caller can confirm what's already on before flipping additional
+    /// bits — the canonical use case is "enable maintenance4 on top of
+    /// the wrapper's set".
     /// </summary>
     [Fact]
     public void CreateDevice_ConfigureFeaturesCallback_SeesWrapperDefaultsOnRefs()
@@ -218,6 +220,7 @@ public sealed unsafe class DeviceTests
             Queues = [new QueueRequest(gfxFamily, count: 1, priority: 1.0f)],
             ConfigureFeatures = (
                 ref ChainBuilder<VkDeviceCreateInfo> _,
+                ref VkPhysicalDeviceFeatures2        _,
                 ref VkPhysicalDeviceVulkan12Features f12,
                 ref VkPhysicalDeviceVulkan13Features f13,
                 ref VkPhysicalDeviceVulkan14Features f14) =>
@@ -231,6 +234,7 @@ public sealed unsafe class DeviceTests
 
         Assert.Equal(1u, sawF12.bufferDeviceAddress);
         Assert.Equal(1u, sawF12.timelineSemaphore);
+        Assert.Equal(1u, sawF12.separateDepthStencilLayouts);
         Assert.Equal(1u, sawF13.synchronization2);
         Assert.Equal(1u, sawF13.dynamicRendering);
         Assert.Equal(1u, sawF14.pushDescriptor);
@@ -259,6 +263,7 @@ public sealed unsafe class DeviceTests
                 Queues = [new QueueRequest(gfxFamily, count: 1, priority: 1.0f)],
                 ConfigureFeatures = (
                     ref ChainBuilder<VkDeviceCreateInfo> chain,
+                    ref VkPhysicalDeviceFeatures2        _,
                     ref VkPhysicalDeviceVulkan12Features _,
                     ref VkPhysicalDeviceVulkan13Features _,
                     ref VkPhysicalDeviceVulkan14Features _) =>
