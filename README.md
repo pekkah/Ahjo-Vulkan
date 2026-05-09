@@ -32,6 +32,40 @@ and follows the same architecture: ClangSharp-generated P/Invokes,
 ref-struct wrapper, `Directory.Build.props` central config, MinVer
 version derivation, GitHub Actions for CI + tag-driven NuGet publish.
 
+## Quick start
+
+```csharp
+using Ahjo.Vulkan;
+
+ReadOnlySpan<Utf8Name> extensions = stackalloc Utf8Name[]
+{
+    Utf8Name.FromLiteral("VK_KHR_surface"u8),
+    VulkanExtensions.KhrWin32Surface,
+};
+
+using var instance = Instance.Create(new InstanceDescription
+{
+    ApplicationName  = Utf8Name.FromLiteral("hello"u8),
+    ApiVersion       = VulkanVersion.V1_4,
+    EnableValidation = true,
+    Extensions       = extensions,
+    DebugCallback    = msg => Console.Error.WriteLine($"[{msg.Severity}] {msg.Message}"),
+});
+```
+
+`"…"u8` literals live in the assembly's read-only data segment (process
+lifetime, null-terminated, no GC pinning); `Utf8Name.FromLiteral` wraps the
+pointer so a `params`/span list can carry them. **Never** round-trip an
+extension name through `string` + `Encoding.UTF8.GetBytes` — the resulting
+buffer is GC-movable and not null-terminated, so the pointer Vulkan sees
+will dangle. `VulkanExtensions.KhrSurface` / `KhrSwapchain` / etc. expose
+the names the wrapper actively wraps as ready-made `Utf8Name` values.
+
+Full design rationale (instance lifecycle, validation wiring, callback
+contract): [`docs/superpowers/specs/2026-05-04-issue-06-instance-creation-design.md`](docs/superpowers/specs/2026-05-04-issue-06-instance-creation-design.md).
+Porting from Vortice.Vulkan: [`docs/migration-vortice-to-ahjo.md`](docs/migration-vortice-to-ahjo.md).
+Other specs and plans live under [`docs/superpowers/specs/`](docs/superpowers/specs/) and [`docs/superpowers/plans/`](docs/superpowers/plans/).
+
 ## Layout
 
 - `src/Ahjo.Vulkan.Native` — ClangSharp-generated P/Invokes against `vulkan.h`. Regenerated via `dotnet build -t:Regenerate`. Ships as `Ahjo.Vulkan.Native`.

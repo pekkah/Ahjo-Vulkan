@@ -44,6 +44,66 @@ Same load-bearing idioms as the Ahjo Wgpu wrapper:
   Recorders don't escape methods; spans live on method parameters, not
   descriptor fields, to keep escape-analysis happy.
 
+## Quick start
+
+```csharp
+using Ahjo.Vulkan;
+
+ReadOnlySpan<Utf8Name> extensions = stackalloc Utf8Name[]
+{
+    Utf8Name.FromLiteral("VK_KHR_surface"u8),
+};
+
+using var instance = Instance.Create(new InstanceDescription
+{
+    ApiVersion       = VulkanVersion.V1_4,
+    EnableValidation = true,            // appends VK_LAYER_KHRONOS_validation + VK_EXT_debug_utils
+    Extensions       = extensions,
+    DebugCallback    = msg => Console.Error.WriteLine($"[{msg.Severity}] {msg.Message}"),
+});
+```
+
+A `default(InstanceDescription)` is also legal — `ApiVersion` falls back to
+`VulkanVersion.V1_4` and the wrapper uses a default callback that writes to
+`Console.Error`.
+
+## Layered design
+
+- **Struct handles.** `Buffer`, `Image`, `Pipeline`, `Queue`, `CommandBuffer`,
+  etc. are `readonly struct`s that satisfy `IVulkanHandle<TSelf>` (one or two
+  raw `Vk*_T*` fields, `default(T)` is a legal null handle, copy-by-value, no
+  finalizer). Disposal is deterministic at the call site; double-dispose is
+  undefined behavior — the wrapper does not zero-on-release. `Instance` and
+  `Device` are the exceptions: they are `sealed class`es with finalizers
+  because they're once-per-process and worth backstopping.
+- **`ChainBuilder<TRoot>`.** Stack-only bump allocator that lays out a Vulkan
+  `pNext` chain into a caller-supplied `Span<byte>` (typically
+  `stackalloc byte[256]`). Zero heap allocations. The generic constraint
+  `T : IChainable<TRoot>` makes "this struct cannot extend that root" a
+  compile error, not a runtime check. `SType` is read from a static-abstract
+  member — call sites never pass it.
+- **`VulkanException` + `VkResult.ThrowIfFailed()`.** Single-success-result
+  APIs throw `VulkanException` on anything other than `VK_SUCCESS`; the
+  exception carries the `VkResult` and the originating function name. Hot-
+  path APIs that legitimately return non-success codes (`VK_INCOMPLETE`,
+  `VK_SUBOPTIMAL_KHR`, `VK_TIMEOUT`, …) surface the `VkResult` directly so
+  callers can branch without paying for a throw.
+- **`Utf8Name.FromLiteral("…"u8)`.** All `const char*` parameters (extension
+  names, layer names, debug labels, application names) flow through
+  `Utf8Name`. Pass `"…"u8` literals only — they live in the assembly's read-
+  only data segment for process lifetime, are null-terminated, and don't
+  require GC pinning. Never round-trip a `string` through
+  `Encoding.UTF8.GetBytes` for these slots: the resulting `byte[]` is GC-
+  movable and not null-terminated, and the pointer Vulkan sees will dangle.
+  See the `FromLiteral` XML doc for the full contract. The wrapper's
+  `VulkanExtensions` static class exposes ready-made `Utf8Name` constants
+  for the names it actively wraps (`KhrSurface`, `KhrWin32Surface`,
+  `KhrSwapchain`).
+
+Deeper rationale on each layer lives under
+[`docs/superpowers/specs/`](https://github.com/pekkah/ahjo-vulkan/tree/main/docs/superpowers/specs)
+in the source repo.
+
 ## Repository
 
 Source, issues, samples: <https://github.com/pekkah/ahjo-vulkan>
