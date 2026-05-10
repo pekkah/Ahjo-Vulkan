@@ -27,4 +27,20 @@ public sealed class VulkanVersionTests
         uint packed = v;
         Assert.Equal(v.Packed, packed);
     }
+
+    [Fact]
+    public void Variant_RoundTrips()
+    {
+        // Khronos-default Make values have variant=0.
+        Assert.Equal(0u, VulkanVersion.Make(1, 4, 0).Variant);
+
+        // A raw-packed value with the top 3 bits set must surface variant=7
+        // and leave Major/Minor/Patch unaffected (the variant field doesn't
+        // overlap them).
+        var raw = new VulkanVersion((7u << 29) | (1u << 22) | (4u << 12) | 7u);
+        Assert.Equal(7u, raw.Variant);
+        Assert.Equal(1u, raw.Major);
+        Assert.Equal(4u, raw.Minor);
+        Assert.Equal(7u, raw.Patch);
+    }
 }
