@@ -49,6 +49,14 @@ public sealed unsafe class Instance : IDisposable
         _callbackKeepAlive = callbackKeepAlive;
     }
 
+    /// <summary>
+    /// Raw <c>VkInstance</c> handle as a pointer-sized integer, for
+    /// interop with windowing libraries (SDL3, GLFW) that expect a
+    /// <c>VkInstance</c> argument when creating surfaces. Mirrors
+    /// <see cref="Device.RawHandle"/> / <see cref="PhysicalDevice.RawHandle"/>.
+    /// </summary>
+    public ulong RawHandle => (ulong)(nint)Handle;
+
     public static Instance Create(scoped in InstanceDescription desc)
     {
         uint apiVersion = desc.ApiVersion.Packed != 0 ? desc.ApiVersion.Packed : VulkanVersion.V1_4.Packed;

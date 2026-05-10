@@ -124,11 +124,36 @@ public sealed unsafe class SurfaceTests
             Surface.CreateWayland(instance, display: unchecked((nint)0xCAFE), surface: 0));
     }
 
-    // No end-to-end Wayland test: producing a wl_surface requires
-    // binding the wl_compositor protocol via the registry, which is
-    // significantly more code than a unit test should carry. The
-    // hidden-window path lands when SDL3 / GLFW integration tests come
-    // online — those wrap the protocol dance for us.
+    /// <summary>
+    /// End-to-end Wayland path: open a hidden Vulkan window through the
+    /// SDL3 shim, extract the <c>wl_display</c> + <c>wl_surface</c>
+    /// SDL exposes via window properties, wrap them through
+    /// <see cref="Surface.CreateWayland"/>, dispose. Skips when
+    /// <c>WAYLAND_DISPLAY</c> is unset (SDL would otherwise fall back
+    /// to X11 and the property pointers would come back null).
+    /// </summary>
+    [Fact]
+    public void CreateWayland_RoundTrip()
+    {
+        Assert.SkipUnless(IsLinux, "Wayland surface test.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipUnless(SdlWindow.IsAvailable, "SDL3 video subsystem unavailable.");
+        Assert.SkipWhen(string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY")),
+            "WAYLAND_DISPLAY unset (no Wayland session).");
+
+        using var window = new SdlWindow("AhjoVk_WaylandRT", 640, 480);
+        nint wlDisplay = window.WaylandDisplay;
+        nint wlSurface = window.WaylandSurface;
+        Assert.SkipWhen(wlDisplay == 0 || wlSurface == 0,
+            "SDL did not select the Wayland video driver for this window.");
+
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWaylandSurface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+
+        using Surface surface = Surface.CreateWayland(instance, wlDisplay, wlSurface);
+        Assert.False(surface.IsNull);
+        Assert.NotEqual(0ul, surface.RawHandle);
+    }
 
     [Fact]
     public void CreateMetal_NullLayer_Throws()
@@ -143,10 +168,41 @@ public sealed unsafe class SurfaceTests
             Surface.CreateMetal(instance, metalLayer: 0));
     }
 
-    // No end-to-end Metal test: allocating a CAMetalLayer requires the
-    // Objective-C runtime (objc_msgSend on QuartzCore) and a proper
-    // host application bundle. The hidden-window path lands when a
-    // SDL3 / GLFW integration shim provides the layer.
+    /// <summary>
+    /// End-to-end Metal path: open a hidden Vulkan window through the
+    /// SDL3 shim, attach a Metal view to extract its <c>CAMetalLayer*</c>,
+    /// wrap it through <see cref="Surface.CreateMetal"/>, dispose.
+    /// MoltenVK on macOS / iOS only — skipped everywhere else, and
+    /// skipped when SDL refuses to attach a Metal view (sandboxed test
+    /// host with no QuartzCore, no display attached, etc.) instead of
+    /// hard-failing the suite.
+    /// </summary>
+    [Fact]
+    public void CreateMetal_RoundTrip()
+    {
+        Assert.SkipUnless(IsMacOS, "Metal surface test.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipUnless(SdlWindow.IsAvailable, "SDL3 video subsystem unavailable.");
+
+        using var window = new SdlWindow("AhjoVk_MetalRT", 640, 480);
+        nint metalLayer;
+        try
+        {
+            metalLayer = window.MetalLayer;
+        }
+        catch (InvalidOperationException ex)
+        {
+            Assert.Skip($"SDL Metal view unavailable: {ex.Message}");
+            return;
+        }
+
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.ExtMetalSurface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+
+        using Surface surface = Surface.CreateMetal(instance, metalLayer);
+        Assert.False(surface.IsNull);
+        Assert.NotEqual(0ul, surface.RawHandle);
+    }
 
     /// <summary>
     /// End-to-end ownership test: create a Win32 surface through the raw

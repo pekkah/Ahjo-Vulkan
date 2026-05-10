@@ -5,12 +5,19 @@
     <RootNamespace>Ahjo.Vulkan.Samples.HelloCube</RootNamespace>
     <AssemblyName>HelloCube</AssemblyName>
     <IsPackable>false</IsPackable>
-    <SupportedOSPlatformVersion>7.0</SupportedOSPlatformVersion>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Ahjo.Vulkan\Ahjo.Vulkan.csproj" />
     <ProjectReference Include="..\..\src\Ahjo.Vulkan.Utilities\Ahjo.Vulkan.Utilities.csproj" />
+    <PackageReference Include="ppy.SDL3-CS" />
+  </ItemGroup>
+
+  <!-- Share the SDL3 window shim with the test project (#87 / #88).
+       The file is owned by tests/ and link-compiled here so a single
+       implementation covers both consumers. -->
+  <ItemGroup>
+    <Compile Include="..\..\tests\Ahjo.Vulkan.Tests\SdlWindow.cs" Link="SdlWindow.cs" />
   </ItemGroup>
 
   <ItemGroup>

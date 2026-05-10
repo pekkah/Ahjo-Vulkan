@@ -1,17 +1,16 @@
-using System.Runtime.Versioning;
 using Ahjo.Vulkan;
 using Ahjo.Vulkan.Native;
 
 namespace Ahjo.Vulkan.Samples.HelloTriangle;
 
 /// <summary>
-/// Issue 25 windowed sample: opens a Win32 window, builds a swapchain
-/// against it, and runs a FrameRing-driven present loop drawing the
-/// same RGB triangle as <c>HeadlessTriangle</c>. Press <kbd>Esc</kbd>
-/// to quit. Resizing the window triggers a swapchain recreate at the
-/// next loop tick.
+/// Issue 25 windowed sample: opens a window through the SDL3 shim,
+/// builds a swapchain against it, and runs a FrameRing-driven present
+/// loop drawing the same RGB triangle as <c>HeadlessTriangle</c>. Press
+/// <kbd>Esc</kbd> to quit. Resizing the window triggers a swapchain
+/// recreate at the next loop tick. Cross-platform (Windows + Wayland /
+/// X11 on Linux + MoltenVK on macOS) thanks to SDL3's surface helper.
 /// </summary>
-[SupportedOSPlatform("windows")]
 internal static unsafe class Program
 {
     private static int Main(string[] args)
@@ -37,12 +36,17 @@ internal static unsafe class Program
             return 2;
         }
 
-        using var window = new Win32Window("Ahjo.Vulkan — HelloTriangle (Esc to quit)", 1024, 768);
+        using var window = new SdlWindow("Ahjo.Vulkan — HelloTriangle (Esc to quit)", 1024, 768,
+            hidden: false, resizable: true);
 
-        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        // Ask SDL what Vulkan instance extensions the chosen video
+        // driver needs — typically VK_KHR_surface + one platform
+        // surface extension (Win32 / Wayland / Xlib / Metal). Cheaper
+        // and more portable than guessing at the call site.
+        Utf8Name[] instanceExts = SdlWindow.GetRequiredVulkanInstanceExtensions();
         using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
 
-        using var surface = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var surface = window.CreateVulkanSurface(instance);
         using var device  = CreatePresentDevice(instance, in surface, out uint family);
 
         var swapDesc = new SwapchainDescription

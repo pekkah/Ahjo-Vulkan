@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using System.Runtime.Versioning;
 using Ahjo.Vulkan;
 using Ahjo.Vulkan.Native;
 using Ahjo.Vulkan.Utilities;
@@ -9,15 +8,15 @@ using Ahjo.Vulkan.Utilities;
 namespace Ahjo.Vulkan.Samples.HelloCube;
 
 /// <summary>
-/// Windowed sample: opens a Win32 window, builds a swapchain with a
-/// matching depth attachment, uploads a textured unit cube (24
-/// vertices × 36 indices, position + UV + per-face tint), and spins it
-/// in front of the camera through a push-constant MVP matrix. The
-/// diffuse texture is the CC0 <c>Planks010</c> color map from
-/// ambientCG, sampled through a per-frame push descriptor.
-/// Press <kbd>Esc</kbd> to quit.
+/// Windowed sample: opens a window through the SDL3 shim, builds a
+/// swapchain with a matching depth attachment, uploads a textured unit
+/// cube (24 vertices × 36 indices, position + UV + per-face tint), and
+/// spins it in front of the camera through a push-constant MVP matrix.
+/// The diffuse texture is the CC0 <c>Planks010</c> color map from
+/// ambientCG, sampled through a per-frame push descriptor. Press
+/// <kbd>W</kbd> to toggle wireframe, <kbd>Esc</kbd> to quit.
+/// Cross-platform (Windows + Linux X11/Wayland + macOS MoltenVK).
 /// </summary>
-[SupportedOSPlatform("windows")]
 internal static unsafe class Program
 {
     private const VkFormat DepthFormat   = VkFormat.VK_FORMAT_D32_SFLOAT;
@@ -122,12 +121,13 @@ internal static unsafe class Program
             return 2;
         }
 
-        using var window = new Win32Window("Ahjo.Vulkan — HelloCube (W: wireframe • Esc: quit)", 1024, 768);
+        using var window = new SdlWindow("Ahjo.Vulkan — HelloCube (W: wireframe • Esc: quit)", 1024, 768,
+            hidden: false, resizable: true);
 
-        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        Utf8Name[] instanceExts = SdlWindow.GetRequiredVulkanInstanceExtensions();
         using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
 
-        using var surface = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var surface = window.CreateVulkanSurface(instance);
         using var device  = CreatePresentDevice(instance, in surface, out uint family, out bool wireframeSupported);
 
         var swapDesc = new SwapchainDescription

@@ -24,11 +24,13 @@
     <PackageVersion Include="MinVer" Version="7.0.0" />
   </ItemGroup>
 
-  <!-- Window/surface integration for samples (SDL3 has built-in Vulkan
-       surface creation helpers). -->
+  <!-- Window/surface integration for tests (Wayland/Metal E2E surface
+       coverage) and the windowed samples. ppy.SDL3-CS is the osu!
+       framework's binding: 1-3 week release cadence, MIT-licensed,
+       ships bundled SDL3 native binaries for win/linux/macOS via
+       runtimes/<rid>/native/. -->
   <ItemGroup>
-    <PackageVersion Include="SDL3-CS" Version="3.4.2" />
-    <PackageVersion Include="SDL3-CS.Native" Version="3.4.2" />
+    <PackageVersion Include="ppy.SDL3-CS" Version="2026.429.0" />
   </ItemGroup>
 
   <!-- On-demand allocation + latency benchmarks. See
