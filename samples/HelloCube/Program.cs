@@ -125,7 +125,15 @@ internal static unsafe class Program
             hidden: false, resizable: true);
 
         Utf8Name[] instanceExts = SdlWindow.GetRequiredVulkanInstanceExtensions();
-        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        // Validation enabled — same standing regression check pattern
+        // as HelloTriangle / HelloVmaWindowed. Findings hit stderr at
+        // WARN/ERROR severity.
+        using var instance = Instance.Create(new InstanceDescription
+        {
+            Extensions       = instanceExts,
+            EnableValidation = true,
+            DebugCallback    = OnValidationMessage,
+        });
 
         using var surface = window.CreateVulkanSurface(instance);
         using var device  = CreatePresentDevice(instance, in surface, out uint family, out bool wireframeSupported);
@@ -450,11 +458,14 @@ internal static unsafe class Program
                         srcStage: Stage.ColorAttachmentOutput, srcAccess: Access.ColorAttachmentWrite,
                         dstStage: Stage.BottomOfPipe,          dstAccess: Access.None);
 
-                    fc.Submit(queue, ref rec);
+                    // Swapchain-aware submit + matching present pull the
+                    // swapchain's per-image RenderingDone semaphore — see
+                    // issue #89 for why per-slot signaling was wrong.
+                    fc.Submit(queue, ref rec, swap, imageIndex);
                 }
                 finally { rec.Dispose(); }
 
-                var pres = swap.Present(queue, imageIndex, fc.RenderingDone);
+                var pres = swap.Present(queue, imageIndex);
                 if (pres is AcquireResult.OutOfDate or AcquireResult.Suboptimal)
                 {
                     device.WaitIdle();
@@ -604,6 +615,19 @@ internal static unsafe class Program
         c.float32[2] = b;
         c.float32[3] = a;
         return c;
+    }
+
+    /// <summary>
+    /// Routes validation messages to stderr at WARN/ERROR severity
+    /// (skipping INFO/VERBOSE which is mostly loader trace).
+    /// </summary>
+    private static void OnValidationMessage(DebugMessage msg)
+    {
+        bool isError = (msg.Severity & VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0;
+        bool isWarn  = (msg.Severity & VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) != 0;
+        if (!isError && !isWarn) return;
+        string tag = isError ? "ERROR" : "WARN ";
+        Console.Error.WriteLine($"[VK {tag}] {msg.MessageIdName ?? "?"}: {msg.Message}");
     }
 
     private static Device CreatePresentDevice(

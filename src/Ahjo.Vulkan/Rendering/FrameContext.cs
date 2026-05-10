@@ -69,12 +69,6 @@ public sealed class FrameContext : IDisposable
     public void MarkImageAcquireSignaled() => Slot.MarkAcquireSignaled();
 
     /// <summary>
-    /// Binary semaphore signaled at submit-completion. Reserved for the
-    /// swapchain present integration in #24.
-    /// </summary>
-    public BinarySemaphore RenderingDone => Slot.RenderingDone;
-
-    /// <summary>
     /// Per-slot fence signaled at submit-completion. The next time this
     /// slot rotates back through <see cref="FrameRing.BeginFrame"/>, the
     /// ring waits on this fence before reusing the slot's pools — that's
@@ -98,20 +92,75 @@ public sealed class FrameContext : IDisposable
     }
 
     /// <summary>
-    /// Swapchain-aware submit. Waits on
+    /// Swapchain-aware submit. Waits on this slot's
     /// <see cref="ImageAcquired"/> at <paramref name="imageAcquireWaitStage"/>
     /// (typically <see cref="Stage.ColorAttachmentOutput"/> for a
-    /// dynamic-rendering color pass), signals
-    /// <see cref="RenderingDone"/> at
+    /// dynamic-rendering color pass), signals the swapchain's
+    /// <i>per-image</i> <c>RenderingDone</c> semaphore for
+    /// <paramref name="imageIndex"/> at
     /// <paramref name="renderingDoneSignalStage"/> (typically
     /// <see cref="Stage.AllGraphics"/>), and signals the slot's fence
-    /// at completion.
+    /// at completion. Pair with
+    /// <see cref="Swapchain.Present(Queue, uint)"/> on the same
+    /// <paramref name="swapchain"/> + <paramref name="imageIndex"/> to
+    /// keep signal/wait identity consistent.
     /// </summary>
+    /// <remarks>
+    /// <para><b>Why the signal target lives on the swapchain.</b> A
+    /// per-frame-in-flight signal target trips
+    /// VUID-vkQueueSubmit2-semaphore-03868 when acquire order doesn't
+    /// match slot rotation: frame N+1's submit can re-signal slot K's
+    /// semaphore while a prior present of a different image still
+    /// holds it. The swapchain orders "next acquire of image i" after
+    /// "prior present of image i", so a per-image signal target is
+    /// provably safe to re-signal on the next acquire of the same
+    /// image. See issue #89 for the full repro and spec citation.</para>
+    /// <para><b>imageIndex provenance.</b> Pass the value returned by
+    /// <see cref="Swapchain.AcquireNextImage"/> on the same
+    /// <paramref name="swapchain"/>, in the same frame. The wrapper
+    /// indexes <see cref="Swapchain.GetRenderingDoneFor"/> with it
+    /// directly — out-of-range or stale indices would either trip the
+    /// validator or worse.</para>
+    /// </remarks>
     public void Submit(
         Queue                queue,
         ref CommandRecorder  recorder,
+        Swapchain            swapchain,
+        uint                 imageIndex,
         Stage                imageAcquireWaitStage    = Stage.ColorAttachmentOutput,
         Stage                renderingDoneSignalStage = Stage.AllGraphics)
+    {
+        ArgumentNullException.ThrowIfNull(swapchain);
+        Submit(queue, ref recorder, swapchain.GetRenderingDoneFor(imageIndex),
+               imageAcquireWaitStage, renderingDoneSignalStage);
+    }
+
+    /// <summary>
+    /// Lower-level swapchain-aware submit: waits on this slot's
+    /// <see cref="ImageAcquired"/> at <paramref name="imageAcquireWaitStage"/>
+    /// and signals an explicit <paramref name="signalSemaphore"/> at
+    /// <paramref name="signalSemaphoreStage"/>. The
+    /// <see cref="Submit(Queue, ref CommandRecorder, Swapchain, uint, Stage, Stage)"/>
+    /// overload routes through this one with
+    /// <see cref="Swapchain.GetRenderingDoneFor"/>; reach for this
+    /// overload when you're driving present semaphores yourself
+    /// (multi-swapchain bridging, exotic test harnesses).
+    /// </summary>
+    /// <remarks>
+    /// <para>The signal target must be unsignaled when the queue
+    /// reaches it (VUID-vkQueueSubmit2-semaphore-03868). Per-acquired-image
+    /// semaphores satisfy that automatically; per-frame-in-flight
+    /// semaphores do not — see issue #89. If you're not certain which
+    /// shape you have, use the
+    /// <see cref="Submit(Queue, ref CommandRecorder, Swapchain, uint, Stage, Stage)"/>
+    /// overload.</para>
+    /// </remarks>
+    public void Submit(
+        Queue                queue,
+        ref CommandRecorder  recorder,
+        in BinarySemaphore   signalSemaphore,
+        Stage                imageAcquireWaitStage = Stage.ColorAttachmentOutput,
+        Stage                signalSemaphoreStage  = Stage.AllGraphics)
     {
         ArgumentNullException.ThrowIfNull(queue);
         Slot.MarkSubmitted();
@@ -120,8 +169,8 @@ public sealed class FrameContext : IDisposable
         // signal is no longer pending the moment Submit2 returns.
         Slot.MarkAcquireWaitConsumed();
 
-        var wait   = new SemaphoreSubmit(ImageAcquired, imageAcquireWaitStage);
-        var signal = new SemaphoreSubmit(RenderingDone, renderingDoneSignalStage);
+        var wait   = new SemaphoreSubmit(ImageAcquired,   imageAcquireWaitStage);
+        var signal = new SemaphoreSubmit(signalSemaphore, signalSemaphoreStage);
         queue.Submit2(
             ref recorder, in Slot.InFlightHandle,
             System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(ref wait,   1),

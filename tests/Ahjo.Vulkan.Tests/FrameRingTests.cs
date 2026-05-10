@@ -465,16 +465,25 @@ public sealed unsafe class FrameRingTests
 
         using var ring = new FrameRing(device, framesInFlight: 2, queueFamily: family);
 
+        // Standalone signal semaphore for the explicit-signal Submit
+        // overload — exercises the swapchain-aware bookkeeping path
+        // (queued wait on ImageAcquired → MarkAcquireWaitConsumed)
+        // without needing a real Surface/Swapchain. The semaphore is
+        // signaled by the queue and immediately abandoned (no consumer);
+        // it is destroyed when SemaphorePool.Dispose runs at end of test.
+        using var auxSemaphores = new SemaphorePool(device);
+        BinarySemaphore signal = auxSemaphores.AcquireBinary();
+
         BinarySemaphore before;
         using (var fc = ring.BeginFrame())
         {
             before = fc.ImageAcquired;
             fc.MarkImageAcquireSignaled();
-            // Use the swapchain-aware Submit (the four-arg overload) —
-            // it clears the pending-acquire flag because the queued
-            // wait on ImageAcquired consumes the host signal.
+            // The swapchain-aware Submit overload that takes an explicit
+            // signal semaphore — clears the pending-acquire flag because
+            // the queued wait on ImageAcquired consumes the host signal.
             var rec = fc.CommandBuffers.Begin();
-            try { fc.Submit(queue, ref rec, Stage.ColorAttachmentOutput, Stage.AllGraphics); }
+            try { fc.Submit(queue, ref rec, in signal, Stage.ColorAttachmentOutput, Stage.AllGraphics); }
             finally { rec.Dispose(); }
         }
 

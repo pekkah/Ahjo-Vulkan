@@ -31,9 +31,20 @@ public sealed unsafe class Swapchain : IDisposable
 {
     private readonly Device       _device;
     private readonly Surface      _surface;
+    private readonly SemaphorePool _semaphorePool;
     private VkSwapchainKHR_T*     _handle;
-    private VkImage_T*[]          _images = [];
-    private ImageView[]           _views  = [];
+    private VkImage_T*[]          _images        = [];
+    private ImageView[]           _views         = [];
+    // Per-acquired-image RenderingDone semaphores, indexed by the
+    // imageIndex returned from vkAcquireNextImageKHR. Sized to the
+    // swapchain's ImageCount; allocated in CreateOrRecreate, rotated
+    // every Recreate, released in Dispose. Spec rationale: a binary
+    // signal semaphore must be unsignalled when the signal executes
+    // (VUID-vkQueueSubmit2-semaphore-03868); per-image keying uses
+    // the swapchain's own "next acquire of image i waits on the prior
+    // present of image i" ordering to guarantee that, where per-slot
+    // keying does not.
+    private BinarySemaphore[]     _renderingDone = [];
     private VkSurfaceFormatKHR    _format;
     private VkExtent2D            _extent;
     private VkPresentModeKHR      _presentMode;
@@ -59,13 +70,43 @@ public sealed unsafe class Swapchain : IDisposable
     /// </summary>
     public nint GetImageHandle(uint index) => (nint)_images[index];
 
+    /// <summary>
+    /// The per-image <c>RenderingDone</c> binary semaphore for
+    /// <paramref name="imageIndex"/>. Pass it as the signal in the submit
+    /// that produced this image's color contents and as the wait in the
+    /// matching <see cref="Present(Queue, uint, in BinarySemaphore)"/>
+    /// (the no-semaphore <see cref="Present(Queue, uint)"/> overload pulls
+    /// it implicitly).
+    /// </summary>
+    /// <remarks>
+    /// <para>Per-image rather than per-frame-in-flight: the spec requires
+    /// the signal target to be unsignalled when the signal executes
+    /// (VUID-vkQueueSubmit2-semaphore-03868). With a per-slot semaphore,
+    /// frame N+1's submit can re-signal slot K's semaphore while a prior
+    /// present of a different image is still holding it. Per-image works
+    /// because the swapchain itself orders "next acquire of image i"
+    /// after "prior present of image i", so the prior wait must have
+    /// been consumed by the time we re-signal for image i.</para>
+    /// <para>The handle is stable across acquire/present cycles but is
+    /// invalidated by <see cref="Recreate"/> — never cache it across
+    /// the recreate boundary.</para>
+    /// </remarks>
+    public BinarySemaphore GetRenderingDoneFor(uint imageIndex)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _renderingDone[imageIndex];
+    }
+
     public Swapchain(Device device, in SwapchainDescription desc)
     {
         ArgumentNullException.ThrowIfNull(device);
         if (desc.Surface.IsNull) throw new ArgumentException("Surface is null.", nameof(desc));
 
-        _device  = device;
-        _surface = desc.Surface;
+        _device        = device;
+        _surface       = desc.Surface;
+        // Owned by the Swapchain so its lifetime tracks the per-image
+        // semaphore array's. Internal — not exposed to callers.
+        _semaphorePool = new SemaphorePool(device);
         CreateOrRecreate(in desc, oldSwapchain: null);
     }
 
@@ -173,6 +214,17 @@ public sealed unsafe class Swapchain : IDisposable
     }
 
     /// <summary>
+    /// Presents <paramref name="imageIndex"/> on <paramref name="queue"/>,
+    /// waiting on this image's per-image <c>RenderingDone</c> semaphore
+    /// (the one returned by <see cref="GetRenderingDoneFor"/>). The
+    /// matching submit must have signaled the same semaphore — see the
+    /// swapchain-aware
+    /// <see cref="FrameContext.Submit(Queue, ref CommandRecorder, Swapchain, uint, Stage, Stage)"/>.
+    /// </summary>
+    public AcquireResult Present(Queue queue, uint imageIndex)
+        => Present(queue, imageIndex, in _renderingDone[imageIndex]);
+
+    /// <summary>
     /// Presents <paramref name="imageIndex"/> on <paramref name="queue"/>
     /// after <paramref name="waitSemaphore"/> fires (the
     /// rendering-done semaphore from the matching submit). Returns the
@@ -180,6 +232,14 @@ public sealed unsafe class Swapchain : IDisposable
     /// <see cref="AcquireNextImage"/> so the caller's "did the surface
     /// change?" branch is symmetric with the acquire path.
     /// </summary>
+    /// <remarks>
+    /// Most callers should use the no-semaphore
+    /// <see cref="Present(Queue, uint)"/> overload, which pulls the
+    /// per-image semaphore from the swapchain. This explicit overload
+    /// stays for the rare case where a caller wants to drive a custom
+    /// signal/wait pair (multi-swapchain bridging, headless capture
+    /// hooks, etc.).
+    /// </remarks>
     public AcquireResult Present(Queue queue, uint imageIndex, in BinarySemaphore waitSemaphore)
     {
         ArgumentNullException.ThrowIfNull(queue);
@@ -217,11 +277,13 @@ public sealed unsafe class Swapchain : IDisposable
         _disposed = true;
 
         DestroyViews();
+        DiscardRenderingDoneSemaphores();
         if (_handle != null)
         {
             Vk.vkDestroySwapchainKHR(_device.Handle, _handle, null);
             _handle = null;
         }
+        _semaphorePool.Dispose();
     }
 
     private void CreateOrRecreate(in SwapchainDescription desc, VkSwapchainKHR_T* oldSwapchain)
@@ -303,6 +365,17 @@ public sealed unsafe class Swapchain : IDisposable
 
         _images = new VkImage_T*[imageCount];
         _views  = new ImageView[imageCount];
+        // Reallocate per-image RenderingDone semaphores. On the first
+        // call (initial create) _renderingDone is empty; on Recreate it
+        // holds the prior swapchain's per-image semaphores, which are
+        // either consumed-and-unsignaled (safe to release back to the
+        // pool but easier to discard uniformly) or stuck signaled if
+        // the matching present returned OutOfDate (must be discarded —
+        // there is no host-reset for binary semaphores). Discarding
+        // every semaphore covers both cases without per-element state
+        // tracking.
+        DiscardRenderingDoneSemaphores();
+        AllocateRenderingDoneSemaphores((int)imageCount);
 
         fixed (VkImage_T** p = _images)
             Vk.vkGetSwapchainImagesKHR(_device.Handle, _handle, &imageCount, p).ThrowIfFailed();
@@ -333,6 +406,30 @@ public sealed unsafe class Swapchain : IDisposable
         for (int i = 0; i < _views.Length; i++) _views[i].Dispose();
         _views  = [];
         _images = [];
+    }
+
+    /// <summary>
+    /// Destroy + replace every per-image <c>RenderingDone</c> semaphore
+    /// the wrapper owns. Called from <see cref="Recreate"/> (after the
+    /// drain) and from <see cref="Dispose"/>. Discards rather than
+    /// releases so a semaphore stuck signaled (submit landed but
+    /// matching present returned <c>OutOfDate</c>) doesn't poison the
+    /// pool's reuse path. The pool's <see cref="SemaphorePool.Discard"/>
+    /// destroys the underlying <c>VkSemaphore</c>; binary semaphores
+    /// can't be host-reset.
+    /// </summary>
+    private void DiscardRenderingDoneSemaphores()
+    {
+        for (int i = 0; i < _renderingDone.Length; i++)
+            _semaphorePool.Discard(_renderingDone[i]);
+        _renderingDone = [];
+    }
+
+    private void AllocateRenderingDoneSemaphores(int count)
+    {
+        var fresh = new BinarySemaphore[count];
+        for (int i = 0; i < count; i++) fresh[i] = _semaphorePool.AcquireBinary();
+        _renderingDone = fresh;
     }
 
     /// <summary>

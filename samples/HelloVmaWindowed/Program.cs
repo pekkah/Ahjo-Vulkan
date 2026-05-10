@@ -107,23 +107,6 @@ internal static unsafe class Program
             Width   = window.Width,
             Height  = window.Height,
         };
-        // ---------------------------------------------------------------
-        //  KNOWN VALIDATION FINDING (wrapper-level, not VMA).
-        // ---------------------------------------------------------------
-        //  Running this sample with the validation layer enabled trips
-        //  VUID-vkQueueSubmit2-semaphore-03868 a few times: the per-slot
-        //  `RenderingDone` semaphore that FrameRing owns can be
-        //  re-signaled by the next frame's submit before the prior
-        //  vkQueuePresent has had its acquire consumed. The textbook
-        //  fix is per-acquired-image semaphores indexed by `imageIndex`
-        //  (the validator quotes it verbatim) — a FrameRing-level
-        //  change, not anything this sample can fix from the outside.
-        //  Aligning ImageCount with FramesInFlight via PreferredImageCount
-        //  doesn't help because acquire order isn't strictly round-robin.
-        //  The errors are unrelated to VMA — every other path
-        //  (allocator, per-frame UBO writes, persistent map, flush)
-        //  is validation-clean.
-        // ---------------------------------------------------------------
         using var swap  = new Swapchain(device, in swapDesc);
         var queue       = device.GetQueue(family, 0);
 
@@ -392,22 +375,20 @@ internal static unsafe class Program
                         srcStage: Stage.ColorAttachmentOutput, srcAccess: Access.ColorAttachmentWrite,
                         dstStage: Stage.BottomOfPipe,          dstAccess: Access.None);
 
-                    // Swapchain-aware submit: waits on fc.ImageAcquired at
-                    // ColorAttachmentOutput (matches the
-                    // UNDEFINED→COLOR_ATTACHMENT_OPTIMAL barrier above),
-                    // signals fc.RenderingDone at AllGraphics so the
-                    // following swap.Present's wait sees a real signal.
-                    // Passing the stage args explicitly is what selects
-                    // this overload over the headless `Submit(queue, ref rec)`
-                    // — the latter doesn't wire either semaphore, which
-                    // validation flags as a present-without-signal hazard.
-                    fc.Submit(queue, ref rec,
-                        imageAcquireWaitStage:    Stage.ColorAttachmentOutput,
-                        renderingDoneSignalStage: Stage.AllGraphics);
+                    // Swapchain-aware submit. Waits on fc.ImageAcquired
+                    // at ColorAttachmentOutput, signals the swapchain's
+                    // *per-image* RenderingDone semaphore for imageIndex
+                    // at AllGraphics. Per-image (not per-slot) is what
+                    // makes this validation-clean — see issue #89 for
+                    // why the per-slot shape tripped
+                    // VUID-vkQueueSubmit2-semaphore-03868. The matching
+                    // swap.Present(queue, imageIndex) below pulls the
+                    // same per-image semaphore implicitly.
+                    fc.Submit(queue, ref rec, swap, imageIndex);
                 }
                 finally { rec.Dispose(); }
 
-                var pres = swap.Present(queue, imageIndex, fc.RenderingDone);
+                var pres = swap.Present(queue, imageIndex);
                 if (pres is AcquireResult.OutOfDate or AcquireResult.Suboptimal)
                 {
                     device.WaitIdle();

@@ -181,11 +181,11 @@ public sealed unsafe class FrameRing : IDisposable
         // Mutable rather than readonly: RecycleStaleAcquireSemaphores
         // swaps the stuck handle out under FrameRing's control after a
         // post-OutOfDate Swapchain.Recreate where AcquireNextImage
-        // signaled but no Submit consumed the signal. RenderingDone is
-        // also signaled-then-waited but the wait is queued by Present
-        // before vkDeviceWaitIdle drains, so it is never stuck.
+        // signaled but no Submit consumed the signal.
+        // RenderingDone is no longer per-slot — see issue #89. The
+        // swapchain owns a per-acquired-image array and FrameContext.Submit
+        // pulls the right one via Swapchain.GetRenderingDoneFor(imageIndex).
         public           BinarySemaphore   ImageAcquired;
-        public  readonly BinarySemaphore   RenderingDone;
         public  readonly Fence             InFlightHandle;
         public  readonly DescriptorSetPool? DescriptorSets;
         // True when the most recent AcquireNextImage host-signaled
@@ -224,7 +224,6 @@ public sealed unsafe class FrameRing : IDisposable
             SemaphorePool?     semPool   = null;
             FencePool?         fencePool = null;
             BinarySemaphore    imgAcq    = default;
-            BinarySemaphore    rendDone  = default;
             Fence              inFlight  = default;
             DescriptorSetPool? descSets  = null;
             bool committed = false;
@@ -235,7 +234,6 @@ public sealed unsafe class FrameRing : IDisposable
                 semPool   = new SemaphorePool(device);
                 fencePool = new FencePool(device);
                 imgAcq    = semPool.AcquireBinary();
-                rendDone  = semPool.AcquireBinary();
                 inFlight  = fencePool.Acquire(initiallySignaled: true);
                 descSets  = descriptorPoolSizes.IsEmpty
                     ? null
@@ -246,7 +244,6 @@ public sealed unsafe class FrameRing : IDisposable
                 SemaphorePool  = semPool;
                 FencePool      = fencePool;
                 ImageAcquired  = imgAcq;
-                RenderingDone  = rendDone;
                 InFlightHandle = inFlight;
                 DescriptorSets = descSets;
                 committed = true;
@@ -261,11 +258,8 @@ public sealed unsafe class FrameRing : IDisposable
                     descSets?.Dispose();
                     if (fencePool is not null && !inFlight.IsNull)
                         fencePool.Release(inFlight);
-                    if (semPool is not null)
-                    {
-                        if (!rendDone.IsNull) semPool.Release(rendDone);
-                        if (!imgAcq.IsNull)   semPool.Release(imgAcq);
-                    }
+                    if (semPool is not null && !imgAcq.IsNull)
+                        semPool.Release(imgAcq);
                     staging?.Dispose();
                     cmdPool?.Dispose();
                     semPool?.Dispose();
@@ -352,7 +346,6 @@ public sealed unsafe class FrameRing : IDisposable
 
             FencePool.Release(InFlightHandle);
             SemaphorePool.Release(ImageAcquired);
-            SemaphorePool.Release(RenderingDone);
             DescriptorSets?.Dispose();
             Staging.Dispose();
             CommandBuffers.Dispose();
