@@ -151,8 +151,6 @@ public sealed unsafe class StagingBatchTests
     public void Flush_EmptyBatch_NoOp()
     {
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
-            "Software ICD (SwiftShader): SIGSEGVs in the StagingBatch teardown / device dispose path even with zero pending uploads.");
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);

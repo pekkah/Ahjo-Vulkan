@@ -33,8 +33,14 @@ namespace Ahjo.Vulkan;
 /// <c>shaderDemoteToHelperInvocation</c>.
 /// </param>
 /// <param name="features14">
-/// <c>VkPhysicalDeviceVulkan14Features</c> already in the chain — flip
-/// 1.4-promoted bits (e.g. <c>maintenance5</c>) directly.
+/// <c>VkPhysicalDeviceVulkan14Features</c> already in the chain when
+/// the device advertises Vulkan 1.4 — flip 1.4-promoted bits (e.g.
+/// <c>maintenance5</c>) directly. On a sub-1.4 device the wrapper omits
+/// the struct from the chain (sType 55 is unrecognized by 1.3 drivers
+/// and crashes some ICDs), so mutations to this ref are silently
+/// dropped. Callers needing 1.4-promoted features on a 1.3 device must
+/// request the equivalent extension (e.g. <c>VK_KHR_push_descriptor</c>)
+/// via <see cref="DeviceDescription.Extensions"/>.
 /// </param>
 /// <remarks>
 /// <para>The Vulkan spec forbids two pNext nodes with the same sType in
