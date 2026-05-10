@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace Ahjo.Vulkan;
 
 /// <summary>
@@ -14,12 +16,26 @@ public readonly record struct VulkanVersion(uint Packed)
     public static VulkanVersion V1_3 { get; } = Make(1, 3, 0);
     public static VulkanVersion V1_4 { get; } = Make(1, 4, 0);
 
+    /// <summary>
+    /// Packs <paramref name="major"/> / <paramref name="minor"/> /
+    /// <paramref name="patch"/> into the layout
+    /// <c>VK_MAKE_API_VERSION(0, major, minor, patch)</c> uses. The
+    /// <c>variant</c> field (top 3 bits) is fixed at 0 — Khronos Vulkan. A
+    /// non-Khronos variant would need a different overload, which we don't
+    /// have a caller for yet.
+    /// </summary>
     public static VulkanVersion Make(uint major, uint minor, uint patch)
-        => new((major << 22) | (minor << 12) | patch);
+    {
+        Debug.Assert(major <= 0x7Fu,  "VulkanVersion.Make: major must fit in 7 bits (<= 127).");
+        Debug.Assert(minor <= 0x3FFu, "VulkanVersion.Make: minor must fit in 10 bits (<= 1023).");
+        Debug.Assert(patch <= 0xFFFu, "VulkanVersion.Make: patch must fit in 12 bits (<= 4095).");
+        return new((major << 22) | (minor << 12) | patch);
+    }
 
-    public uint Major => (Packed >> 22) & 0x7Fu;
-    public uint Minor => (Packed >> 12) & 0x3FFu;
-    public uint Patch =>  Packed         & 0xFFFu;
+    public uint Variant => (Packed >> 29) & 0x7u;
+    public uint Major   => (Packed >> 22) & 0x7Fu;
+    public uint Minor   => (Packed >> 12) & 0x3FFu;
+    public uint Patch   =>  Packed        & 0xFFFu;
 
     public static implicit operator uint(VulkanVersion v) => v.Packed;
 }
