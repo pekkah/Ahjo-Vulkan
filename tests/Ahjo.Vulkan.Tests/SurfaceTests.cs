@@ -53,6 +53,8 @@ public sealed unsafe class SurfaceTests
     {
         Assert.SkipUnless(IsLinux, "Xlib surface test.");
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipUnless(VulkanDriverProbe.HasInstanceExtension("VK_KHR_xlib_surface"u8),
+            "VK_KHR_xlib_surface not exposed by the ICD (SwiftShader's Linux build ships Wayland but not Xlib).");
 
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrXlibSurface];
         using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
@@ -66,6 +68,8 @@ public sealed unsafe class SurfaceTests
     {
         Assert.SkipUnless(IsLinux, "Xlib surface test.");
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipUnless(VulkanDriverProbe.HasInstanceExtension("VK_KHR_xlib_surface"u8),
+            "VK_KHR_xlib_surface not exposed by the ICD (SwiftShader's Linux build ships Wayland but not Xlib).");
 
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrXlibSurface];
         using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });

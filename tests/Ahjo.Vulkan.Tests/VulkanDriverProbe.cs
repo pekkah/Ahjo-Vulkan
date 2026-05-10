@@ -105,6 +105,51 @@ internal static unsafe class VulkanDriverProbe
     public static bool HasValidationLayer => _hasValidationLayer.Value;
     public static bool IsSoftwareDriver => _isSoftwareDriver.Value;
 
+    // Per-extension cache. Used by surface-extension tests so they can
+    // skip cleanly when the ICD doesn't expose the platform extension
+    // they target — e.g. SwiftShader on Linux ships VK_KHR_wayland_surface
+    // but not VK_KHR_xlib_surface, so the Xlib argument-validation tests
+    // would otherwise fail with VK_ERROR_EXTENSION_NOT_PRESENT at
+    // Instance.Create time rather than testing what they mean to test.
+    private static readonly Dictionary<string, bool> _extensionCache = new();
+
+    public static bool HasInstanceExtension(ReadOnlySpan<byte> extension)
+    {
+        if (!_hasDriver.Value) return false;
+
+        var key = System.Text.Encoding.UTF8.GetString(extension);
+        lock (_extensionCache)
+        {
+            if (_extensionCache.TryGetValue(key, out var cached)) return cached;
+            bool present = ProbeInstanceExtension(extension);
+            _extensionCache[key] = present;
+            return present;
+        }
+    }
+
+    private static bool ProbeInstanceExtension(ReadOnlySpan<byte> target)
+    {
+        uint count = 0;
+        if (Vk.vkEnumerateInstanceExtensionProperties(null, &count, null) != VkResult.VK_SUCCESS || count == 0)
+            return false;
+
+        var props = new VkExtensionProperties[count];
+        fixed (VkExtensionProperties* p = props)
+        {
+            if (Vk.vkEnumerateInstanceExtensionProperties(null, &count, p) != VkResult.VK_SUCCESS)
+                return false;
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            fixed (VkExtensionProperties* entry = &props[i])
+            {
+                if (Match((sbyte*)entry, target)) return true;
+            }
+        }
+        return false;
+    }
+
     private static bool Match(sbyte* name, ReadOnlySpan<byte> target)
     {
         for (int i = 0; i < target.Length; i++)
