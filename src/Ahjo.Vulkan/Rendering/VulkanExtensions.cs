@@ -20,6 +20,24 @@ public static class VulkanExtensions
     /// via <see cref="Surface.CreateWin32"/>.</summary>
     public static Utf8Name KhrWin32Surface => Utf8Name.FromLiteral("VK_KHR_win32_surface"u8);
 
+    /// <summary>VK_KHR_xlib_surface — instance-level. Pair with
+    /// <see cref="KhrSurface"/> when creating a surface from an Xlib
+    /// <c>Display*</c> + <c>Window</c> via
+    /// <see cref="Surface.CreateXlib"/>.</summary>
+    public static Utf8Name KhrXlibSurface => Utf8Name.FromLiteral("VK_KHR_xlib_surface"u8);
+
+    /// <summary>VK_KHR_wayland_surface — instance-level. Pair with
+    /// <see cref="KhrSurface"/> when creating a surface from a Wayland
+    /// <c>wl_display*</c> + <c>wl_surface*</c> via
+    /// <see cref="Surface.CreateWayland"/>.</summary>
+    public static Utf8Name KhrWaylandSurface => Utf8Name.FromLiteral("VK_KHR_wayland_surface"u8);
+
+    /// <summary>VK_EXT_metal_surface — instance-level (MoltenVK on
+    /// macOS). Pair with <see cref="KhrSurface"/> when creating a
+    /// surface from a Cocoa <c>CAMetalLayer</c> via
+    /// <see cref="Surface.CreateMetal"/>.</summary>
+    public static Utf8Name ExtMetalSurface => Utf8Name.FromLiteral("VK_EXT_metal_surface"u8);
+
     /// <summary>VK_KHR_swapchain — device-level. Required for
     /// <see cref="Swapchain"/> creation and present.</summary>
     public static Utf8Name KhrSwapchain => Utf8Name.FromLiteral("VK_KHR_swapchain"u8);

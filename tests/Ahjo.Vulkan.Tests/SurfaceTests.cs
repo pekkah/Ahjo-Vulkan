@@ -8,11 +8,14 @@ namespace Ahjo.Vulkan.Tests;
 /// Covers <see cref="Surface"/>'s ownership semantics (issue 64): the
 /// distinction between <see cref="Surface.FromRaw"/> (borrowing, no-op
 /// dispose) and <see cref="Surface.WrapExternal"/> (owning, calls
-/// <c>vkDestroySurfaceKHR</c>).
+/// <c>vkDestroySurfaceKHR</c>), plus argument validation and end-to-end
+/// surface creation across the platform-specific factories.
 /// </summary>
 public sealed unsafe class SurfaceTests
 {
     private static bool IsWindows => RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+    private static bool IsLinux   => RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
+    private static bool IsMacOS   => RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
 
     [Fact]
     public void Default_IsNull_DisposeIsNoOp()
@@ -36,7 +39,7 @@ public sealed unsafe class SurfaceTests
     [Fact]
     public void WrapExternal_NullHandle_Throws()
     {
-        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
+        Assert.SkipUnless(IsWindows, "Win32 surface test.");
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
 
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
@@ -44,6 +47,106 @@ public sealed unsafe class SurfaceTests
 
         Assert.Throws<ArgumentException>(() => Surface.WrapExternal(instance, handle: 0));
     }
+
+    [Fact]
+    public void CreateXlib_NullDisplay_Throws()
+    {
+        Assert.SkipUnless(IsLinux, "Xlib surface test.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrXlibSurface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+
+        Assert.Throws<ArgumentException>(() =>
+            Surface.CreateXlib(instance, display: 0, window: unchecked((nint)0xCAFE)));
+    }
+
+    [Fact]
+    public void CreateXlib_NoneWindow_Throws()
+    {
+        Assert.SkipUnless(IsLinux, "Xlib surface test.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrXlibSurface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+
+        Assert.Throws<ArgumentException>(() =>
+            Surface.CreateXlib(instance, display: unchecked((nint)0xCAFE), window: 0));
+    }
+
+    /// <summary>
+    /// End-to-end Xlib path: open the X display, create a hidden window,
+    /// wrap it as a <see cref="Surface"/> via <see cref="Surface.CreateXlib"/>,
+    /// dispose. Validates the binding round-trips and the wrapper destroy
+    /// is wired up. Skips when no X server is reachable (CI without
+    /// xvfb / a headless session).
+    /// </summary>
+    [Fact]
+    public void CreateXlib_RoundTrip()
+    {
+        Assert.SkipUnless(IsLinux, "Xlib surface test.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipUnless(LinuxXlibWindow.IsAvailable, "No reachable X server (DISPLAY unset / libX11 missing).");
+
+        using var window = new LinuxXlibWindow(640, 480);
+
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrXlibSurface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+
+        using Surface surface = Surface.CreateXlib(instance, window.Display, window.Window);
+        Assert.False(surface.IsNull);
+        Assert.NotEqual(0ul, surface.RawHandle);
+    }
+
+    [Fact]
+    public void CreateWayland_NullDisplay_Throws()
+    {
+        Assert.SkipUnless(IsLinux, "Wayland surface test.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWaylandSurface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+
+        Assert.Throws<ArgumentException>(() =>
+            Surface.CreateWayland(instance, display: 0, surface: unchecked((nint)0xCAFE)));
+    }
+
+    [Fact]
+    public void CreateWayland_NullSurface_Throws()
+    {
+        Assert.SkipUnless(IsLinux, "Wayland surface test.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWaylandSurface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+
+        Assert.Throws<ArgumentException>(() =>
+            Surface.CreateWayland(instance, display: unchecked((nint)0xCAFE), surface: 0));
+    }
+
+    // No end-to-end Wayland test: producing a wl_surface requires
+    // binding the wl_compositor protocol via the registry, which is
+    // significantly more code than a unit test should carry. The
+    // hidden-window path lands when SDL3 / GLFW integration tests come
+    // online — those wrap the protocol dance for us.
+
+    [Fact]
+    public void CreateMetal_NullLayer_Throws()
+    {
+        Assert.SkipUnless(IsMacOS, "Metal surface test.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.ExtMetalSurface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+
+        Assert.Throws<ArgumentException>(() =>
+            Surface.CreateMetal(instance, metalLayer: 0));
+    }
+
+    // No end-to-end Metal test: allocating a CAMetalLayer requires the
+    // Objective-C runtime (objc_msgSend on QuartzCore) and a proper
+    // host application bundle. The hidden-window path lands when a
+    // SDL3 / GLFW integration shim provides the layer.
 
     /// <summary>
     /// End-to-end ownership test: create a Win32 surface through the raw
@@ -56,7 +159,7 @@ public sealed unsafe class SurfaceTests
     [Fact]
     public void WrapExternal_OwnsSurface_DisposeDestroysIt()
     {
-        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
+        Assert.SkipUnless(IsWindows, "Win32 surface test.");
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
 
         using var window = new Win32Window(640, 480, $"AhjoVk_WrapExt_{Guid.NewGuid():N}");
