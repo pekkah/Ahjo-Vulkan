@@ -11,4 +11,6 @@
   <Project Path="samples/HeadlessTriangle/HeadlessTriangle.csproj" />
   <Project Path="samples/HelloTriangle/HelloTriangle.csproj" />
   <Project Path="samples/HelloCube/HelloCube.csproj" />
+  <Project Path="samples/HelloVma/HelloVma.csproj" />
+  <Project Path="samples/HelloVmaWindowed/HelloVmaWindowed.csproj" />
 </Solution>
