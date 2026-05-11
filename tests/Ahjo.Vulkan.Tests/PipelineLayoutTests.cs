@@ -47,9 +47,14 @@ public sealed class PipelineLayoutTests
     public void DescriptorSetLayout_BindingFlags_ChainsBindingFlagsCreateInfo()
     {
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipUnless(VulkanDriverProbe.SupportsBindlessSampledImage,
+            "Device lacks the descriptor-indexing bits for bindless sampled-image arrays " +
+            "(SwiftShader's Linux build reports none); this layout-creation test requires " +
+            "descriptorBindingPartiallyBound + descriptorBindingVariableDescriptorCount + " +
+            "descriptorBindingSampledImageUpdateAfterBind.");
 
         using var instance = Instance.Create(default);
-        using var device   = CreateGraphicsDevice(instance);
+        using var device   = CreateBindlessGraphicsDevice(instance);
 
         var desc = new DescriptorSetLayoutDescription
         {
@@ -249,6 +254,44 @@ public sealed class PipelineLayoutTests
         return gpu.CreateDevice(new DeviceDescription
         {
             Queues = [new QueueRequest(family, count: 1, priority: 1.0f)],
+        });
+    }
+
+    // Same picker as CreateGraphicsDevice but also opts into the
+    // descriptor-indexing bits the bindless sampled-image layout test
+    // needs. UPDATE_AFTER_BIND_POOL + PARTIALLY_BOUND |
+    // VARIABLE_DESCRIPTOR_COUNT | UPDATE_AFTER_BIND on a
+    // SAMPLED_IMAGE binding require these feature bits to be enabled at
+    // device-creation time, otherwise driver paths can SIGSEGV.
+    private static unsafe Device CreateBindlessGraphicsDevice(Instance instance)
+    {
+        uint family = uint.MaxValue;
+        var gpu = instance.PickPhysicalDevice((in PhysicalDeviceInfo info) =>
+        {
+            for (int i = 0; i < info.QueueFamilies.Length; i++)
+            {
+                if (info.QueueFamilies[i].SupportsGraphics)
+                {
+                    family = info.QueueFamilies[i].Index;
+                    return true;
+                }
+            }
+            return false;
+        });
+        return gpu.CreateDevice(new DeviceDescription
+        {
+            Queues            = [new QueueRequest(family, count: 1, priority: 1.0f)],
+            ConfigureFeatures = static (
+                ref ChainBuilder<VkDeviceCreateInfo> _,
+                ref VkPhysicalDeviceFeatures2 _,
+                ref VkPhysicalDeviceVulkan12Features f12,
+                ref VkPhysicalDeviceVulkan13Features _,
+                ref VkPhysicalDeviceVulkan14Features _) =>
+            {
+                f12.descriptorBindingPartiallyBound             = 1;
+                f12.descriptorBindingVariableDescriptorCount    = 1;
+                f12.descriptorBindingSampledImageUpdateAfterBind = 1;
+            },
         });
     }
 }
