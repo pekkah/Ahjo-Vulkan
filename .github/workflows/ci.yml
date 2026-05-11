@@ -11,19 +11,17 @@ on:
 # natively ship with a Node 24 runtime.
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  # SwiftShader software Vulkan ICD packaged by Silk.NET (Apache-2.0).
-  # Same vendor as the loader below — using Silk.NET for both keeps the
-  # loader and ICD bundled to a tested pair. Ships
-  # runtimes/{win-x64,linux-x64,...}/native/ with the ICD binary plus a
-  # vk_swiftshader_icd.json whose library_path is relative — so dropping
-  # both files in the same directory is enough for the loader to find
-  # the driver. Switched away from Stride.Dependencies.SwiftShader 2026.4.14
-  # because that build exhibited assorted SIGSEGVs on the Linux leg during
-  # the test sweep (issue 32 follow-up: vkDestroyDevice paths and
-  # vkAllocateDescriptorSets on UPDATE_AFTER_BIND_POOL).
+  # SwiftShader software Vulkan ICD packaged by Silk.NET (Apache-2.0)
+  # — used only on the Windows leg. Linux uses NcStudios/VulkanCI@vnext
+  # (see below) because Silk.NET's Linux SwiftShader build SIGSEGV'd
+  # mid-suite across multiple test fixtures, while NcStudios ships a
+  # SwiftShader binary built against ubuntu-20.04 glibc plus a custom
+  # Vulkan loader with LOADER_USE_UNSAFE_FILE_SEARCH=ON that was the
+  # only software-Vulkan-on-Linux recipe in the ecosystem we found
+  # surviving a full xUnit sweep.
   SILK_VULKAN_SWIFTSHADER_VERSION: "2025.9.8"
-  # Khronos Vulkan loader (vulkan-1.dll / libvulkan.so) packaged by
-  # Silk.NET. Hosted runners don't ship a Vulkan loader OOTB, so we
+  # Khronos Vulkan loader (vulkan-1.dll) packaged by Silk.NET, Windows
+  # only. Hosted Windows runners don't ship a Vulkan loader OOTB, so we
   # provision it alongside the ICD; VK_DRIVER_FILES then routes the
   # loader's driver lookup exclusively at SwiftShader.
   SILK_VULKAN_LOADER_VERSION: "2025.9.12"
@@ -68,18 +66,35 @@ jobs:
           key: vulkan-headers-${{ matrix.os }}-${{ hashFiles('Directory.Build.props') }}
 
       # ── Vulkan loader + SwiftShader ICD ──────────────────────────────
-      # Cache hit skips two nupkg downloads (~30 MB combined). Cache key
-      # invalidates whenever either pinned version env var changes.
+      # Two provisioning paths because the only software-Vulkan recipe we
+      # found that survives a full xUnit sweep on Linux is NcStudios's
+      # purpose-built artifact set:
+      #   - Windows: Silk.NET loader + Silk.NET SwiftShader nupkgs. Cheap
+      #     downloads, fast cache, already proven stable on this leg.
+      #   - Linux: NcStudios/VulkanCI@vnext, which installs their custom
+      #     Vulkan SDK (Khronos loader built with
+      #     LOADER_USE_UNSAFE_FILE_SEARCH=ON) and a SwiftShader binary
+      #     built against ubuntu-20.04 glibc. The action also generates
+      #     a fresh ICD JSON manifest with an absolute library_path and
+      #     sets only VK_DRIVER_FILES (we used to set VK_ICD_FILENAMES
+      #     too — possibly double-loading). Other ecosystem actions
+      #     (jakoch/install-vulkan-sdk-action) explicitly refuse to ship
+      #     SwiftShader for Linux, so this recipe is a load-bearing
+      #     reference.
 
+      # Windows: pinned Silk.NET nupkgs. Cache hit skips two ~15 MB
+      # downloads. Cache key invalidates whenever either pinned version
+      # env var changes.
       - name: Cache Vulkan ICD bundle
+        if: matrix.os == 'windows-latest'
         id: cache-vk
         uses: actions/cache@v4
         with:
           path: build/vulkan/${{ matrix.rid }}
           key: vk-${{ matrix.rid }}-loader${{ env.SILK_VULKAN_LOADER_VERSION }}-sws${{ env.SILK_VULKAN_SWIFTSHADER_VERSION }}
 
-      - name: Provision Khronos loader + SwiftShader ICD
-        if: steps.cache-vk.outputs.cache-hit != 'true'
+      - name: Provision Khronos loader + SwiftShader ICD (Windows)
+        if: matrix.os == 'windows-latest' && steps.cache-vk.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $rid = "${{ matrix.rid }}"
@@ -105,32 +120,30 @@ jobs:
           Copy-Item -Path "$swsUnp/runtimes/$rid/native/*"    -Destination $dst -Force
           Get-ChildItem $dst | ForEach-Object { Write-Host ("  {0,12}  {1}" -f $_.Length, $_.Name) }
 
-      - name: Configure Vulkan environment
+      - name: Configure Vulkan environment (Windows)
+        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           $dir = Join-Path $env:GITHUB_WORKSPACE "build/vulkan/${{ matrix.rid }}"
           $icd = Join-Path $dir "vk_swiftshader_icd.json"
           if (-not (Test-Path $icd)) { throw "SwiftShader ICD manifest missing: $icd" }
           # VK_DRIVER_FILES (loader 1.3.207+) overrides system ICD
-          # discovery and routes exclusively at SwiftShader.
-          # VK_ICD_FILENAMES is the pre-1.3.207 spelling — set for
-          # safety on older loaders.
-          "VK_DRIVER_FILES=$icd"  >> $env:GITHUB_ENV
-          "VK_ICD_FILENAMES=$icd" >> $env:GITHUB_ENV
-          if ($IsWindows) {
-            # Prepend so LoadLibrary("vulkan-1.dll") finds the Silk.NET
-            # loader before anything system-wide.
-            "PATH=$dir;$env:PATH" >> $env:GITHUB_ENV
-          } else {
-            $existing = if ($env:LD_LIBRARY_PATH) { ":$env:LD_LIBRARY_PATH" } else { "" }
-            "LD_LIBRARY_PATH=${dir}${existing}" >> $env:GITHUB_ENV
-            # Silk.NET ships the loader as libvulkan.so; the wrapper's
-            # NativeLibrary resolver tries libvulkan.so.1 first, so add
-            # the canonical soname symlink to short-circuit the fallback.
-            # Always recreated (ln -sf) — actions/cache restore semantics
-            # for symlinks aren't worth depending on.
-            ln -sf "$dir/libvulkan.so" "$dir/libvulkan.so.1"
-          }
+          # discovery and routes exclusively at SwiftShader. Only set
+          # VK_DRIVER_FILES — setting VK_ICD_FILENAMES (the pre-1.3.207
+          # spelling) alongside caused double-load symptoms on Linux
+          # during the issue-32 investigation; keep it off here too.
+          "VK_DRIVER_FILES=$icd" >> $env:GITHUB_ENV
+          # Prepend so LoadLibrary("vulkan-1.dll") finds the Silk.NET
+          # loader before anything system-wide.
+          "PATH=$dir;$env:PATH" >> $env:GITHUB_ENV
+
+      # Linux: NcStudios/VulkanCI@vnext installs their Vulkan SDK +
+      # SwiftShader artifacts and configures VK_DRIVER_FILES,
+      # LD_LIBRARY_PATH, VK_LAYER_PATH for us. Pinned to the floating
+      # vnext tag the action's own examples use.
+      - name: Provision Vulkan + SwiftShader (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        uses: NcStudios/VulkanCI@vnext
 
       # ── /Vulkan loader + SwiftShader ICD ─────────────────────────────
 
