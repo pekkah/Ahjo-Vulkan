@@ -48,10 +48,12 @@ public sealed class PipelineLayoutTests
     {
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
         Assert.SkipUnless(VulkanDriverProbe.SupportsBindlessSampledImage,
-            "Device lacks the descriptor-indexing bits for bindless sampled-image arrays " +
-            "(SwiftShader's Linux build reports none); this layout-creation test requires " +
-            "descriptorBindingPartiallyBound + descriptorBindingVariableDescriptorCount + " +
-            "descriptorBindingSampledImageUpdateAfterBind.");
+            "Device does not advertise descriptorBindingPartiallyBound + " +
+            "descriptorBindingVariableDescriptorCount + descriptorBindingSampledImageUpdateAfterBind; " +
+            "this bindless sampled-image layout test requires all three.");
+        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+            "Software ICD (SwiftShader): its descriptor-indexing path is unstable on UPDATE_AFTER_BIND_POOL " +
+            "even when features are advertised. Real drivers cover this on the Windows CI leg.");
 
         using var instance = Instance.Create(default);
         using var device   = CreateBindlessGraphicsDevice(instance);

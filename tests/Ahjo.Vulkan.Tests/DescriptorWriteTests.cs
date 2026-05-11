@@ -157,8 +157,12 @@ public sealed unsafe class DescriptorWriteTests
     {
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
         Assert.SkipUnless(VulkanDriverProbe.SupportsBindlessStorageBuffer,
-            "Device lacks descriptorBindingPartiallyBound / descriptorBindingStorageBufferUpdateAfterBind " +
-            "(SwiftShader's Linux build reports neither); this bindless storage-buffer test requires both.");
+            "Device does not advertise descriptorBindingPartiallyBound + " +
+            "descriptorBindingStorageBufferUpdateAfterBind; this bindless storage-buffer test requires both.");
+        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+            "Software ICD (SwiftShader): advertises the descriptor-indexing features but SIGSEGVs " +
+            "inside vkAllocateDescriptorSets on an UPDATE_AFTER_BIND_POOL pool. Tracked upstream; " +
+            "real drivers (NVIDIA / AMD / Intel) exercise this path on the Windows CI leg.");
 
         using var instance = Instance.Create(default);
         using var device   = CreateBindlessGraphicsDevice(instance, out uint _);
