@@ -151,6 +151,11 @@ public sealed unsafe class StagingBatchTests
     public void Flush_EmptyBatch_NoOp()
     {
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+            "Software ICD (SwiftShader): the device + instance dispose path crashes inside " +
+            "libvk_swiftshader on Linux even though the Flush call itself is an early-return " +
+            "no-op. Known SwiftShader sensitivity to cumulative vkDestroyDevice paths; real " +
+            "drivers (NVIDIA / AMD / Intel) exercise this fixture on the Windows CI leg.");
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
