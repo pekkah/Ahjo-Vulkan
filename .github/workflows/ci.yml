@@ -148,7 +148,21 @@ jobs:
       # instead of just surfacing as exit 139 with no context. --blame
       # also writes Sequence.xml naming the test that was running when
       # the test host crashed — printed below on step failure.
+      #
+      # Linux diagnostic env (issue 32 follow-up — SwiftShader Linux
+      # crashes mid-suite in different tests across runs):
+      #   VK_LOADER_DEBUG=warn  surfaces loader warnings (ICD mismatch,
+      #                         missing extension entry points, fallback
+      #                         dispatch) that would otherwise be silent.
+      #   LD_BIND_NOW=1         forces eager symbol resolution on .so
+      #                         load — any unresolved Vulkan entry point
+      #                         in libvk_swiftshader.so fails at load
+      #                         time with a clear message instead of
+      #                         SIGSEGV-ing later when first called.
       - name: Test — Ahjo.Vulkan.Tests
+        env:
+          VK_LOADER_DEBUG: ${{ matrix.os == 'ubuntu-latest' && 'warn' || '' }}
+          LD_BIND_NOW: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
         run: dotnet test tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj -c Release --no-build --nologo -l "console;verbosity=detailed" --blame --blame-crash --results-directory TestResults
 
       - name: Print blame logs on failure
