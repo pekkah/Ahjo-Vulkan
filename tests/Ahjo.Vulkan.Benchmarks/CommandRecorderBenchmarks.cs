@@ -23,10 +23,6 @@ public class CommandRecorderBenchmarks
     private CommandBufferPool _cmdPool  = null!;
     private Image             _image;
     private ImageView         _view;
-    // Persistent attachment list. A method-local stackalloc fails CS8350:
-    // the analyzer can't prove the recorder (borrowed from _cmdPool, a
-    // field) doesn't outlive the span ColorAttachments points at.
-    private ColorAttachment[] _color  = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -74,17 +70,6 @@ public class CommandRecorderBenchmarks
             LevelCount = 1, LayerCount = 1,
         });
 
-        _color = new[]
-        {
-            new ColorAttachment
-            {
-                View    = _view,
-                Layout  = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                LoadOp  = VkAttachmentLoadOp.VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-                StoreOp = VkAttachmentStoreOp.VK_ATTACHMENT_STORE_OP_DONT_CARE,
-            },
-        };
-
         // Warm — fault in the pool's first command buffer + JIT the recording
         // path so the steady-state Begin/End pairs hit reuse and the
         // BeginRendering/EndRendering surfaces are tier-1+.
@@ -106,14 +91,26 @@ public class CommandRecorderBenchmarks
     {
         var vp = new VkViewport { width = 64, height = 64, maxDepth = 1.0f };
 
+        Span<ColorAttachment> color = stackalloc ColorAttachment[1];
+        color[0] = new ColorAttachment
+        {
+            View    = _view,
+            Layout  = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            LoadOp  = VkAttachmentLoadOp.VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+            StoreOp = VkAttachmentStoreOp.VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        };
+
         var info = new RenderingInfo
         {
             RenderArea       = new VkRect2D { extent = new VkExtent2D { width = 64, height = 64 } },
             LayerCount       = 1,
-            ColorAttachments = _color,
+            ColorAttachments = color,
         };
 
-        using var rec = _cmdPool.Begin();
+        // `scoped` narrows the recorder's safe-to-escape to this method
+        // so the method-local stackalloc above (carried inside info) can
+        // flow into BeginRendering without tripping CS8350.
+        using scoped var rec = _cmdPool.Begin();
         rec.BeginRendering(in info);
         for (int i = 0; i < CommandsPerPass; i++)
             rec.SetViewport(in vp);

@@ -22,10 +22,6 @@ public class PipelineBarrierBenchmarks
     private Device            _device   = null!;
     private CommandBufferPool _cmdPool  = null!;
     private Image             _image;
-    // Persistent barrier list for the large-batch path. A method-local
-    // stackalloc fails CS8350: the analyzer can't prove the recorder
-    // (borrowed from _cmdPool, a field) doesn't outlive the local span.
-    private ImageBarrier[]    _bars = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -66,15 +62,6 @@ public class PipelineBarrierBenchmarks
             },
             new AllocationDescription { Usage = MemoryUsage.AutoPreferDevice });
 
-        var template = ImageBarrier.Transition(
-            in _image,
-            from:     VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
-            to:       VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            srcStage: Stage.TopOfPipe,             srcAccess: Access.None,
-            dstStage: Stage.ColorAttachmentOutput, dstAccess: Access.ColorAttachmentWrite);
-        _bars = new ImageBarrier[BatchSize];
-        for (int i = 0; i < BatchSize; i++) _bars[i] = template;
-
         // Warm — first Begin grows the pool by one buffer; subsequent
         // begins/resets hit reuse and steady-state recording is alloc-free.
         var rec = _cmdPool.Begin();
@@ -113,8 +100,20 @@ public class PipelineBarrierBenchmarks
     [Benchmark(OperationsPerInvoke = CallsPerInvoke)]
     public void LargeBatch_8x8x1()
     {
-        ReadOnlySpan<ImageBarrier> bars = _bars;
-        using var rec = _cmdPool.Begin();
+        var template = ImageBarrier.Transition(
+            in _image,
+            from:     VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
+            to:       VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            srcStage: Stage.TopOfPipe,             srcAccess: Access.None,
+            dstStage: Stage.ColorAttachmentOutput, dstAccess: Access.ColorAttachmentWrite);
+
+        Span<ImageBarrier> bars = stackalloc ImageBarrier[BatchSize];
+        for (int i = 0; i < BatchSize; i++) bars[i] = template;
+
+        // `scoped` narrows the recorder's safe-to-escape to this method
+        // so the method-local stackalloc above can flow into
+        // PipelineBarrier without tripping CS8350.
+        using scoped var rec = _cmdPool.Begin();
         for (int i = 0; i < CallsPerInvoke; i++)
             rec.PipelineBarrier(default, default, bars);
         rec.End();
