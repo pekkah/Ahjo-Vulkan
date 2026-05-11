@@ -251,15 +251,28 @@ public sealed unsafe class Instance : IDisposable
                 var pchain = ChainBuilder.For<VkPhysicalDeviceProperties2>(propsChain);
                 pchain.Root();
                 Vk.vkGetPhysicalDeviceProperties2(d, pchain.Head);
+                uint deviceApiVersion = pchain.Head->properties.apiVersion;
 
-                // 2b. Features chain — base + 1.1/1.2/1.3/1.4.
+                // 2b. Features chain — base + 1.1/1.2/1.3 always, plus 1.4
+                // only when the device advertises Vulkan 1.4. Same gate as
+                // the device-create path in PhysicalDevice.CreateDevice:
+                // SwiftShader (and other 1.3-only ICDs) log
+                // "UNSUPPORTED: curExtension->sType: 55" — the
+                // VkPhysicalDeviceVulkan14Features sType — when the struct
+                // sits in the read-back chain, and the cumulative state
+                // damage manifests as later SIGSEGVs in unrelated entry
+                // points. Mirroring the create-path gate keeps both probe
+                // and create chains internally consistent for the same GPU.
                 featuresChain.Clear();
                 var fchain = ChainBuilder.For<VkPhysicalDeviceFeatures2>(featuresChain);
                 fchain.Root();
                 ref var f11 = ref fchain.Push<VkPhysicalDeviceVulkan11Features>();
                 ref var f12 = ref fchain.Push<VkPhysicalDeviceVulkan12Features>();
                 ref var f13 = ref fchain.Push<VkPhysicalDeviceVulkan13Features>();
-                ref var f14 = ref fchain.Push<VkPhysicalDeviceVulkan14Features>();
+                VkPhysicalDeviceVulkan14Features f14Local = default;
+                ref VkPhysicalDeviceVulkan14Features f14 = ref f14Local;
+                if (deviceApiVersion >= VulkanVersion.V1_4.Packed)
+                    f14 = ref fchain.Push<VkPhysicalDeviceVulkan14Features>();
                 Vk.vkGetPhysicalDeviceFeatures2(d, fchain.Head);
 
                 // 2c. Memory.

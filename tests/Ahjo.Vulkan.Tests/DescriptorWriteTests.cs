@@ -156,9 +156,12 @@ public sealed unsafe class DescriptorWriteTests
     public void DescriptorSet_Update_BindlessSingleElement_AtArrayElement5()
     {
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipUnless(VulkanDriverProbe.SupportsBindlessStorageBuffer,
+            "Device does not advertise descriptorBindingPartiallyBound + " +
+            "descriptorBindingStorageBufferUpdateAfterBind; this bindless storage-buffer test requires both.");
 
         using var instance = Instance.Create(default);
-        using var device   = CreateGraphicsDevice(instance, out uint _);
+        using var device   = CreateBindlessGraphicsDevice(instance, out uint _);
 
         // 32-element array binding mirroring the engine's bindless table.
         DescriptorBinding[] bindings =
@@ -186,7 +189,7 @@ public sealed unsafe class DescriptorWriteTests
                 descriptorCount = 32,
             },
         ];
-        using var pool = new DescriptorSetPool(device, maxSets: 1, sizes);
+        using var pool = new DescriptorSetPool(device, maxSets: 1, sizes, updateAfterBind: true);
 
         using var buffer = device.Allocator.CreateBuffer(
             new BufferDescription { Size = 256, Usage = BufferUsage.StorageBuffer },
@@ -238,6 +241,45 @@ public sealed unsafe class DescriptorWriteTests
         return gpu.CreateDevice(new DeviceDescription
         {
             Queues = [new QueueRequest(f, count: 1, priority: 1.0f)],
+        });
+    }
+
+    // Same picker as CreateGraphicsDevice but also enables the
+    // descriptor-indexing bits the bindless storage-buffer test needs.
+    // The wrapper does not turn these on by default — callers that ask
+    // for UPDATE_AFTER_BIND_POOL + PARTIALLY_BOUND must opt in explicitly,
+    // otherwise vkCreateDescriptorSetLayout / driver paths SIGSEGV (seen
+    // on SwiftShader Linux) when the binding flags reference features
+    // the device was never told to grant.
+    private static Device CreateBindlessGraphicsDevice(Instance instance, out uint family)
+    {
+        uint f = uint.MaxValue;
+        var gpu = instance.PickPhysicalDevice((in PhysicalDeviceInfo info) =>
+        {
+            for (int i = 0; i < info.QueueFamilies.Length; i++)
+            {
+                if (info.QueueFamilies[i].SupportsGraphics)
+                {
+                    f = info.QueueFamilies[i].Index;
+                    return true;
+                }
+            }
+            return false;
+        });
+        family = f;
+        return gpu.CreateDevice(new DeviceDescription
+        {
+            Queues            = [new QueueRequest(f, count: 1, priority: 1.0f)],
+            ConfigureFeatures = static (
+                ref ChainBuilder<VkDeviceCreateInfo> _,
+                ref VkPhysicalDeviceFeatures2 _,
+                ref VkPhysicalDeviceVulkan12Features f12,
+                ref VkPhysicalDeviceVulkan13Features _,
+                ref VkPhysicalDeviceVulkan14Features _) =>
+            {
+                f12.descriptorBindingPartiallyBound              = 1;
+                f12.descriptorBindingStorageBufferUpdateAfterBind = 1;
+            },
         });
     }
 }

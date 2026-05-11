@@ -199,14 +199,34 @@ public sealed unsafe class PhysicalDevice
         ref var f13 = ref chain.Push<VkPhysicalDeviceVulkan13Features>();
         f13.synchronization2 = 1;
         f13.dynamicRendering = 1;
-        ref var f14 = ref chain.Push<VkPhysicalDeviceVulkan14Features>();
-        f14.pushDescriptor = 1;
+
+        // The 1.4 features struct only lands in the chain when the device
+        // actually advertises Vulkan 1.4. On a 1.3 (or older) ICD, sType 55
+        // is unrecognized — most loaders pass the chain through, then the
+        // driver either silently ignores it (SwiftShader on Linux logs
+        // "UNSUPPORTED: pCreateInfo->pNext sType = 55" and walks on) or
+        // SIGSEGVs later when downstream paths assume the requested
+        // features were granted. Same shape as the VMA apiVersion clamp
+        // in Allocator.Create. Callers needing pushDescriptor on a
+        // sub-1.4 device should request VK_KHR_push_descriptor via
+        // DeviceDescription.Extensions and skip f14 entirely.
+        VkPhysicalDeviceProperties deviceProps;
+        Vk.vkGetPhysicalDeviceProperties(Handle, &deviceProps);
+        VkPhysicalDeviceVulkan14Features f14Local = default;
+        ref VkPhysicalDeviceVulkan14Features f14 = ref f14Local;
+        if (deviceProps.apiVersion >= VulkanVersion.V1_4.Packed)
+        {
+            f14 = ref chain.Push<VkPhysicalDeviceVulkan14Features>();
+            f14.pushDescriptor = 1;
+        }
 
         // Hand the configurer ref access to the wrapper's pre-pushed
         // structs so it can flip additional bits in-place without
         // producing a duplicate-sType chain (issue 53). The duplicate-
         // sType validator below still catches callers that push their
-        // own copy through `chain`.
+        // own copy through `chain`. On a sub-1.4 device, mutations to
+        // f14 are silently dropped because the struct is a stack local
+        // not threaded into the chain.
         desc.ConfigureFeatures?.Invoke(ref chain, ref f2, ref f12, ref f13, ref f14);
 
         // Vulkan disallows two pNext nodes with the same sType inside a

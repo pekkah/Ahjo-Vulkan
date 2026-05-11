@@ -11,37 +11,26 @@ on:
 # natively ship with a Node 24 runtime.
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  # SwiftShader software Vulkan ICD packaged by Silk.NET (Apache-2.0).
+  # Hosted Windows runners ship no Vulkan loader / ICD, so the workflow
+  # provisions both alongside the build. Linux CI is parked until a
+  # self-hosted runner with real Vulkan drivers is available — issue 32
+  # established that SwiftShader on Linux SIGSEGVs mid-suite across
+  # every build + loader combination tested.
+  SILK_VULKAN_SWIFTSHADER_VERSION: "2025.9.8"
+  # Khronos Vulkan loader (vulkan-1.dll) packaged by Silk.NET. Provisioned
+  # alongside the ICD; VK_DRIVER_FILES then routes the loader's driver
+  # lookup exclusively at SwiftShader.
+  SILK_VULKAN_LOADER_VERSION: "2025.9.12"
 
 jobs:
   build-test:
-    name: Build & Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-          # Linux job temporarily disabled (issue 32). Mesa lavapipe is
-          # the only viable software ICD on hosted Ubuntu runners, but
-          # multiple lavapipe-1.3.275 paths SIGSEGV/hang under our test
-          # workload (queue submit, image-view creation, vertex-buffer
-          # bind setup) — three distinct crash categories surfaced in
-          # CI iteration. The wrapper-side fixes that came out of that
-          # iteration (Allocator.Create vulkanApiVersion clamp,
-          # VulkanDriverProbe.IsSoftwareDriver, per-test gates) all
-          # stay in code so re-enabling lavapipe is a one-line change
-          # if a future Mesa version stabilises. Re-add when revisiting
-          # issue 32 with either a fixed Mesa, a self-hosted GPU
-          # runner, or a pre-built SwiftShader artifact.
-          # - os: ubuntu-latest
+    name: Build & Test (windows-latest)
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      # Windows runner stays compile-only / pure-CPU subset — no Vulkan
-      # ICD provisioned. SwiftShader build was tried but at 39+ min on
-      # the hosted runner it's not viable; mock ICD wouldn't satisfy VMA.
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -57,7 +46,58 @@ jobs:
         uses: actions/cache@v4
         with:
           path: native/downloaded
-          key: vulkan-headers-${{ matrix.os }}-${{ hashFiles('Directory.Build.props') }}
+          key: vulkan-headers-windows-latest-${{ hashFiles('Directory.Build.props') }}
+
+      # ── Vulkan loader + SwiftShader ICD ──────────────────────────────
+      # Cache hit skips two ~15 MB nupkg downloads. Cache key invalidates
+      # whenever either pinned version env var changes.
+      - name: Cache Vulkan ICD bundle
+        id: cache-vk
+        uses: actions/cache@v4
+        with:
+          path: build/vulkan/win-x64
+          key: vk-win-x64-loader${{ env.SILK_VULKAN_LOADER_VERSION }}-sws${{ env.SILK_VULKAN_SWIFTSHADER_VERSION }}
+
+      - name: Provision Khronos loader + SwiftShader ICD
+        if: steps.cache-vk.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $dst = "build/vulkan/win-x64"
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          # .nupkg files are zips; rename to .zip so Expand-Archive
+          # accepts them without extension-sniffing complaints.
+          $loaderZip = Join-Path $env:RUNNER_TEMP "vk-loader.zip"
+          $swsZip    = Join-Path $env:RUNNER_TEMP "vk-sws.zip"
+          $loaderUnp = Join-Path $env:RUNNER_TEMP "vk-loader"
+          $swsUnp    = Join-Path $env:RUNNER_TEMP "vk-sws"
+          Invoke-WebRequest -UseBasicParsing `
+            -Uri "https://www.nuget.org/api/v2/package/Silk.NET.Vulkan.Loader.Native/${{ env.SILK_VULKAN_LOADER_VERSION }}" `
+            -OutFile $loaderZip
+          Invoke-WebRequest -UseBasicParsing `
+            -Uri "https://www.nuget.org/api/v2/package/Silk.NET.Vulkan.SwiftShader.Native/${{ env.SILK_VULKAN_SWIFTSHADER_VERSION }}" `
+            -OutFile $swsZip
+          if (Test-Path $loaderUnp) { Remove-Item -Recurse -Force $loaderUnp }
+          if (Test-Path $swsUnp)    { Remove-Item -Recurse -Force $swsUnp }
+          Expand-Archive -Path $loaderZip -DestinationPath $loaderUnp -Force
+          Expand-Archive -Path $swsZip    -DestinationPath $swsUnp    -Force
+          Copy-Item -Path "$loaderUnp/runtimes/win-x64/native/*" -Destination $dst -Force
+          Copy-Item -Path "$swsUnp/runtimes/win-x64/native/*"    -Destination $dst -Force
+          Get-ChildItem $dst | ForEach-Object { Write-Host ("  {0,12}  {1}" -f $_.Length, $_.Name) }
+
+      - name: Configure Vulkan environment
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:GITHUB_WORKSPACE "build/vulkan/win-x64"
+          $icd = Join-Path $dir "vk_swiftshader_icd.json"
+          if (-not (Test-Path $icd)) { throw "SwiftShader ICD manifest missing: $icd" }
+          # VK_DRIVER_FILES (loader 1.3.207+) overrides system ICD
+          # discovery and routes exclusively at SwiftShader.
+          "VK_DRIVER_FILES=$icd" >> $env:GITHUB_ENV
+          # Prepend so LoadLibrary("vulkan-1.dll") finds the Silk.NET
+          # loader before anything system-wide.
+          "PATH=$dir;$env:PATH" >> $env:GITHUB_ENV
+
+      # ── /Vulkan loader + SwiftShader ICD ─────────────────────────────
 
       - name: Restore dotnet tools
         run: dotnet tool restore
@@ -86,22 +126,17 @@ jobs:
 
       # Issue 28 — Native AOT smoke. Publishing under PublishAot=true
       # is the load-bearing check: trim warnings + ILC errors fail the
-      # build, so any reflection / dynamic-codegen creep in the
-      # wrapper is caught here. The published exe also runs — on
-      # windows-latest there's no Vulkan ICD, so the smoke prints
-      # "no driver, AOT publish verified, skipping smoke run" and
-      # exits 0. Local developers with a driver get the full
-      # round-trip (image render → PNG dump).
+      # build, so any reflection / dynamic-codegen creep in the wrapper
+      # is caught here. With SwiftShader provisioned the published exe
+      # also runs the full render→PNG round-trip, exercising the whole
+      # wrapper surface under AOT codegen.
       - name: Setup MSVC dev environment
-        if: matrix.os == 'windows-latest'
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: AOT publish — AotSmoke
-        if: matrix.os == 'windows-latest'
         run: dotnet publish samples/AotSmoke/AotSmoke.csproj -c Release -r win-x64 --nologo -p:IlcUseEnvironmentalTools=true
 
       - name: AOT smoke run
-        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           $exe = "samples/AotSmoke/bin/x64/Release/net10.0/win-x64/publish/AotSmoke.exe"
