@@ -11,14 +11,10 @@ on:
 # natively ship with a Node 24 runtime.
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  # SwiftShader software Vulkan ICD packaged by Silk.NET (Apache-2.0)
-  # — used only on the Windows leg. Linux uses NcStudios/VulkanCI@vnext
-  # (see below) because Silk.NET's Linux SwiftShader build SIGSEGV'd
-  # mid-suite across multiple test fixtures, while NcStudios ships a
-  # SwiftShader binary built against ubuntu-20.04 glibc plus a custom
-  # Vulkan loader with LOADER_USE_UNSAFE_FILE_SEARCH=ON that was the
-  # only software-Vulkan-on-Linux recipe in the ecosystem we found
-  # surviving a full xUnit sweep.
+  # SwiftShader software Vulkan ICD packaged by Silk.NET (Apache-2.0),
+  # used only on the Windows leg. Linux is build-only on CI — see the
+  # loader+ICD block below for the SwiftShader-Linux investigation that
+  # led to that decision.
   SILK_VULKAN_SWIFTSHADER_VERSION: "2025.9.8"
   # Khronos Vulkan loader (vulkan-1.dll) packaged by Silk.NET, Windows
   # only. Hosted Windows runners don't ship a Vulkan loader OOTB, so we
@@ -43,11 +39,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Both runners provision SwiftShader (software Vulkan ICD) so the
-      # driver-gated test subset executes rather than skipping. Tests
-      # that depend on hardware-driver semantics still short-circuit via
-      # VulkanDriverProbe.IsSoftwareDriver — loosening those gates is a
-      # follow-up once we know SwiftShader's failure modes on CI.
+      # Tests run on Windows only (see SwiftShader Linux investigation in
+      # the loader+ICD provisioning block below). Linux is build-only —
+      # a cross-platform compile smoke. Both legs still need .NET, the
+      # Vulkan-Headers cache, and dotnet tools.
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -65,26 +60,21 @@ jobs:
           path: native/downloaded
           key: vulkan-headers-${{ matrix.os }}-${{ hashFiles('Directory.Build.props') }}
 
-      # ── Vulkan loader + SwiftShader ICD ──────────────────────────────
-      # Two provisioning paths because the only software-Vulkan recipe we
-      # found that survives a full xUnit sweep on Linux is NcStudios's
-      # purpose-built artifact set:
-      #   - Windows: Silk.NET loader + Silk.NET SwiftShader nupkgs. Cheap
-      #     downloads, fast cache, already proven stable on this leg.
-      #   - Linux: NcStudios/VulkanCI@vnext, which installs their custom
-      #     Vulkan SDK (Khronos loader built with
-      #     LOADER_USE_UNSAFE_FILE_SEARCH=ON) and a SwiftShader binary
-      #     built against ubuntu-20.04 glibc. The action also generates
-      #     a fresh ICD JSON manifest with an absolute library_path and
-      #     sets only VK_DRIVER_FILES (we used to set VK_ICD_FILENAMES
-      #     too — possibly double-loading). Other ecosystem actions
-      #     (jakoch/install-vulkan-sdk-action) explicitly refuse to ship
-      #     SwiftShader for Linux, so this recipe is a load-bearing
-      #     reference.
-
-      # Windows: pinned Silk.NET nupkgs. Cache hit skips two ~15 MB
-      # downloads. Cache key invalidates whenever either pinned version
-      # env var changes.
+      # ── Vulkan loader + SwiftShader ICD (Windows only) ───────────────
+      # Tests run on Windows only. Linux does a cross-platform build
+      # smoke (proves wrapper + native projects compile against the Linux
+      # RID) but doesn't execute the test suite: issue 32 investigation
+      # found that every SwiftShader Linux build we tried (Stride
+      # 2026.4.14, Silk.NET 2025.9.8, NcStudios's ubuntu-20.04 binary
+      # paired with its custom Khronos loader built with
+      # LOADER_USE_UNSAFE_FILE_SEARCH=ON) SIGSEGV'd inside libvk_swiftshader
+      # after ~60 seconds of cumulative Vulkan use, regardless of test
+      # order. The wrapper bugs uncovered along the way (Vulkan-1.4
+      # chain push on 1.3 devices in both create and probe paths,
+      # descriptor-pool UPDATE_AFTER_BIND flag) are already fixed; the
+      # residual instability is SwiftShader-internal and reproducible
+      # across three independently-built binaries. With the suite
+      # Windows-only, Linux needs no ICD/loader provisioning.
       - name: Cache Vulkan ICD bundle
         if: matrix.os == 'windows-latest'
         id: cache-vk
@@ -137,17 +127,6 @@ jobs:
           # loader before anything system-wide.
           "PATH=$dir;$env:PATH" >> $env:GITHUB_ENV
 
-      # Linux: NcStudios/VulkanCI installs their Vulkan SDK + SwiftShader
-      # artifacts and configures VK_DRIVER_FILES, LD_LIBRARY_PATH,
-      # VK_LAYER_PATH for us. Pinned to v1.2 because v1.3's action.yml
-      # still references ubuntu-20.04 artifact names while the v1.3
-      # release only attaches ubuntu-24.04 binaries — v1.2 is the last
-      # internally-consistent tag, and it ships ubuntu-20.04 SwiftShader
-      # plus VulkanSDK 1.4.309.0 (the action's default sdkVersion).
-      - name: Provision Vulkan + SwiftShader (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        uses: NcStudios/VulkanCI@v1.2
-
       # ── /Vulkan loader + SwiftShader ICD ─────────────────────────────
 
       - name: Restore dotnet tools
@@ -157,6 +136,7 @@ jobs:
         run: dotnet build Ahjo.Vulkan.slnx -c Release --nologo
 
       - name: Test — Ahjo.Vulkan.Native.Tests
+        if: matrix.os == 'windows-latest'
         run: dotnet test tests/Ahjo.Vulkan.Native.Tests/Ahjo.Vulkan.Native.Tests.csproj -c Release --no-build --nologo -l "console;verbosity=detailed"
 
       # Detailed console logging prints each test name as it starts so a
@@ -165,10 +145,11 @@ jobs:
       # also writes Sequence.xml naming the test that was running when
       # the test host crashed — printed below on step failure.
       - name: Test — Ahjo.Vulkan.Tests
+        if: matrix.os == 'windows-latest'
         run: dotnet test tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj -c Release --no-build --nologo -l "console;verbosity=detailed" --blame --blame-crash --results-directory TestResults
 
       - name: Print blame logs on failure
-        if: failure()
+        if: failure() && matrix.os == 'windows-latest'
         shell: bash
         run: |
           echo "::group::Blame Sequence files"
