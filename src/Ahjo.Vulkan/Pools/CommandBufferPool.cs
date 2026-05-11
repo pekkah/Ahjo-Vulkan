@@ -95,6 +95,10 @@ public sealed unsafe class CommandBufferPool : IDisposable
         }
         else
         {
+            // Pre-grow _idle so the catch handler below can push the
+            // cb back onto the free list without risking OOM on a
+            // capacity expansion.
+            _idle.EnsureCapacity(_idle.Count + 1);
             var ai = new VkCommandBufferAllocateInfo
             {
                 sType              = VkStructureType.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -113,7 +117,21 @@ public sealed unsafe class CommandBufferPool : IDisposable
             sType = VkStructureType.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             flags = (uint)VkCommandBufferUsageFlagBits.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         };
-        Vk.vkBeginCommandBuffer(cb, &bi).ThrowIfFailed();
+        try
+        {
+            Vk.vkBeginCommandBuffer(cb, &bi).ThrowIfFailed();
+        }
+        catch
+        {
+            // vkBeginCommandBuffer can fail (OOM, validation-layer
+            // reject). Return the cb to the free list so a subsequent
+            // Begin can retry it; without this the pool's _allocated
+            // count grows by one orphan on every failure
+            // (vkResetCommandPool still resets the cb, but the wrapper
+            // has lost the handle and would never hand it back out).
+            _idle.Push((nint)cb);
+            throw;
+        }
 
         _outstanding++;
         return new CommandRecorder(this, cb);

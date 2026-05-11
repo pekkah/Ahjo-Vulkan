@@ -29,6 +29,10 @@ public sealed unsafe class Device : IDisposable
     private  Allocator                    _allocator;
     private  bool                         _allocatorCreated;
     private  bool                         _disposed;
+    // Allocator lazy-init runs at most once per Device, so the cost of
+    // always taking the lock is negligible and removes the
+    // double-create race on concurrent first access.
+    private  readonly object              _allocatorLock = new();
 
     internal Device(VkDevice_T* handle, PhysicalDevice physicalDevice, Queue[] queues)
     {
@@ -47,12 +51,15 @@ public sealed unsafe class Device : IDisposable
     {
         get
         {
-            if (!_allocatorCreated)
+            lock (_allocatorLock)
             {
-                _allocator        = Ahjo.Vulkan.Allocator.Create(this);
-                _allocatorCreated = true;
+                if (!_allocatorCreated)
+                {
+                    _allocator        = Ahjo.Vulkan.Allocator.Create(this);
+                    _allocatorCreated = true;
+                }
+                return _allocator;
             }
-            return _allocator;
         }
     }
 

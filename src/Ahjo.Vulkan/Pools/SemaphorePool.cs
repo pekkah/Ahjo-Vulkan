@@ -40,6 +40,10 @@ public sealed unsafe class SemaphorePool : IDisposable
         if (_freeBinary.Count > 0)
             return new BinarySemaphore((VkSemaphore_T*)_freeBinary.Pop());
 
+        // Pre-grow so the Add after vkCreateSemaphore can't OOM and
+        // orphan the just-created VkSemaphore.
+        _allHandles.EnsureCapacity(_allHandles.Count + 1);
+
         var ci = new VkSemaphoreCreateInfo
         {
             sType = VkStructureType.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
@@ -55,6 +59,10 @@ public sealed unsafe class SemaphorePool : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_freeTimeline.Count > 0)
             return new TimelineSemaphore((VkSemaphore_T*)_freeTimeline.Pop(), _device.Handle);
+
+        // Pre-grow so the Add after vkCreateSemaphore can't OOM and
+        // orphan the just-created VkSemaphore.
+        _allHandles.EnsureCapacity(_allHandles.Count + 1);
 
         var typeInfo = new VkSemaphoreTypeCreateInfo
         {

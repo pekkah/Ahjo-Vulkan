@@ -75,9 +75,12 @@ public sealed unsafe class FrameRing : IDisposable
             }
             catch
             {
-                // Roll back any earlier successfully-built slots so a later
-                // failure doesn't leak the wrappers they own.
-                for (uint j = 0; j < i; j++) _slots[j]?.Dispose();
+                // Roll back every slot built so far, including index i.
+                // The Slot ctor's own try/finally guarantees _slots[i] is
+                // null if `new Slot(...)` threw; if `new FrameContext(...)`
+                // threw afterwards, _slots[i] is the freshly-built slot
+                // and would otherwise leak its pools/semaphores/fence.
+                for (uint j = 0; j <= i; j++) _slots[j]?.Dispose();
                 throw;
             }
         }

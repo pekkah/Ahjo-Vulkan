@@ -110,6 +110,9 @@ public sealed unsafe class DescriptorSetPool : IDisposable
             ? VkDescriptorPoolCreateFlagBits.VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT
             : 0;
 
+        // Pre-grow so the Add after the native call below can't OOM
+        // and orphan the freshly-created VkDescriptorPool.
+        _pools.EnsureCapacity(1);
         _pools.Add(CreatePool());
     }
 
@@ -129,6 +132,10 @@ public sealed unsafe class DescriptorSetPool : IDisposable
         if (_idle.TryGetValue((nint)layout, out Stack<nint>? stack) && stack.Count > 0)
             return new DescriptorSet((VkDescriptorSet_T*)stack.Pop(), layout);
 
+        // Pre-grow _allHandles so each Add after a successful native
+        // alloc can't OOM and orphan the just-acquired VkDescriptorSet.
+        _allHandles.EnsureCapacity(_allHandles.Count + 1);
+
         VkDescriptorSet_T* raw = AllocateFromCurrentPool(layout, out VkResult result);
         if (raw != null)
         {
@@ -141,6 +148,7 @@ public sealed unsafe class DescriptorSetPool : IDisposable
         // shape fits, and a brand-new pool can't already be fragmented.
         if (_growOnExhaustion && IsExhaustion(result))
         {
+            _pools.EnsureCapacity(_pools.Count + 1);
             _pools.Add(CreatePool());
             raw = AllocateFromCurrentPool(layout, out result);
             if (raw != null)

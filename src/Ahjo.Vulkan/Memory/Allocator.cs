@@ -30,8 +30,18 @@ namespace Ahjo.Vulkan;
 public readonly unsafe struct Allocator : IDisposable
 {
     internal readonly VmaAllocator_T* Handle;
+    // OS handle on the Vulkan loader DLL. Owned for the allocator's
+    // lifetime so VMA's captured function pointers can't dangle if some
+    // other [DllImport] consumer is the only thing keeping the DLL
+    // resident and gets unloaded. Zero on default(Allocator) and on
+    // wrappers that didn't go through Create (none currently exist).
+    internal readonly nint Loader;
 
-    internal Allocator(VmaAllocator_T* handle) { Handle = handle; }
+    internal Allocator(VmaAllocator_T* handle, nint loader)
+    {
+        Handle = handle;
+        Loader = loader;
+    }
 
     public bool IsNull => Handle == null;
 
@@ -47,12 +57,14 @@ public readonly unsafe struct Allocator : IDisposable
     {
         ArgumentNullException.ThrowIfNull(device);
 
-        // The loader handle is only needed for the GetExport calls below — VMA
-        // copies the function pointers into its internal state, and the OS
-        // keeps the DLL loaded via the wrapper's other reference (the static
-        // [DllImport] path in Ahjo.Vulkan.Native). Releasing the handle in
-        // finally keeps repeated Create/Dispose cycles (tests, benchmarks)
-        // from accumulating handles on the loader.
+        // Load the loader DLL and keep the handle for the allocator's
+        // lifetime — VMA captures vkGetInstanceProcAddr /
+        // vkGetDeviceProcAddr below and dispatches through them on every
+        // vmaCreateBuffer / vmaDestroyBuffer call. The static [DllImport]
+        // path in Ahjo.Vulkan.Native usually pins the DLL too, but tying
+        // the OS ref-count to the allocator (released in Dispose) keeps
+        // VMA correct even in degenerate scenarios where this is the
+        // only resident reference.
         nint loader = LoadVulkanLoader();
         try
         {
@@ -109,11 +121,15 @@ public readonly unsafe struct Allocator : IDisposable
 
             VmaAllocator_T* raw = null;
             VmaApi.vmaCreateAllocator(&ci, &raw).ThrowIfFailed();
-            return new Allocator(raw);
+            var allocator = new Allocator(raw, loader);
+            loader = 0; // ownership transferred — Dispose frees it now.
+            return allocator;
         }
         finally
         {
-            NativeLibrary.Free(loader);
+            // Only the failure path runs Free here; the success path
+            // moves the handle onto the returned Allocator (above).
+            if (loader != 0) NativeLibrary.Free(loader);
         }
     }
 
@@ -242,6 +258,7 @@ public readonly unsafe struct Allocator : IDisposable
         }
 
         VmaApi.vmaDestroyAllocator(Handle);
+        if (Loader != 0) NativeLibrary.Free(Loader);
     }
 
     private static nint LoadVulkanLoader()

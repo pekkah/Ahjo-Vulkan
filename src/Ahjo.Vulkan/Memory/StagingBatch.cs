@@ -210,6 +210,13 @@ public sealed unsafe class StagingBatch : IDisposable
         // size to the larger of the default chunk size or the upload's
         // own (aligned) length so a single oversize upload never fails.
         ulong needed = Math.Max(_chunkSize, AlignUp(sizeBytes, _alignment));
+        // Pre-grow both lists before the native alloc. Without this,
+        // _chunks.Add can succeed before _heads.Add throws on capacity
+        // expansion — the catch can free `fresh` but `_chunks` still
+        // holds it, and the eventual Dispose double-vmaDestroyBuffers.
+        int nextCount = _chunks.Count + 1;
+        _chunks.EnsureCapacity(nextCount);
+        _heads.EnsureCapacity(nextCount);
         Buffer fresh = AllocateChunkBuffer(needed);
         try
         {
@@ -218,8 +225,11 @@ public sealed unsafe class StagingBatch : IDisposable
         }
         catch
         {
-            // Managed OOM during list growth would orphan the VMA buffer
-            // — destroy it before propagating.
+            // EnsureCapacity above means Add is allocation-free; this
+            // catch is defense-in-depth for an async thread-abort
+            // landing between the two Adds. Pull `fresh` back out of
+            // _chunks if it landed there so Dispose can't double-free.
+            if (_chunks.Count == nextCount) _chunks.RemoveAt(_chunks.Count - 1);
             fresh.Dispose();
             throw;
         }

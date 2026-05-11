@@ -65,13 +65,14 @@ public sealed unsafe class MappedRegion<T> : MemoryManager<T>
     protected override void Dispose(bool disposing)
     {
         if (_data == null) return;
-        // Finalizer-driven path: the owning Allocator may already have been
-        // destroyed (it has its own finalizer with non-deterministic order).
-        // Calling vmaUnmapMemory on a destroyed allocator is undefined; the
-        // best we can do is null the pointer and let the missed unmap leak
-        // for the rest of the process. Only the explicit Dispose() path
-        // (disposing == true) is allowed to touch the allocator.
-        if (disposing && !_persistent)
+        // MemoryManager<T> has no default finalizer and MappedRegion
+        // doesn't declare one, so this only ever runs via explicit
+        // Dispose (disposing == true). A forgotten Dispose leaks the
+        // vmaMapMemory ref-count until the owning Buffer/Allocator is
+        // destroyed, at which point VMA cleans the map state regardless
+        // — so the leak is bounded to the buffer's lifetime, not the
+        // process's.
+        if (!_persistent)
             VmaApi.vmaUnmapMemory(_allocator, _allocation);
         _data = null;
     }

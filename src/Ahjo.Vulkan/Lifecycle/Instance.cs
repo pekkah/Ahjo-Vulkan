@@ -139,57 +139,73 @@ public sealed unsafe class Instance : IDisposable
             VkInstance_T* raw = null;
             Vk.vkCreateInstance(chain.Head, null, &raw).ThrowIfFailed();
 
-            var functions = new InstanceFunctionTable(raw);
-
+            // Anything between vkCreateInstance and the final return that
+            // throws — function-table resolve, the validation-extension-
+            // missing throw, messenger create failure, managed OOM at
+            // `new Instance` — needs to roll the live VkInstance back;
+            // otherwise the handle outlives its managed owner and the
+            // GPU/driver stays tied to a dead wrapper.
             VkDebugUtilsMessengerEXT_T* messenger = null;
-            if (desc.EnableValidation)
+            InstanceFunctionTable       functions = default;
+            try
             {
-                // VK_EXT_debug_utils is auto-added when EnableValidation is
-                // true (see CopyAndMaybeAppend above), so a null entry-point
-                // here means the loader has the extension declared but the
-                // function pointer didn't resolve — typically a validation-
-                // layer-less SDK install. Silently dropping the messenger
-                // would let validation = true succeed without ever running
-                // a callback after instance creation; surface the gap loud
-                // so the caller fixes the install.
-                if (functions.CreateDebugUtilsMessenger == null)
+                functions = new InstanceFunctionTable(raw);
+
+                if (desc.EnableValidation)
                 {
-                    Vk.vkDestroyInstance(raw, null);
-                    throw new VulkanException(VkResult.VK_ERROR_EXTENSION_NOT_PRESENT,
-                        "EnableValidation = true but vkCreateDebugUtilsMessengerEXT could not be resolved. " +
-                        "Install the Vulkan SDK validation layers, or set EnableValidation = false.");
+                    // VK_EXT_debug_utils is auto-added when EnableValidation
+                    // is true (see CopyAndMaybeAppend above), so a null
+                    // entry-point here means the loader has the extension
+                    // declared but the function pointer didn't resolve —
+                    // typically a validation-layer-less SDK install.
+                    // Silently dropping the messenger would let
+                    // validation = true succeed without ever running a
+                    // callback after instance creation; surface the gap
+                    // loud so the caller fixes the install.
+                    if (functions.CreateDebugUtilsMessenger == null)
+                        throw new VulkanException(VkResult.VK_ERROR_EXTENSION_NOT_PRESENT,
+                            "EnableValidation = true but vkCreateDebugUtilsMessengerEXT could not be resolved. " +
+                            "Install the Vulkan SDK validation layers, or set EnableValidation = false.");
+
+                    var mci = new VkDebugUtilsMessengerCreateInfoEXT
+                    {
+                        sType = VkStructureType.VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+                        messageSeverity = AllSeverities,
+                        messageType = AllTypes,
+                    };
+
+                    if (desc.DebugCallbackRaw != null)
+                    {
+                        mci.pfnUserCallback = desc.DebugCallbackRaw;
+                    }
+                    else if (desc.DebugCallback is not null)
+                    {
+                        mci.pfnUserCallback = &ManagedCallbackThunk;
+                        mci.pUserData = (void*)GCHandle.ToIntPtr(keepAlive);
+                    }
+                    else
+                    {
+                        mci.pfnUserCallback = &DefaultCallback;
+                    }
+
+                    // Stage into a local — on failure the Vulkan spec
+                    // leaves pMessenger's value undefined, so committing
+                    // to `messenger` only on success keeps the catch
+                    // path from invoking destroy on garbage.
+                    VkDebugUtilsMessengerEXT_T* msg = null;
+                    functions.CreateDebugUtilsMessenger(raw, &mci, null, &msg).ThrowIfFailed();
+                    messenger = msg;
                 }
 
-                var mci = new VkDebugUtilsMessengerCreateInfoEXT
-                {
-                    sType = VkStructureType.VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-                    messageSeverity = AllSeverities,
-                    messageType = AllTypes,
-                };
-
-                if (desc.DebugCallbackRaw != null)
-                {
-                    mci.pfnUserCallback = desc.DebugCallbackRaw;
-                }
-                else if (desc.DebugCallback is not null)
-                {
-                    mci.pfnUserCallback = &ManagedCallbackThunk;
-                    mci.pUserData = (void*)GCHandle.ToIntPtr(keepAlive);
-                }
-                else
-                {
-                    mci.pfnUserCallback = &DefaultCallback;
-                }
-
-                var r = functions.CreateDebugUtilsMessenger(raw, &mci, null, &messenger);
-                if (r != VkResult.VK_SUCCESS)
-                {
-                    Vk.vkDestroyInstance(raw, null);
-                    r.ThrowIfFailed();
-                }
+                return new Instance(raw, messenger, functions, keepAlive);
             }
-
-            return new Instance(raw, messenger, functions, keepAlive);
+            catch
+            {
+                if (messenger != null && functions.DestroyDebugUtilsMessenger != null)
+                    functions.DestroyDebugUtilsMessenger(raw, messenger, null);
+                Vk.vkDestroyInstance(raw, null);
+                throw;
+            }
         }
         catch
         {

@@ -56,6 +56,10 @@ public sealed unsafe class FencePool : IDisposable
         if (preferred.Count > 0)
             return new Fence((VkFence_T*)preferred.Pop(), _device.Handle);
 
+        // Pre-grow _allHandles so the Add below can't OOM after
+        // vkCreateFence and orphan the just-created VkFence.
+        _allHandles.EnsureCapacity(_allHandles.Count + 1);
+
         var ci = new VkFenceCreateInfo
         {
             sType = VkStructureType.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
