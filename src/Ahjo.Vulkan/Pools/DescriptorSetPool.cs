@@ -61,6 +61,7 @@ public sealed unsafe class DescriptorSetPool : IDisposable
     private readonly uint                          _maxSetsPerPool;
     private readonly VkDescriptorPoolSize[]        _poolSizes;
     private readonly bool                          _growOnExhaustion;
+    private readonly VkDescriptorPoolCreateFlagBits _poolFlags;
     // Per-layout free-list. Different layouts allocate to different binding
     // shapes, so a set built for layout A can't be returned to a caller
     // asking for layout B.
@@ -82,11 +83,21 @@ public sealed unsafe class DescriptorSetPool : IDisposable
     /// with the same template on <c>OUT_OF_POOL_MEMORY</c> /
     /// <c>FRAGMENTED_POOL</c>.
     /// </summary>
+    /// <param name="updateAfterBind">
+    /// Set <see langword="true"/> to create the pool with
+    /// <c>VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT</c>. Required
+    /// (VUID-VkDescriptorSetAllocateInfo-pSetLayouts-03044) whenever the
+    /// caller will allocate sets against a layout built with
+    /// <see cref="DescriptorSetLayoutDescription.UpdateAfterBindPool"/>;
+    /// a flag mismatch is undefined behaviour — hardware drivers tend to
+    /// tolerate it, but SwiftShader SIGSEGVs inside vkAllocateDescriptorSets.
+    /// </param>
     public DescriptorSetPool(
         Device                              device,
         uint                                maxSets,
         ReadOnlySpan<VkDescriptorPoolSize>  poolSizes,
-        bool                                growOnExhaustion = true)
+        bool                                growOnExhaustion = true,
+        bool                                updateAfterBind  = false)
     {
         ArgumentNullException.ThrowIfNull(device);
         if (poolSizes.IsEmpty)
@@ -95,6 +106,9 @@ public sealed unsafe class DescriptorSetPool : IDisposable
         _maxSetsPerPool   = maxSets;
         _poolSizes        = poolSizes.ToArray();
         _growOnExhaustion = growOnExhaustion;
+        _poolFlags        = updateAfterBind
+            ? VkDescriptorPoolCreateFlagBits.VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT
+            : 0;
 
         _pools.Add(CreatePool());
     }
@@ -210,7 +224,7 @@ public sealed unsafe class DescriptorSetPool : IDisposable
             var ci = new VkDescriptorPoolCreateInfo
             {
                 sType         = VkStructureType.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-                flags         = 0,
+                flags         = (uint)_poolFlags,
                 maxSets       = _maxSetsPerPool,
                 poolSizeCount = (uint)_poolSizes.Length,
                 pPoolSizes    = pSizes,

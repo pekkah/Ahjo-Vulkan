@@ -189,7 +189,7 @@ public sealed unsafe class DescriptorWriteTests
                 descriptorCount = 32,
             },
         ];
-        using var pool = new DescriptorSetPool(device, maxSets: 1, sizes);
+        using var pool = new DescriptorSetPool(device, maxSets: 1, sizes, updateAfterBind: true);
 
         using var buffer = device.Allocator.CreateBuffer(
             new BufferDescription { Size = 256, Usage = BufferUsage.StorageBuffer },
