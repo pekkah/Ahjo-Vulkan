@@ -139,11 +139,14 @@ jobs:
 
       # Linux: NcStudios/VulkanCI installs their Vulkan SDK + SwiftShader
       # artifacts and configures VK_DRIVER_FILES, LD_LIBRARY_PATH,
-      # VK_LAYER_PATH for us. Pinned to v1.3, the latest tagged release
-      # (the vnext branch has no attached release binaries).
+      # VK_LAYER_PATH for us. Pinned to v1.2 because v1.3's action.yml
+      # still references ubuntu-20.04 artifact names while the v1.3
+      # release only attaches ubuntu-24.04 binaries — v1.2 is the last
+      # internally-consistent tag, and it ships ubuntu-20.04 SwiftShader
+      # plus VulkanSDK 1.4.309.0 (the action's default sdkVersion).
       - name: Provision Vulkan + SwiftShader (Linux)
         if: matrix.os == 'ubuntu-latest'
-        uses: NcStudios/VulkanCI@v1.3
+        uses: NcStudios/VulkanCI@v1.2
 
       # ── /Vulkan loader + SwiftShader ICD ─────────────────────────────
 
