@@ -137,13 +137,13 @@ jobs:
           # loader before anything system-wide.
           "PATH=$dir;$env:PATH" >> $env:GITHUB_ENV
 
-      # Linux: NcStudios/VulkanCI@vnext installs their Vulkan SDK +
-      # SwiftShader artifacts and configures VK_DRIVER_FILES,
-      # LD_LIBRARY_PATH, VK_LAYER_PATH for us. Pinned to the floating
-      # vnext tag the action's own examples use.
+      # Linux: NcStudios/VulkanCI installs their Vulkan SDK + SwiftShader
+      # artifacts and configures VK_DRIVER_FILES, LD_LIBRARY_PATH,
+      # VK_LAYER_PATH for us. Pinned to v1.3, the latest tagged release
+      # (the vnext branch has no attached release binaries).
       - name: Provision Vulkan + SwiftShader (Linux)
         if: matrix.os == 'ubuntu-latest'
-        uses: NcStudios/VulkanCI@vnext
+        uses: NcStudios/VulkanCI@v1.3
 
       # ── /Vulkan loader + SwiftShader ICD ─────────────────────────────
 
