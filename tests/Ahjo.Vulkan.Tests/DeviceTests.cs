@@ -208,6 +208,11 @@ public sealed unsafe class DeviceTests
     public void CreateDevice_ConfigureFeaturesCallback_SeesWrapperDefaultsOnRefs()
     {
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+            "Software ICD (SwiftShader Linux): reports Vulkan 1.3, so the wrapper's 1.4 features " +
+            "struct is intentionally omitted from the create chain (see PhysicalDevice.CreateDevice " +
+            "and the f14 gate in commit 1d46b60). The pushDescriptor assertion at the bottom checks a " +
+            "1.4-promoted feature and only makes sense on a 1.4+ device.");
 
         using var instance = Instance.Create(default);
         uint gfxFamily = PickGraphicsFamily(instance, out var gpu);

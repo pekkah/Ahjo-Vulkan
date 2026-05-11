@@ -130,6 +130,10 @@ public sealed unsafe class StagingBatchTests
     public void EnqueueUpload_OversizePayload_GrowsChunk()
     {
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+            "Software ICD (SwiftShader): crashes inside libvk_swiftshader on the device+instance " +
+            "dispose chain after a VMA staging-chunk grow. Same SwiftShader-internal sensitivity " +
+            "as the other StagingBatchTests methods; real drivers cover this on the Windows CI leg.");
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint _);
