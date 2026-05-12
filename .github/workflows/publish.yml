@@ -1,18 +1,24 @@
-name: Publish (disabled)
+name: Publish
 
-# NuGet publishing is currently DISABLED. Tag pushes do not trigger this
-# workflow; only manual workflow_dispatch runs do, and even then the
-# nuget push + GitHub Release steps are gated behind the `release`
-# input. The pack-only path stays usable for verifying the artifact
-# pipeline without shipping anything.
+# NuGet publishing is gated, not automatic. Tag pushes do NOT trigger
+# this workflow yet — only manual workflow_dispatch runs do, and the
+# nuget push + GitHub Release steps are still guarded by the `release`
+# input so the pack-only path can be used to verify the artifact
+# pipeline without shipping.
 #
-# To re-enable real publishing later:
-#   1) restore the `push: tags: ["v*", "vma-v*"]` trigger below
+# First-publish runbook:
+#   1) workflow_dispatch with release=false → produces nupkgs as an
+#      artifact, no push. Inspect the uploaded `nuget-packages` artifact.
+#   2) workflow_dispatch with release=true → pushes to NuGet.org using
+#      the NUGET_KEY repo secret.
+#
+# To switch to tag-driven publishing later:
+#   1) add `push: tags: ["v*", "vma-v*"]` to `on:` below
 #   2) drop the `if: inputs.release == true` guards on the push +
-#      release steps
-#   3) confirm the NUGET secret is configured on the repo
+#      release steps (or branch on `github.event_name == 'push'`)
+#   3) confirm the NUGET_KEY secret is still configured on the repo
 #
-# Tagging convention (when re-enabled):
+# Tagging convention (when enabled):
 #   git tag v0.1.0 && git push origin v0.1.0   (core)
 #   git tag vma-v0.1.0 && git push origin vma-v0.1.0   (VMA)
 
@@ -161,7 +167,7 @@ jobs:
         if: inputs.release == true
         run: >-
           dotnet nuget push "${{ github.workspace }}/artifacts/*.nupkg"
-          --api-key ${{ secrets.NUGET }}
+          --api-key ${{ secrets.NUGET_KEY }}
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
 
