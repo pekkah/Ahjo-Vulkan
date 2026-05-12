@@ -24,6 +24,14 @@
     <PackageVersion Include="MinVer" Version="7.0.0" />
   </ItemGroup>
 
+  <!-- Embeds commit metadata into PDBs so consumers debugging into the
+       symbols (.snupkg) get a source map back to this repository on
+       GitHub. Pulled in by every publishable project; PrivateAssets=all
+       keeps it out of the consumer's dependency graph. -->
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="8.0.0" />
+  </ItemGroup>
+
   <!-- Window/surface integration for tests (Wayland/Metal E2E surface
        coverage) and the windowed samples. ppy.SDL3-CS is the osu!
        framework's binding: 1-3 week release cadence, MIT-licensed,

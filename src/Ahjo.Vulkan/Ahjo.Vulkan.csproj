@@ -18,6 +18,7 @@
     <ProjectReference Include="..\Ahjo.Vulkan.Native\Ahjo.Vulkan.Native.csproj" />
     <ProjectReference Include="..\Ahjo.Vulkan.Vma.Native\Ahjo.Vulkan.Vma.Native.csproj" />
     <PackageReference Include="MinVer" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
     <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
