@@ -19,9 +19,9 @@ NuGet as three packages:
   — raw P/Invoke bindings against `vk_mem_alloc.h`, plus prebuilt VMA
   SHARED library (`vma.{dll,so}`) for Windows + Linux (x64, arm64) under
   `runtimes/<rid>/native/`. Pulled in transitively by `Ahjo.Vulkan`.
-  Versioned independently from core via the `vma-v*` tag prefix. macOS
-  RIDs aren't shipped today; the MoltenVK runtime path needs validation
-  before adding them.
+  Shares the same `v*` tag versioning as the rest of the stack — all
+  three packages release together. macOS RIDs aren't shipped today;
+  the MoltenVK runtime path needs validation before adding them.
 
 Project folders, csproj filenames, `AssemblyName`, `RootNamespace`, and
 NuGet `PackageId` all use the dotted `Ahjo.Vulkan*` form — one canonical
@@ -98,13 +98,13 @@ to skip that step (e.g. when consuming a pre-staged binary in CI).
 
 ## Release tagging
 
-| Package set                                       | Tag prefix |
-|---------------------------------------------------|------------|
-| `Ahjo.Vulkan` + `Ahjo.Vulkan.Native`              | `v*`       |
-| `Ahjo.Vulkan.Vma.Native`                          | `vma-v*`   |
+All three packages — `Ahjo.Vulkan`, `Ahjo.Vulkan.Native`, and
+`Ahjo.Vulkan.Vma.Native` — share a single `v*` tag and release together.
+A `git tag v0.1.0 && git push origin v0.1.0` ships the whole stack.
 
-VMA is versioned independently because its release cadence and ABI
-churn don't align with Vulkan-Headers'.
+The underlying VMA C++ library version (independent of the package
+version) is pinned in `Directory.Build.props` as `VmaVersion`; bump it
+deliberately and regenerate the bindings.
 
 Requires the .NET 10 SDK (see `global.json`) and a system Vulkan loader.
 

@@ -73,29 +73,27 @@ jobs:
       - name: Fetch VMA + Vulkan-Headers
         run: dotnet build src/Ahjo.Vulkan.Vma.Native/Ahjo.Vulkan.Vma.Native.csproj -t:FetchVma`;EnsureVulkanHeaders -p:SkipVmaNativeBuild=true --nologo
 
+      # FetchVma copies vk_mem_alloc.h to the version-independent staging
+      # path native/vma/include/ — point cmake there so the workflow
+      # doesn't have to track VmaVersion in a second place.
       - name: Configure
         if: runner.os != 'Windows'
         run: |
           cmake -S native/vma \
                 -B native/vma/build/${{ matrix.rid }} \
                 -DCMAKE_BUILD_TYPE=Release \
-                -DAHJO_VMA_HEADERS_DIR="$PWD/native/vma/downloaded/VulkanMemoryAllocator-${VMA_VERSION}/include" \
+                -DAHJO_VMA_HEADERS_DIR="$PWD/native/vma/include" \
                 -DAHJO_VULKAN_HEADERS_DIR="$PWD/native/include"
-        env:
-          # VmaVersion lives in Directory.Build.props; replicate here to
-          # construct the extracted-headers path. Update both together.
-          VMA_VERSION: v3.1.0
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $vma = "v3.1.0"
           cmake -S native/vma `
                 -B native/vma/build/${{ matrix.rid }} `
                 -A ${{ matrix.cmake-arch }} `
                 -DCMAKE_BUILD_TYPE=Release `
-                -DAHJO_VMA_HEADERS_DIR="$pwd/native/vma/downloaded/VulkanMemoryAllocator-$vma/include" `
+                -DAHJO_VMA_HEADERS_DIR="$pwd/native/vma/include" `
                 -DAHJO_VULKAN_HEADERS_DIR="$pwd/native/include"
 
       - name: Build
