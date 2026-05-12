@@ -60,7 +60,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Cache the produced binary per RID, keyed by the hash of every
+      # input that can change the output: the impl TU, CMakeLists, the
+      # Directory.Build.props block (carries VmaVersion + the Vulkan
+      # headers version VMA compiles against), and this workflow file
+      # (cmake flags live here). On a hit we skip .NET setup, the
+      # header fetch, and both cmake steps — only checkout, cache
+      # restore, and upload-artifact run.
+      - name: Cache VMA build output
+        id: cache-vma
+        uses: actions/cache@v4
+        with:
+          path: native/vma/${{ matrix.built-path }}
+          key: vma-${{ matrix.rid }}-${{ hashFiles('native/vma/src/vma.cpp', 'native/vma/CMakeLists.txt', 'Directory.Build.props', '.github/workflows/build-vma-native.yml') }}
+
       - name: Setup .NET
+        if: steps.cache-vma.outputs.cache-hit != 'true'
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
@@ -71,13 +86,14 @@ jobs:
       # explicit cmake step below uses per-RID generator/arch flags that
       # the local Build target doesn't pass.
       - name: Fetch VMA + Vulkan-Headers
+        if: steps.cache-vma.outputs.cache-hit != 'true'
         run: dotnet build src/Ahjo.Vulkan.Vma.Native/Ahjo.Vulkan.Vma.Native.csproj -t:FetchVma`;EnsureVulkanHeaders -p:SkipVmaNativeBuild=true --nologo
 
       # FetchVma copies vk_mem_alloc.h to the version-independent staging
       # path native/vma/include/ — point cmake there so the workflow
       # doesn't have to track VmaVersion in a second place.
       - name: Configure
-        if: runner.os != 'Windows'
+        if: steps.cache-vma.outputs.cache-hit != 'true' && runner.os != 'Windows'
         run: |
           cmake -S native/vma \
                 -B native/vma/build/${{ matrix.rid }} \
@@ -86,7 +102,7 @@ jobs:
                 -DAHJO_VULKAN_HEADERS_DIR="$PWD/native/include"
 
       - name: Configure (Windows)
-        if: runner.os == 'Windows'
+        if: steps.cache-vma.outputs.cache-hit != 'true' && runner.os == 'Windows'
         shell: pwsh
         run: |
           cmake -S native/vma `
@@ -97,6 +113,7 @@ jobs:
                 -DAHJO_VULKAN_HEADERS_DIR="$pwd/native/include"
 
       - name: Build
+        if: steps.cache-vma.outputs.cache-hit != 'true'
         run: cmake --build native/vma/build/${{ matrix.rid }} --config Release --parallel
 
       - name: List output
