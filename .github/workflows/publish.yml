@@ -1,29 +1,35 @@
 name: Publish
 
-# NuGet publishing is gated, not automatic. Tag pushes do NOT trigger
-# this workflow yet — only manual workflow_dispatch runs do, and the
-# nuget push + GitHub Release steps are still guarded by the `release`
-# input so the pack-only path can be used to verify the artifact
-# pipeline without shipping.
+# Triggers and what they ship:
+#   push to main          → preview package (MinVer picks the next pre-
+#                           release version: 0.0.0-alpha.0.<height> until
+#                           the first tag, then 0.x.y-alpha.0.<height>).
+#                           Pushed to NuGet.org as a pre-release; consumers
+#                           opt in by allowing pre-release in their feed.
+#   release published     → stable package. Tag the commit with v0.1.0,
+#                           publish a GitHub Release on that tag — MinVer
+#                           reads the tag, ships 0.1.0, and the produced
+#                           nupkgs are attached back to the release.
+#   workflow_dispatch     → manual override. `release=false` packs without
+#                           pushing (artifact-only dry-run); `release=true`
+#                           pushes. The `version` input forces a specific
+#                           MinVer version when needed.
 #
-# First-publish runbook:
-#   1) workflow_dispatch with release=false → produces nupkgs as an
-#      artifact, no push. Inspect the uploaded `nuget-packages` artifact.
-#   2) workflow_dispatch with release=true → pushes to NuGet.org using
-#      the NUGET_KEY repo secret.
+# Failed publishes are recoverable: `dotnet nuget push --skip-duplicate`
+# is idempotent, and pre-release versions ratchet monotonically with
+# commit height so a re-run never collides.
 #
-# To switch to tag-driven publishing later:
-#   1) add `push: tags: ["v*"]` to `on:` below
-#   2) drop the `if: inputs.release == true` guards on the push +
-#      release steps (or branch on `github.event_name == 'push'`)
-#   3) confirm the NUGET_KEY secret is still configured on the repo
-#
-# Tagging convention (when enabled): a single `v*` tag ships all three
-# packages (Ahjo.Vulkan, Ahjo.Vulkan.Native, Ahjo.Vulkan.Vma.Native) at
-# the same version — they're shipped together.
+# Tagging a release:
 #   git tag v0.1.0 && git push origin v0.1.0
+#   gh release create v0.1.0 --generate-notes
+# (or create the release via the GitHub UI — that's what fires the
+# `release: published` event.)
 
 on:
+  push:
+    branches: [main, master]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       version:
@@ -36,10 +42,19 @@ on:
         type: boolean
         default: true
       release:
-        description: "Push to NuGet.org and create a GitHub Release. Default: pack only."
+        description: "Push to NuGet.org. Default: pack only (artifact upload, no push)."
         required: false
         type: boolean
         default: false
+
+# One in-flight publish per ref — main pushes serialize against each
+# other so two near-simultaneous commits don't race for the same NuGet
+# id+version, but each release tag is its own ref and runs in parallel.
+# Never cancel in-flight: a half-published nupkg is worse than a slow
+# queue.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -48,12 +63,12 @@ env:
 
 jobs:
   # Pre-build the VMA native binaries. All three packages ship at the
-  # same version (one v* tag), so the default release flow always packs
-  # VMA too — workflow_dispatch defaults include_vma to true. Setting it
-  # to false skips the 4-RID matrix for a fast core-only pack dry-run.
+  # same version, so push/release events ALWAYS pack VMA. Only
+  # workflow_dispatch can opt out via include_vma=false, intended for
+  # quick core-only dry-runs during development.
   build-vma:
     name: Build VMA native (matrix)
-    if: inputs.include_vma == true
+    if: github.event_name != 'workflow_dispatch' || inputs.include_vma == true
     uses: ./.github/workflows/build-vma-native.yml
 
   publish:
@@ -160,25 +175,31 @@ jobs:
           path: ${{ github.workspace }}/artifacts/*.*nupkg
           if-no-files-found: error
 
-      # Publish steps below are gated behind the `release` input so that
-      # ad-hoc workflow_dispatch runs can produce + verify nupkgs without
-      # actually shipping anything. Set release=true only when ready to
-      # publish.
+      # Push for push:main and release:published events always; for
+      # workflow_dispatch only when release=true (lets the manual path
+      # do artifact-only dry-runs). `--skip-duplicate` keeps re-runs
+      # idempotent against an already-published version.
+      # `dotnet nuget push *.nupkg` also pushes matching .snupkg files
+      # in the same directory automatically.
       - name: Push to NuGet.org
-        if: inputs.release == true
+        if: github.event_name != 'workflow_dispatch' || inputs.release == true
         run: >-
           dotnet nuget push "${{ github.workspace }}/artifacts/*.nupkg"
           --api-key ${{ secrets.NUGET_KEY }}
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
 
-      - name: Create GitHub Release
-        if: inputs.release == true && github.event_name == 'push'
+      # Attach the built nupkgs/snupkgs to the GitHub Release that
+      # triggered this run. The Release object already exists (creating
+      # it is what fired `release: published`); softprops/action-gh-release
+      # updates the existing release's asset list when tag_name matches.
+      # Skipped for push:main (no release object) and workflow_dispatch
+      # (no associated tag).
+      - name: Attach assets to GitHub Release
+        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          generate_release_notes: true
+          tag_name: ${{ github.event.release.tag_name }}
           files: |
             ${{ github.workspace }}/artifacts/*.nupkg
             ${{ github.workspace }}/artifacts/*.snupkg
