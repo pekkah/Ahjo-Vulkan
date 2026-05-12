@@ -85,9 +85,12 @@ jobs:
       # SkipVmaNativeBuild prevents the local cmake invocation — CI's
       # explicit cmake step below uses per-RID generator/arch flags that
       # the local Build target doesn't pass.
+      # Quote the -t: argument so bash on Linux runners doesn't treat
+      # the target separator `;` as a command separator. (Windows pwsh
+      # used to accept the backtick-escaped form; quoting works on both.)
       - name: Fetch VMA + Vulkan-Headers
         if: steps.cache-vma.outputs.cache-hit != 'true'
-        run: dotnet build src/Ahjo.Vulkan.Vma.Native/Ahjo.Vulkan.Vma.Native.csproj -t:FetchVma`;EnsureVulkanHeaders -p:SkipVmaNativeBuild=true --nologo
+        run: dotnet build src/Ahjo.Vulkan.Vma.Native/Ahjo.Vulkan.Vma.Native.csproj "-t:FetchVma;EnsureVulkanHeaders" -p:SkipVmaNativeBuild=true --nologo
 
       # FetchVma copies vk_mem_alloc.h to the version-independent staging
       # path native/vma/include/ — point cmake there so the workflow
