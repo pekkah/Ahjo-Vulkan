@@ -149,32 +149,38 @@ public unsafe readonly record struct ImageBarrier
             LayerCount          = image.ArrayLayers == 0 ? 1u : image.ArrayLayers,
         };
 
-    internal VkImageMemoryBarrier2 ToNative() => new()
+    internal VkImageMemoryBarrier2 ToNative()
     {
-        sType               = VkStructureType.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        srcStageMask        = (ulong)SrcStage,
-        srcAccessMask       = (ulong)SrcAccess,
-        dstStageMask        = (ulong)DstStage,
-        dstAccessMask       = (ulong)DstAccess,
-        oldLayout           = OldLayout,
-        newLayout           = NewLayout,
-        srcQueueFamilyIndex = SrcQueueFamilyIndex,
-        dstQueueFamilyIndex = DstQueueFamilyIndex,
-        image               = (VkImage_T*)Image,
-        subresourceRange    = new VkImageSubresourceRange
+        // Aspect=0 used to silently default to COLOR, which silently
+        // miscompiled depth/stencil object-initializer barriers
+        // (VUID-VkImageSubresourceRange-aspectMask-requiredbitmask).
+        // Throwing surfaces the missing field instead of producing a
+        // legal-but-wrong COLOR barrier on a depth image.
+        if (Aspect == 0)
+            throw new InvalidOperationException(
+                "ImageBarrier.Aspect must be set explicitly (e.g. VK_IMAGE_ASPECT_COLOR_BIT). " +
+                "Use Transition/Release/Acquire factories or set Aspect in the object initializer.");
+
+        return new VkImageMemoryBarrier2
         {
-            // Aspect=0 from a record-zero-init slips through Vulkan
-            // validation as VUID-VkImageSubresourceRange-aspectMask-requiredbitmask.
-            // Default to COLOR (matching the Transition/Release/Acquire
-            // factories) so an object-initializer caller who forgot the
-            // field gets the dominant case rather than a driver reject.
-            // Depth/stencil callers must set Aspect explicitly — the
-            // factories already do.
-            aspectMask     = Aspect == 0 ? (uint)VkImageAspectFlagBits.VK_IMAGE_ASPECT_COLOR_BIT : (uint)Aspect,
-            baseMipLevel   = BaseMipLevel,
-            levelCount     = LevelCount == 0 ? 1u : LevelCount,
-            baseArrayLayer = BaseArrayLayer,
-            layerCount     = LayerCount == 0 ? 1u : LayerCount,
-        },
-    };
+            sType               = VkStructureType.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            srcStageMask        = (ulong)SrcStage,
+            srcAccessMask       = (ulong)SrcAccess,
+            dstStageMask        = (ulong)DstStage,
+            dstAccessMask       = (ulong)DstAccess,
+            oldLayout           = OldLayout,
+            newLayout           = NewLayout,
+            srcQueueFamilyIndex = SrcQueueFamilyIndex,
+            dstQueueFamilyIndex = DstQueueFamilyIndex,
+            image               = (VkImage_T*)Image,
+            subresourceRange    = new VkImageSubresourceRange
+            {
+                aspectMask     = (uint)Aspect,
+                baseMipLevel   = BaseMipLevel,
+                levelCount     = LevelCount == 0 ? 1u : LevelCount,
+                baseArrayLayer = BaseArrayLayer,
+                layerCount     = LayerCount == 0 ? 1u : LayerCount,
+            },
+        };
+    }
 }

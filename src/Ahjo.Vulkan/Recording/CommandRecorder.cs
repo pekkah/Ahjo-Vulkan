@@ -510,28 +510,42 @@ public unsafe ref struct CommandRecorder : IDisposable
     {
         if (memory.IsEmpty && buffer.IsEmpty && image.IsEmpty) return;
 
-        Span<VkMemoryBarrier2>       nm = stackalloc VkMemoryBarrier2[Math.Max(memory.Length, 1)];
-        Span<VkBufferMemoryBarrier2> nb = stackalloc VkBufferMemoryBarrier2[Math.Max(buffer.Length, 1)];
-        Span<VkImageMemoryBarrier2>  ni = stackalloc VkImageMemoryBarrier2[Math.Max(image.Length, 1)];
-        for (int i = 0; i < memory.Length; i++) nm[i] = memory[i].ToNative();
-        for (int i = 0; i < buffer.Length; i++) nb[i] = buffer[i].ToNative();
-        for (int i = 0; i < image.Length;  i++) ni[i] = image[i].ToNative();
+        const int Threshold = 16;
+        Span<VkMemoryBarrier2>       mSlab = stackalloc VkMemoryBarrier2[Threshold];
+        Span<VkBufferMemoryBarrier2> bSlab = stackalloc VkBufferMemoryBarrier2[Threshold];
+        Span<VkImageMemoryBarrier2>  iSlab = stackalloc VkImageMemoryBarrier2[Threshold];
 
-        fixed (VkMemoryBarrier2*       pm = nm)
-        fixed (VkBufferMemoryBarrier2* pb = nb)
-        fixed (VkImageMemoryBarrier2*  pi = ni)
+        Span<VkMemoryBarrier2>       nm = RentForOverflow(memory.Length, Threshold, mSlab, out VkMemoryBarrier2[]?       mRent);
+        Span<VkBufferMemoryBarrier2> nb = RentForOverflow(buffer.Length, Threshold, bSlab, out VkBufferMemoryBarrier2[]? bRent);
+        Span<VkImageMemoryBarrier2>  ni = RentForOverflow(image.Length,  Threshold, iSlab, out VkImageMemoryBarrier2[]?  iRent);
+        try
         {
-            var dep = new VkDependencyInfo
+            for (int i = 0; i < memory.Length; i++) nm[i] = memory[i].ToNative();
+            for (int i = 0; i < buffer.Length; i++) nb[i] = buffer[i].ToNative();
+            for (int i = 0; i < image.Length;  i++) ni[i] = image[i].ToNative();
+
+            fixed (VkMemoryBarrier2*       pm = nm)
+            fixed (VkBufferMemoryBarrier2* pb = nb)
+            fixed (VkImageMemoryBarrier2*  pi = ni)
             {
-                sType                    = VkStructureType.VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                memoryBarrierCount       = (uint)memory.Length,
-                pMemoryBarriers          = memory.Length > 0 ? pm : null,
-                bufferMemoryBarrierCount = (uint)buffer.Length,
-                pBufferMemoryBarriers    = buffer.Length > 0 ? pb : null,
-                imageMemoryBarrierCount  = (uint)image.Length,
-                pImageMemoryBarriers     = image.Length  > 0 ? pi : null,
-            };
-            Vk.vkCmdPipelineBarrier2(Handle, &dep);
+                var dep = new VkDependencyInfo
+                {
+                    sType                    = VkStructureType.VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                    memoryBarrierCount       = (uint)memory.Length,
+                    pMemoryBarriers          = memory.Length > 0 ? pm : null,
+                    bufferMemoryBarrierCount = (uint)buffer.Length,
+                    pBufferMemoryBarriers    = buffer.Length > 0 ? pb : null,
+                    imageMemoryBarrierCount  = (uint)image.Length,
+                    pImageMemoryBarriers     = image.Length  > 0 ? pi : null,
+                };
+                Vk.vkCmdPipelineBarrier2(Handle, &dep);
+            }
+        }
+        finally
+        {
+            if (mRent is not null) System.Buffers.ArrayPool<VkMemoryBarrier2>.Shared.Return(mRent);
+            if (bRent is not null) System.Buffers.ArrayPool<VkBufferMemoryBarrier2>.Shared.Return(bRent);
+            if (iRent is not null) System.Buffers.ArrayPool<VkImageMemoryBarrier2>.Shared.Return(iRent);
         }
     }
 
@@ -554,19 +568,29 @@ public unsafe ref struct CommandRecorder : IDisposable
     public void CopyBuffer(in Buffer src, in Buffer dst, params ReadOnlySpan<BufferCopyRegion> regions)
     {
         if (regions.IsEmpty) return;
-        Span<VkBufferCopy2> n = stackalloc VkBufferCopy2[regions.Length];
-        for (int i = 0; i < regions.Length; i++) n[i] = regions[i].ToNative();
-        fixed (VkBufferCopy2* p = n)
+
+        const int Threshold = 16;
+        Span<VkBufferCopy2> slab = stackalloc VkBufferCopy2[Threshold];
+        Span<VkBufferCopy2> n = RentForOverflow(regions.Length, Threshold, slab, out VkBufferCopy2[]? rented);
+        try
         {
-            var info = new VkCopyBufferInfo2
+            for (int i = 0; i < regions.Length; i++) n[i] = regions[i].ToNative();
+            fixed (VkBufferCopy2* p = n)
             {
-                sType       = VkStructureType.VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2,
-                srcBuffer   = src.Handle,
-                dstBuffer   = dst.Handle,
-                regionCount = (uint)regions.Length,
-                pRegions    = p,
-            };
-            Vk.vkCmdCopyBuffer2(Handle, &info);
+                var info = new VkCopyBufferInfo2
+                {
+                    sType       = VkStructureType.VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2,
+                    srcBuffer   = src.Handle,
+                    dstBuffer   = dst.Handle,
+                    regionCount = (uint)regions.Length,
+                    pRegions    = p,
+                };
+                Vk.vkCmdCopyBuffer2(Handle, &info);
+            }
+        }
+        finally
+        {
+            if (rented is not null) System.Buffers.ArrayPool<VkBufferCopy2>.Shared.Return(rented);
         }
     }
 
@@ -594,20 +618,30 @@ public unsafe ref struct CommandRecorder : IDisposable
         params ReadOnlySpan<BufferImageCopy> regions)
     {
         if (regions.IsEmpty) return;
-        Span<VkBufferImageCopy2> n = stackalloc VkBufferImageCopy2[regions.Length];
-        for (int i = 0; i < regions.Length; i++) n[i] = regions[i].ToNative();
-        fixed (VkBufferImageCopy2* p = n)
+
+        const int Threshold = 16;
+        Span<VkBufferImageCopy2> slab = stackalloc VkBufferImageCopy2[Threshold];
+        Span<VkBufferImageCopy2> n = RentForOverflow(regions.Length, Threshold, slab, out VkBufferImageCopy2[]? rented);
+        try
         {
-            var info = new VkCopyBufferToImageInfo2
+            for (int i = 0; i < regions.Length; i++) n[i] = regions[i].ToNative();
+            fixed (VkBufferImageCopy2* p = n)
             {
-                sType          = VkStructureType.VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
-                srcBuffer      = src.Handle,
-                dstImage       = dst.Handle,
-                dstImageLayout = dstLayout,
-                regionCount    = (uint)regions.Length,
-                pRegions       = p,
-            };
-            Vk.vkCmdCopyBufferToImage2(Handle, &info);
+                var info = new VkCopyBufferToImageInfo2
+                {
+                    sType          = VkStructureType.VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2,
+                    srcBuffer      = src.Handle,
+                    dstImage       = dst.Handle,
+                    dstImageLayout = dstLayout,
+                    regionCount    = (uint)regions.Length,
+                    pRegions       = p,
+                };
+                Vk.vkCmdCopyBufferToImage2(Handle, &info);
+            }
+        }
+        finally
+        {
+            if (rented is not null) System.Buffers.ArrayPool<VkBufferImageCopy2>.Shared.Return(rented);
         }
     }
 
@@ -618,20 +652,30 @@ public unsafe ref struct CommandRecorder : IDisposable
         params ReadOnlySpan<BufferImageCopy> regions)
     {
         if (regions.IsEmpty) return;
-        Span<VkBufferImageCopy2> n = stackalloc VkBufferImageCopy2[regions.Length];
-        for (int i = 0; i < regions.Length; i++) n[i] = regions[i].ToNative();
-        fixed (VkBufferImageCopy2* p = n)
+
+        const int Threshold = 16;
+        Span<VkBufferImageCopy2> slab = stackalloc VkBufferImageCopy2[Threshold];
+        Span<VkBufferImageCopy2> n = RentForOverflow(regions.Length, Threshold, slab, out VkBufferImageCopy2[]? rented);
+        try
         {
-            var info = new VkCopyImageToBufferInfo2
+            for (int i = 0; i < regions.Length; i++) n[i] = regions[i].ToNative();
+            fixed (VkBufferImageCopy2* p = n)
             {
-                sType          = VkStructureType.VK_STRUCTURE_TYPE_COPY_IMAGE_TO_BUFFER_INFO_2,
-                srcImage       = src.Handle,
-                srcImageLayout = srcLayout,
-                dstBuffer      = dst.Handle,
-                regionCount    = (uint)regions.Length,
-                pRegions       = p,
-            };
-            Vk.vkCmdCopyImageToBuffer2(Handle, &info);
+                var info = new VkCopyImageToBufferInfo2
+                {
+                    sType          = VkStructureType.VK_STRUCTURE_TYPE_COPY_IMAGE_TO_BUFFER_INFO_2,
+                    srcImage       = src.Handle,
+                    srcImageLayout = srcLayout,
+                    dstBuffer      = dst.Handle,
+                    regionCount    = (uint)regions.Length,
+                    pRegions       = p,
+                };
+                Vk.vkCmdCopyImageToBuffer2(Handle, &info);
+            }
+        }
+        finally
+        {
+            if (rented is not null) System.Buffers.ArrayPool<VkBufferImageCopy2>.Shared.Return(rented);
         }
     }
 
@@ -641,21 +685,31 @@ public unsafe ref struct CommandRecorder : IDisposable
         params ReadOnlySpan<ImageCopyRegion> regions)
     {
         if (regions.IsEmpty) return;
-        Span<VkImageCopy2> n = stackalloc VkImageCopy2[regions.Length];
-        for (int i = 0; i < regions.Length; i++) n[i] = regions[i].ToNative();
-        fixed (VkImageCopy2* p = n)
+
+        const int Threshold = 16;
+        Span<VkImageCopy2> slab = stackalloc VkImageCopy2[Threshold];
+        Span<VkImageCopy2> n = RentForOverflow(regions.Length, Threshold, slab, out VkImageCopy2[]? rented);
+        try
         {
-            var info = new VkCopyImageInfo2
+            for (int i = 0; i < regions.Length; i++) n[i] = regions[i].ToNative();
+            fixed (VkImageCopy2* p = n)
             {
-                sType          = VkStructureType.VK_STRUCTURE_TYPE_COPY_IMAGE_INFO_2,
-                srcImage       = src.Handle,
-                srcImageLayout = srcLayout,
-                dstImage       = dst.Handle,
-                dstImageLayout = dstLayout,
-                regionCount    = (uint)regions.Length,
-                pRegions       = p,
-            };
-            Vk.vkCmdCopyImage2(Handle, &info);
+                var info = new VkCopyImageInfo2
+                {
+                    sType          = VkStructureType.VK_STRUCTURE_TYPE_COPY_IMAGE_INFO_2,
+                    srcImage       = src.Handle,
+                    srcImageLayout = srcLayout,
+                    dstImage       = dst.Handle,
+                    dstImageLayout = dstLayout,
+                    regionCount    = (uint)regions.Length,
+                    pRegions       = p,
+                };
+                Vk.vkCmdCopyImage2(Handle, &info);
+            }
+        }
+        finally
+        {
+            if (rented is not null) System.Buffers.ArrayPool<VkImageCopy2>.Shared.Return(rented);
         }
     }
 
@@ -730,13 +784,17 @@ public unsafe ref struct CommandRecorder : IDisposable
         }
 
         // Step 1: mips 1..N-1 start in UNDEFINED and need to move to
-        // TRANSFER_DST so the loop's blit destinations are valid.
+        // TRANSFER_DST so the loop's blit destinations are valid. The
+        // upcoming write is vkCmdBlitImage2, which executes at the Blit
+        // stage in sync2 (not Copy), so DstStage must include Blit —
+        // otherwise the layout transition isn't ordered against the blit
+        // write and sync2 validation fires WRITE-AFTER-WRITE.
         ImageBarrier dstInit = new()
         {
             Image               = (nint)image.Handle,
             SrcStage            = Stage.None,
             SrcAccess           = Access.None,
-            DstStage            = Stage.Copy,
+            DstStage            = Stage.Blit,
             DstAccess           = Access.TransferWrite,
             OldLayout           = VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
             NewLayout           = VkImageLayout.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -762,11 +820,16 @@ public unsafe ref struct CommandRecorder : IDisposable
             int dstD = Math.Max(1, srcD >> 1);
 
             // Move mip (i-1) from TRANSFER_DST → TRANSFER_SRC so the
-            // upcoming blit can sample it.
+            // upcoming blit can sample it. SrcStage tracks the producer of
+            // the previous write to mip (i-1): the caller's
+            // vkCmdCopyBufferToImage on i=1 (Copy stage), and the previous
+            // iteration's vkCmdBlitImage2 on i>=2 (Blit stage). Sync2 treats
+            // Copy and Blit as distinct stages; getting this wrong leaves
+            // the prior write unordered against the layout transition.
             ImageBarrier srcSwap = new()
             {
                 Image               = (nint)image.Handle,
-                SrcStage            = Stage.Copy,
+                SrcStage            = i == 1 ? Stage.Copy : Stage.Blit,
                 SrcAccess           = Access.TransferWrite,
                 DstStage            = Stage.Blit,
                 DstAccess           = Access.TransferRead,
@@ -834,10 +897,14 @@ public unsafe ref struct CommandRecorder : IDisposable
         };
         PipelineBarrier(in finalSrcBarrier);
 
+        // The last mip (mipLevels - 1) was written by vkCmdBlitImage2 in
+        // the final loop iteration — SrcStage must be Blit, not Copy, or
+        // the transition out of TRANSFER_DST won't be ordered against that
+        // write under sync2's separate Copy/Blit stages.
         ImageBarrier finalDstBarrier = new()
         {
             Image               = (nint)image.Handle,
-            SrcStage            = Stage.Copy,
+            SrcStage            = Stage.Blit,
             SrcAccess           = Access.TransferWrite,
             DstStage            = Stage.AllCommands,
             DstAccess           = Access.MemoryRead | Access.MemoryWrite,
@@ -866,22 +933,32 @@ public unsafe ref struct CommandRecorder : IDisposable
         VkFilter                       filter = VkFilter.VK_FILTER_LINEAR)
     {
         if (regions.IsEmpty) return;
-        Span<VkImageBlit2> n = stackalloc VkImageBlit2[regions.Length];
-        for (int i = 0; i < regions.Length; i++) n[i] = regions[i].ToNative();
-        fixed (VkImageBlit2* p = n)
+
+        const int Threshold = 16;
+        Span<VkImageBlit2> slab = stackalloc VkImageBlit2[Threshold];
+        Span<VkImageBlit2> n = RentForOverflow(regions.Length, Threshold, slab, out VkImageBlit2[]? rented);
+        try
         {
-            var info = new VkBlitImageInfo2
+            for (int i = 0; i < regions.Length; i++) n[i] = regions[i].ToNative();
+            fixed (VkImageBlit2* p = n)
             {
-                sType          = VkStructureType.VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2,
-                srcImage       = src.Handle,
-                srcImageLayout = srcLayout,
-                dstImage       = dst.Handle,
-                dstImageLayout = dstLayout,
-                regionCount    = (uint)regions.Length,
-                pRegions       = p,
-                filter         = filter,
-            };
-            Vk.vkCmdBlitImage2(Handle, &info);
+                var info = new VkBlitImageInfo2
+                {
+                    sType          = VkStructureType.VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2,
+                    srcImage       = src.Handle,
+                    srcImageLayout = srcLayout,
+                    dstImage       = dst.Handle,
+                    dstImageLayout = dstLayout,
+                    regionCount    = (uint)regions.Length,
+                    pRegions       = p,
+                    filter         = filter,
+                };
+                Vk.vkCmdBlitImage2(Handle, &info);
+            }
+        }
+        finally
+        {
+            if (rented is not null) System.Buffers.ArrayPool<VkImageBlit2>.Shared.Return(rented);
         }
     }
 
@@ -986,32 +1063,73 @@ public unsafe ref struct CommandRecorder : IDisposable
 
     public void BeginRendering(in RenderingInfo info)
     {
-        Span<VkRenderingAttachmentInfo> color = stackalloc VkRenderingAttachmentInfo[
-            Math.Max(info.ColorAttachments.Length, 1)];
-        for (int i = 0; i < info.ColorAttachments.Length; i++)
-            color[i] = info.ColorAttachments[i].ToNative();
-
-        VkRenderingAttachmentInfo depth = info.DepthAttachment is { } d ? d.ToNative() : default;
-        VkRenderingAttachmentInfo stencil = info.StencilAttachment is { } s ? s.ToNative() : default;
-
-        fixed (VkRenderingAttachmentInfo* pColor = color)
+        // Spec floor for maxColorAttachments is 8; some GPUs allow more.
+        // Stack-budget the common case and fall back to ArrayPool to keep
+        // a pathological caller from blowing the recording thread's stack.
+        const int Threshold = 8;
+        int count = info.ColorAttachments.Length;
+        Span<VkRenderingAttachmentInfo> slab = stackalloc VkRenderingAttachmentInfo[Threshold];
+        Span<VkRenderingAttachmentInfo> color = RentForOverflow(count, Threshold, slab, out VkRenderingAttachmentInfo[]? rented);
+        try
         {
-            VkRenderingAttachmentInfo* pDepth   = info.DepthAttachment.HasValue   ? &depth   : null;
-            VkRenderingAttachmentInfo* pStencil = info.StencilAttachment.HasValue ? &stencil : null;
-            var native = new VkRenderingInfo
+            for (int i = 0; i < count; i++)
+                color[i] = info.ColorAttachments[i].ToNative();
+
+            VkRenderingAttachmentInfo depth = info.DepthAttachment is { } d ? d.ToNative() : default;
+            VkRenderingAttachmentInfo stencil = info.StencilAttachment is { } s ? s.ToNative() : default;
+
+            fixed (VkRenderingAttachmentInfo* pColor = color)
             {
-                sType                = VkStructureType.VK_STRUCTURE_TYPE_RENDERING_INFO,
-                renderArea           = info.RenderArea,
-                layerCount           = info.LayerCount == 0 ? 1u : info.LayerCount,
-                viewMask             = info.ViewMask,
-                colorAttachmentCount = (uint)info.ColorAttachments.Length,
-                pColorAttachments    = info.ColorAttachments.Length > 0 ? pColor : null,
-                pDepthAttachment     = pDepth,
-                pStencilAttachment   = pStencil,
-            };
-            Vk.vkCmdBeginRendering(Handle, &native);
+                VkRenderingAttachmentInfo* pDepth   = info.DepthAttachment.HasValue   ? &depth   : null;
+                VkRenderingAttachmentInfo* pStencil = info.StencilAttachment.HasValue ? &stencil : null;
+                var native = new VkRenderingInfo
+                {
+                    sType                = VkStructureType.VK_STRUCTURE_TYPE_RENDERING_INFO,
+                    renderArea           = info.RenderArea,
+                    layerCount           = info.LayerCount == 0 ? 1u : info.LayerCount,
+                    viewMask             = info.ViewMask,
+                    colorAttachmentCount = (uint)count,
+                    pColorAttachments    = count > 0 ? pColor : null,
+                    pDepthAttachment     = pDepth,
+                    pStencilAttachment   = pStencil,
+                };
+                Vk.vkCmdBeginRendering(Handle, &native);
+            }
+        }
+        finally
+        {
+            if (rented is not null) System.Buffers.ArrayPool<VkRenderingAttachmentInfo>.Shared.Return(rented);
         }
     }
 
     public void EndRendering() => Vk.vkCmdEndRendering(Handle);
+
+    // ---- Internal: bounded-stackalloc / ArrayPool fallback ----
+
+    /// <summary>
+    /// Returns a span of <paramref name="count"/> elements that lives on
+    /// the stack when <paramref name="count"/> ≤ <paramref name="stackThreshold"/>
+    /// and on an <see cref="System.Buffers.ArrayPool{T}"/> rental otherwise.
+    /// Caller must pre-allocate <paramref name="stackSlab"/> (of length
+    /// <paramref name="stackThreshold"/>) at the callsite — this method
+    /// cannot stackalloc on the caller's frame. The returned span aliases
+    /// either the slab slice or the rented array; pass <paramref name="rented"/>
+    /// to <c>System.Buffers.ArrayPool&lt;T&gt;.Shared.Return</c> in a finally.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Span<T> RentForOverflow<T>(
+        int count,
+        int stackThreshold,
+        Span<T> stackSlab,
+        out T[]? rented)
+        where T : unmanaged
+    {
+        if (count <= stackThreshold)
+        {
+            rented = null;
+            return stackSlab[..count];
+        }
+        rented = System.Buffers.ArrayPool<T>.Shared.Rent(count);
+        return rented.AsSpan(0, count);
+    }
 }

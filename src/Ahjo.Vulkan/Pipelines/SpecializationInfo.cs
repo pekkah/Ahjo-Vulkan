@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -69,7 +70,9 @@ public static class SpecializationInfo
     /// <c>device.BuildComputePipeline().WithSpecialization(SpecializationInfo.For(in v)).Build()</c>
     /// idiom satisfies this on a single stack frame.
     /// </remarks>
-    public static unsafe SpecializationInfo<T> For<T>(in T values) where T : unmanaged
+    public static unsafe SpecializationInfo<T> For<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields)] T>(in T values)
+        where T : unmanaged
         => new(
             Unsafe.AsPointer(ref Unsafe.AsRef(in values)),
             SpecializationLayout<T>.Entries);
@@ -80,7 +83,9 @@ public static class SpecializationInfo
 /// once on first access and reused for every <see cref="SpecializationInfo.For{T}"/>
 /// call thereafter.
 /// </summary>
-internal static class SpecializationLayout<T> where T : unmanaged
+internal static class SpecializationLayout<
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields)] T>
+    where T : unmanaged
 {
     public static readonly VkSpecializationMapEntry[] Entries = Build();
 
@@ -94,15 +99,25 @@ internal static class SpecializationLayout<T> where T : unmanaged
         // field order, which is what the spec-constant IDs key off.
         Array.Sort(fields, static (a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
 
+        // Field size is the gap to the next field's offset (or sizeof(T)
+        // for the last field). Avoids Marshal.SizeOf(Type), which is
+        // [RequiresDynamicCode] and would warn under PublishAot.
+        // T : unmanaged guarantees every field is itself unmanaged, so
+        // sequential-layout gaps are exactly the field sizes.
+        uint total = (uint)Unsafe.SizeOf<T>();
+        var offsets = new uint[fields.Length];
+        for (int i = 0; i < fields.Length; i++)
+            offsets[i] = (uint)Marshal.OffsetOf<T>(fields[i].Name);
+
         var entries = new VkSpecializationMapEntry[fields.Length];
         for (int i = 0; i < fields.Length; i++)
         {
-            FieldInfo f = fields[i];
+            uint next = i + 1 < fields.Length ? offsets[i + 1] : total;
             entries[i] = new VkSpecializationMapEntry
             {
                 constantID = (uint)i,
-                offset     = (uint)Marshal.OffsetOf<T>(f.Name),
-                size       = (nuint)Marshal.SizeOf(f.FieldType),
+                offset     = offsets[i],
+                size       = (nuint)(next - offsets[i]),
             };
         }
         return entries;

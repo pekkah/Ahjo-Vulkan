@@ -458,7 +458,12 @@ public sealed unsafe class Device : IDisposable
                 // Best-effort wait-idle before destroy; Dispose mustn't throw on
                 // the success path. A failing wait-idle (lost device, OOM)
                 // already implies the device is going away — destroy still runs.
-                Vk.vkDeviceWaitIdle(Handle);
+                // Surface the VkResult to stderr so a shutdown after a crash
+                // doesn't look like a clean exit in the logs.
+                VkResult idleResult = Vk.vkDeviceWaitIdle(Handle);
+                if (idleResult != VkResult.VK_SUCCESS)
+                    Console.Error.WriteLine(
+                        $"Device.Dispose: vkDeviceWaitIdle returned {idleResult}; destroy proceeds anyway.");
                 // Allocator must die before the VkDevice — vmaDestroyAllocator
                 // calls into the device's function table.
                 if (_allocatorCreated) _allocator.Dispose();

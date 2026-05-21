@@ -95,6 +95,17 @@ public sealed unsafe class FrameRing : IDisposable
     /// returns immediately), resets the slot's pools, and returns a
     /// <see cref="FrameContext"/> the caller drives for one frame.
     /// </summary>
+    /// <exception cref="VulkanException">
+    /// Wraps the underlying <see cref="VkResult"/>. The wait paths throw
+    /// <see cref="VkResult.VK_ERROR_DEVICE_LOST"/> when the device dies
+    /// mid-frame — recovery is to <see cref="Dispose"/> the ring,
+    /// dispose the owning <see cref="Device"/>, and rebuild from a fresh
+    /// physical device. Retrying <see cref="BeginFrame"/> after device
+    /// loss will keep throwing. A throw out of this method leaves the
+    /// internal slot index unchanged so the broken slot isn't silently
+    /// rotated past — the next call (after recreate, if attempted) would
+    /// retry the same slot.
+    /// </exception>
     public FrameContext BeginFrame()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -288,9 +299,13 @@ public sealed unsafe class FrameRing : IDisposable
         public void WaitForPendingSubmit()
         {
             if (!_pendingSubmit) return;
-            if (InFlightHandle.Wait(Timeout.InfiniteTimeSpan) != WaitState.Signaled)
+            WaitState state = InFlightHandle.Wait(Timeout.InfiniteTimeSpan);
+            if (state == WaitState.DeviceLost)
+                throw new VulkanException(VkResult.VK_ERROR_DEVICE_LOST,
+                    "Device was lost while draining FrameRing slot for swapchain recreate.");
+            if (state != WaitState.Signaled)
                 throw new VulkanException(VkResult.VK_TIMEOUT,
-                    "FrameRing slot fence never signaled while draining for swapchain recreate.");
+                    $"FrameRing slot wait returned unexpected state {state} for an infinite wait.");
         }
 
         /// <summary>
@@ -323,9 +338,13 @@ public sealed unsafe class FrameRing : IDisposable
         {
             if (_pendingSubmit)
             {
-                if (InFlightHandle.Wait(Timeout.InfiniteTimeSpan) != WaitState.Signaled)
+                WaitState state = InFlightHandle.Wait(Timeout.InfiniteTimeSpan);
+                if (state == WaitState.DeviceLost)
+                    throw new VulkanException(VkResult.VK_ERROR_DEVICE_LOST,
+                        "Device was lost waiting on the FrameRing in-flight fence.");
+                if (state != WaitState.Signaled)
                     throw new VulkanException(VkResult.VK_TIMEOUT,
-                        "FrameRing slot fence never signaled.");
+                        $"FrameRing slot wait returned unexpected state {state} for an infinite wait.");
             }
             InFlightHandle.Reset();
             _pendingSubmit = false;
@@ -344,7 +363,15 @@ public sealed unsafe class FrameRing : IDisposable
             // re-submitted has an unsignaled fence with no GPU work
             // behind it, and waiting on it would hang Dispose forever.
             if (_pendingSubmit)
-                InFlightHandle.Wait(Timeout.InfiniteTimeSpan);
+            {
+                // Dispose mustn't throw — log a lost-device or unexpected
+                // wait outcome and let teardown proceed. vkDestroy* on a
+                // lost device is spec-legal.
+                WaitState state = InFlightHandle.Wait(Timeout.InfiniteTimeSpan);
+                if (state != WaitState.Signaled)
+                    Console.Error.WriteLine(
+                        $"FrameRing.Slot.Dispose: in-flight fence wait returned {state}; teardown proceeds.");
+            }
             _pendingSubmit = false;
 
             FencePool.Release(InFlightHandle);

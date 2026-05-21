@@ -1,6 +1,4 @@
-using System.Reflection;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using Ahjo.Vulkan.Native;
 
 namespace Ahjo.Vulkan;
@@ -145,6 +143,12 @@ internal static unsafe class DescriptorTemplateBuilder
         return new DescriptorTemplate<T>(raw, device, set);
     }
 
+    // Lays out one VkDescriptorUpdateTemplateEntry per binding by walking
+    // cumulative 24-byte strides from offset 0. Equivalent to the previous
+    // reflection-driven path for the documented shape of T (a sequential
+    // struct of *DescriptorWrite fields or inline arrays thereof — no
+    // padding, no foreign fields) but AOT-clean: no GetFields/OffsetOf/
+    // Marshal.SizeOf, no [DynamicallyAccessedMembers] propagation.
     private static void BuildEntries<T>(
         ReadOnlySpan<DescriptorBinding>       bindings,
         Span<VkDescriptorUpdateTemplateEntry> dst)
@@ -153,49 +157,37 @@ internal static unsafe class DescriptorTemplateBuilder
         if (bindings.IsEmpty)
             throw new ArgumentException("DescriptorTemplate<T> requires at least one binding.", nameof(bindings));
 
-        FieldInfo[] fields = typeof(T).GetFields(
-            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-        // GetFields() doesn't guarantee declaration order; sort by byte
-        // offset, which matches declaration order for sequential layout
-        // and is the order Vulkan reads anyway. OffsetOf hits a P/Invoke;
-        // cache once per field instead of recomputing 4× inside the
-        // sort comparer.
-        var offsets = new long[fields.Length];
-        for (int i = 0; i < fields.Length; i++)
-            offsets[i] = Marshal.OffsetOf(fields[i].DeclaringType!, fields[i].Name).ToInt64();
-        Array.Sort(offsets, fields);
-
-        if (fields.Length != bindings.Length)
-            throw new ArgumentException(
-                $"DescriptorTemplate<{typeof(T).Name}> has {fields.Length} field(s) but {bindings.Length} binding(s) were provided. " +
-                "Each binding must map to exactly one field in declaration order.", nameof(bindings));
-
+        nuint structSize    = (nuint)Unsafe.SizeOf<T>();
+        nuint runningOffset = 0;
         for (int i = 0; i < bindings.Length; i++)
         {
             ref readonly DescriptorBinding b = ref bindings[i];
-            nuint offset = (nuint)(nint)Marshal.OffsetOf<T>(fields[i].Name);
+            uint  count = b.Count == 0 ? 1u : b.Count;
+            nuint end   = runningOffset + (nuint)count * DescriptorWriteStride;
+            if (end > structSize)
+                throw new ArgumentException(
+                    $"DescriptorTemplate<{typeof(T).Name}>: binding {i} (Count = {count}) extends past T's {structSize} bytes. " +
+                    "Each binding must map to a *DescriptorWrite (or inline array of *DescriptorWrite) sized 24 bytes per descriptor.",
+                    nameof(bindings));
             dst[i] = new VkDescriptorUpdateTemplateEntry
             {
                 dstBinding      = b.Slot,
                 dstArrayElement = 0,
-                descriptorCount = b.Count == 0 ? 1u : b.Count,
+                descriptorCount = count,
                 descriptorType  = b.Type,
-                offset          = offset,
+                offset          = runningOffset,
                 stride          = DescriptorWriteStride,
             };
+            runningOffset = end;
         }
 
-        // Sanity check: total size must accommodate the last entry's range.
-        nuint structSize = (nuint)Unsafe.SizeOf<T>();
-        for (int i = 0; i < bindings.Length; i++)
-        {
-            nuint count = bindings[i].Count == 0 ? 1u : bindings[i].Count;
-            nuint end   = dst[i].offset + count * DescriptorWriteStride;
-            if (end > structSize)
-                throw new ArgumentException(
-                    $"Field {i} ({fields[i].Name}) extends to byte {end} but {typeof(T).Name} is only {structSize} bytes. " +
-                    "Field type must be a *DescriptorWrite (or inline array thereof) sized 24 bytes per descriptor.",
-                    nameof(bindings));
-        }
+        // Strict size match catches "T has padding or extra fields" — the
+        // previous reflection-driven check would have caught the same
+        // shape via fields.Length != bindings.Length.
+        if (runningOffset != structSize)
+            throw new ArgumentException(
+                $"DescriptorTemplate<{typeof(T).Name}>: bindings cover {runningOffset} bytes but {typeof(T).Name} is {structSize} bytes. " +
+                "T must be a LayoutKind.Sequential struct of *DescriptorWrite fields (or inline arrays thereof) with no foreign fields or padding.",
+                nameof(bindings));
     }
 }
