@@ -9,6 +9,10 @@ library compiled from a single `VMA_IMPLEMENTATION` translation unit, for
 every supported RID under `runtimes/<rid>/native/`. No separate per-platform
 package to reference, no compile step on the consumer side.
 
+> **Status: pre-1.0.** The managed surface is generated and stable per
+> VMA release; bumps here track the pinned VMA tag. Tag your
+> `PackageReference` to an exact version.
+
 ## Most people want `Ahjo.Vulkan` instead
 
 This package exposes the raw C ABI. If you want ergonomics — `Allocator`,
@@ -43,6 +47,14 @@ VMA loads Vulkan entry points dynamically through
 `vkGetInstanceProcAddr` / `vkGetDeviceProcAddr` — supplied by the caller
 via `VmaVulkanFunctions`. You still need the Vulkan loader installed at
 runtime (provided by the `Ahjo.Vulkan.Native` dependency).
+
+## Repository
+
+Source, issues, generator response file
+([`tools/generate-vma.rsp`](https://github.com/pekkah/Ahjo-Vulkan/blob/main/tools/generate-vma.rsp)),
+native build CMake config
+([`native/vma/CMakeLists.txt`](https://github.com/pekkah/Ahjo-Vulkan/blob/main/native/vma/CMakeLists.txt)):
+<https://github.com/pekkah/Ahjo-Vulkan>
 
 ## License
 

@@ -101,12 +101,12 @@ A `default(InstanceDescription)` is also legal — `ApiVersion` falls back to
   `KhrSwapchain`).
 
 Deeper rationale on each layer lives under
-[`docs/superpowers/specs/`](https://github.com/pekkah/ahjo-vulkan/tree/main/docs/superpowers/specs)
+[`docs/superpowers/specs/`](https://github.com/pekkah/Ahjo-Vulkan/tree/main/docs/superpowers/specs)
 in the source repo.
 
 ## Repository
 
-Source, issues, samples: <https://github.com/pekkah/ahjo-vulkan>
+Source, issues, samples: <https://github.com/pekkah/Ahjo-Vulkan>
 
 ## License
 

@@ -32,10 +32,11 @@ dotnet add package Ahjo.Vulkan.Native
 |----------|---------------------------------------------------------------|
 | Windows  | GPU drivers ship `vulkan-1.dll`, or install the Vulkan SDK / VulkanRT |
 | Linux    | `libvulkan1` (Debian/Ubuntu) or distro equivalent             |
+| macOS    | MoltenVK (Vulkan SDK install) — surface bindings shipped, but no Mac CI runner yet |
 
-The loader resolver code already understands MoltenVK / `libvulkan.dylib`
-on macOS, but macOS isn't a tested target yet — revisit when surface
-bindings + a Mac sample land.
+The loader resolver maps `vulkan-1` to `libvulkan.dylib` so `DllImport`
+resolves cleanly under MoltenVK. End-to-end Mac validation is pending a
+runner with real Vulkan drivers.
 
 TFM: `net10.0`. Native ABI tracks the pinned Vulkan-Headers release
 version; bumps are minor-version bumps here.
@@ -48,8 +49,8 @@ release.
 ## Repository
 
 Source, issues, generator response file
-([`tools/generate.rsp`](https://github.com/pekkah/ahjo-vulkan/blob/main/tools/generate.rsp)),
-regeneration instructions: <https://github.com/pekkah/ahjo-vulkan>
+([`tools/generate.rsp`](https://github.com/pekkah/Ahjo-Vulkan/blob/main/tools/generate.rsp)),
+regeneration instructions: <https://github.com/pekkah/Ahjo-Vulkan>
 
 ## License
 

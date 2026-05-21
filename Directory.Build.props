@@ -45,8 +45,8 @@
     <Product>Ahjo.Vulkan</Product>
     <Copyright>Copyright (c) Pekka Heikura</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/pekkah/ahjo-vulkan</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/pekkah/ahjo-vulkan</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/pekkah/Ahjo-Vulkan</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/pekkah/Ahjo-Vulkan</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>vulkan;graphics;gpu;interop;native</PackageTags>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
@@ -63,6 +63,14 @@
     (src/Ahjo.Vulkan/README.md + src/Ahjo.Vulkan.Native/README.md). The
     repo-root README.md stays contributor-focused and doesn't ship in
     either nupkg.
+
+    LICENSE is shipped at the nupkg root alongside the SPDX
+    PackageLicenseExpression. The expression drives nuget.org's license
+    rendering; the bundled file satisfies SBOM / OSS-scanning tools that
+    grep nupkgs for a license file without round-tripping to nuget.org.
   -->
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
 
 </Project>
