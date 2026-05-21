@@ -8,6 +8,13 @@
         "ClangSharpPInvokeGenerator"
       ],
       "rollForward": false
+    },
+    "nuget.mcp.server": {
+      "version": "1.4.3",
+      "commands": [
+        "nuget-mcp-server"
+      ],
+      "rollForward": false
     }
   }
 }

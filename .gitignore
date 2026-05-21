@@ -233,8 +233,11 @@ $RECYCLE.BIN/
 .cache/
 node_modules/
 
-# Claude Code local state
-.claude/
+# Claude Code: ignore personal state, track team-shared agents/skills/settings.
+.claude/*
+!.claude/agents/
+!.claude/skills/
+!.claude/settings.json
 
 # ---------------------------------------------------------------------------
 # Project-specific
