@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkExportFenceCreateInfo : IChainable<VkFenceCreateInfo>
 {
+    public VkExportFenceCreateInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_EXPORT_FENCE_CREATE_INFO;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_EXPORT_FENCE_CREATE_INFO;
 }

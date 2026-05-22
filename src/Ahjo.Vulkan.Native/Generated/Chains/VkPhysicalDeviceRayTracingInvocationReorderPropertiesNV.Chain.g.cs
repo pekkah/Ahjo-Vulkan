@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPhysicalDeviceRayTracingInvocationReorderPropertiesNV : IChainable<VkPhysicalDeviceProperties2>
 {
+    public VkPhysicalDeviceRayTracingInvocationReorderPropertiesNV()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_PROPERTIES_NV;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_PROPERTIES_NV;
 }

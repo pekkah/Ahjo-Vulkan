@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkVideoEncodeIntraRefreshCapabilitiesKHR : IChainable<VkVideoCapabilitiesKHR>
 {
+    public VkVideoEncodeIntraRefreshCapabilitiesKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_VIDEO_ENCODE_INTRA_REFRESH_CAPABILITIES_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_VIDEO_ENCODE_INTRA_REFRESH_CAPABILITIES_KHR;
 }

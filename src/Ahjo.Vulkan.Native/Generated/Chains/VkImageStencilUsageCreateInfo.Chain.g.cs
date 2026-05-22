@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkImageStencilUsageCreateInfo : IChainable<VkImageCreateInfo>, IChainable<VkPhysicalDeviceImageFormatInfo2>
 {
+    public VkImageStencilUsageCreateInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_IMAGE_STENCIL_USAGE_CREATE_INFO;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_IMAGE_STENCIL_USAGE_CREATE_INFO;
 }

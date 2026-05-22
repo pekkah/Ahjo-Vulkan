@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkRenderPassStripeBeginInfoARM : IChainable<VkRenderingInfo>, IChainable<VkRenderPassBeginInfo>
 {
+    public VkRenderPassStripeBeginInfoARM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_RENDER_PASS_STRIPE_BEGIN_INFO_ARM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_RENDER_PASS_STRIPE_BEGIN_INFO_ARM;
 }

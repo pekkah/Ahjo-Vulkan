@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPhysicalDeviceSubgroupProperties : IChainable<VkPhysicalDeviceProperties2>
 {
+    public VkPhysicalDeviceSubgroupProperties()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
 }

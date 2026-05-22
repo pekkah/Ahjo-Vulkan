@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPipelineRasterizationStateCreateInfo : IChainRoot
 {
+    public VkPipelineRasterizationStateCreateInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
 }

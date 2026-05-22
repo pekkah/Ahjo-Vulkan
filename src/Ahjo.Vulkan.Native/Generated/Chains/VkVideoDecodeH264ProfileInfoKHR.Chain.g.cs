@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkVideoDecodeH264ProfileInfoKHR : IChainable<VkVideoProfileInfoKHR>, IChainable<VkQueryPoolCreateInfo>
 {
+    public VkVideoDecodeH264ProfileInfoKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PROFILE_INFO_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PROFILE_INFO_KHR;
 }

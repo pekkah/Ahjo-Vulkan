@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkLatencySubmissionPresentIdNV : IChainable<VkSubmitInfo>, IChainable<VkSubmitInfo2>
 {
+    public VkLatencySubmissionPresentIdNV()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_LATENCY_SUBMISSION_PRESENT_ID_NV;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_LATENCY_SUBMISSION_PRESENT_ID_NV;
 }

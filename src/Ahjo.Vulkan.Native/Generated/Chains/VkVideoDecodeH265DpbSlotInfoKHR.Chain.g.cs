@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkVideoDecodeH265DpbSlotInfoKHR : IChainable<VkVideoReferenceSlotInfoKHR>
 {
+    public VkVideoDecodeH265DpbSlotInfoKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_DPB_SLOT_INFO_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_DPB_SLOT_INFO_KHR;
 }

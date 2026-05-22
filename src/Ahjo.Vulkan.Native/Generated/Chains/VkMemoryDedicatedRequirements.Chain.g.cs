@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkMemoryDedicatedRequirements : IChainable<VkMemoryRequirements2>
 {
+    public VkMemoryDedicatedRequirements()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS;
 }

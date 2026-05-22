@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkBindBufferMemoryDeviceGroupInfo : IChainable<VkBindBufferMemoryInfo>
 {
+    public VkBindBufferMemoryDeviceGroupInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_BIND_BUFFER_MEMORY_DEVICE_GROUP_INFO;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_BIND_BUFFER_MEMORY_DEVICE_GROUP_INFO;
 }

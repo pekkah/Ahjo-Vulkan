@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkTileMemoryRequirementsQCOM : IChainable<VkMemoryRequirements2>
 {
+    public VkTileMemoryRequirementsQCOM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_TILE_MEMORY_REQUIREMENTS_QCOM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_TILE_MEMORY_REQUIREMENTS_QCOM;
 }

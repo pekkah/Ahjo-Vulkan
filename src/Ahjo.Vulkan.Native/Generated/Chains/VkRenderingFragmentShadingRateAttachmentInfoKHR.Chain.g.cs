@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkRenderingFragmentShadingRateAttachmentInfoKHR : IChainable<VkRenderingInfo>
 {
+    public VkRenderingFragmentShadingRateAttachmentInfoKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR;
 }

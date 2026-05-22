@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkExternalMemoryImageCreateInfo : IChainable<VkImageCreateInfo>
 {
+    public VkExternalMemoryImageCreateInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
 }

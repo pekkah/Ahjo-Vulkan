@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPartitionedAccelerationStructureFlagsNV : IChainable<VkPartitionedAccelerationStructureInstancesInputNV>
 {
+    public VkPartitionedAccelerationStructureFlagsNV()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PARTITIONED_ACCELERATION_STRUCTURE_FLAGS_NV;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PARTITIONED_ACCELERATION_STRUCTURE_FLAGS_NV;
 }

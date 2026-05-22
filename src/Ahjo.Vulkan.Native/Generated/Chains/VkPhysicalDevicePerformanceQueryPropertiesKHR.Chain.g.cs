@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPhysicalDevicePerformanceQueryPropertiesKHR : IChainable<VkPhysicalDeviceProperties2>
 {
+    public VkPhysicalDevicePerformanceQueryPropertiesKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PERFORMANCE_QUERY_PROPERTIES_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PERFORMANCE_QUERY_PROPERTIES_KHR;
 }

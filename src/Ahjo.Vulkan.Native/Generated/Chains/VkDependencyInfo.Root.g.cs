@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDependencyInfo : IChainRoot
 {
+    public VkDependencyInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
 }

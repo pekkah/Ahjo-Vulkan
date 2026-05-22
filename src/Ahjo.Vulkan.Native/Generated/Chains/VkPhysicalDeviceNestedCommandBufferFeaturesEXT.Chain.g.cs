@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPhysicalDeviceNestedCommandBufferFeaturesEXT : IChainable<VkPhysicalDeviceFeatures2>, IChainable<VkDeviceCreateInfo>
 {
+    public VkPhysicalDeviceNestedCommandBufferFeaturesEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_NESTED_COMMAND_BUFFER_FEATURES_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_NESTED_COMMAND_BUFFER_FEATURES_EXT;
 }

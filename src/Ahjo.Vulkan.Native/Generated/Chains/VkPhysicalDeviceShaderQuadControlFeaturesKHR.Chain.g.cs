@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPhysicalDeviceShaderQuadControlFeaturesKHR : IChainable<VkPhysicalDeviceFeatures2>, IChainable<VkDeviceCreateInfo>
 {
+    public VkPhysicalDeviceShaderQuadControlFeaturesKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_QUAD_CONTROL_FEATURES_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_QUAD_CONTROL_FEATURES_KHR;
 }

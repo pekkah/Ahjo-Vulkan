@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPresentTimesInfoGOOGLE : IChainable<VkPresentInfoKHR>
 {
+    public VkPresentTimesInfoGOOGLE()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE;
 }

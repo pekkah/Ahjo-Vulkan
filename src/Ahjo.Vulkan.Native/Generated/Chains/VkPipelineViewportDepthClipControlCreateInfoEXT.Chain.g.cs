@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPipelineViewportDepthClipControlCreateInfoEXT : IChainable<VkPipelineViewportStateCreateInfo>
 {
+    public VkPipelineViewportDepthClipControlCreateInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT;
 }

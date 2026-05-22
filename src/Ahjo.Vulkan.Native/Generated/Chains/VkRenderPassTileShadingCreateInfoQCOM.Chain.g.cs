@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkRenderPassTileShadingCreateInfoQCOM : IChainable<VkRenderPassCreateInfo>, IChainable<VkRenderPassCreateInfo2>, IChainable<VkRenderingInfo>, IChainable<VkCommandBufferInheritanceInfo>
 {
+    public VkRenderPassTileShadingCreateInfoQCOM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_RENDER_PASS_TILE_SHADING_CREATE_INFO_QCOM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_RENDER_PASS_TILE_SHADING_CREATE_INFO_QCOM;
 }

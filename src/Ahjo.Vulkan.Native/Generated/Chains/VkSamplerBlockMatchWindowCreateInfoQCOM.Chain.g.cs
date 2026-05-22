@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSamplerBlockMatchWindowCreateInfoQCOM : IChainable<VkSamplerCreateInfo>
 {
+    public VkSamplerBlockMatchWindowCreateInfoQCOM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SAMPLER_BLOCK_MATCH_WINDOW_CREATE_INFO_QCOM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_SAMPLER_BLOCK_MATCH_WINDOW_CREATE_INFO_QCOM;
 }

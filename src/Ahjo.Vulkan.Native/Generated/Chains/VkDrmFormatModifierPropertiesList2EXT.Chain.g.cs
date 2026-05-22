@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDrmFormatModifierPropertiesList2EXT : IChainable<VkFormatProperties2>
 {
+    public VkDrmFormatModifierPropertiesList2EXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_2_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_2_EXT;
 }

@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkLatencySurfaceCapabilitiesNV : IChainable<VkSurfaceCapabilities2KHR>
 {
+    public VkLatencySurfaceCapabilitiesNV()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_LATENCY_SURFACE_CAPABILITIES_NV;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_LATENCY_SURFACE_CAPABILITIES_NV;
 }

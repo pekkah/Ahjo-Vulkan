@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPhysicalDeviceDescriptorPoolOverallocationFeaturesNV : IChainable<VkPhysicalDeviceFeatures2>, IChainable<VkDeviceCreateInfo>
 {
+    public VkPhysicalDeviceDescriptorPoolOverallocationFeaturesNV()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_POOL_OVERALLOCATION_FEATURES_NV;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_POOL_OVERALLOCATION_FEATURES_NV;
 }

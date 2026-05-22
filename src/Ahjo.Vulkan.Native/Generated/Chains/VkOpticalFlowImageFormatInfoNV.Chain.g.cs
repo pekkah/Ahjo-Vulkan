@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkOpticalFlowImageFormatInfoNV : IChainable<VkPhysicalDeviceImageFormatInfo2>, IChainable<VkImageCreateInfo>
 {
+    public VkOpticalFlowImageFormatInfoNV()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_OPTICAL_FLOW_IMAGE_FORMAT_INFO_NV;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_OPTICAL_FLOW_IMAGE_FORMAT_INFO_NV;
 }

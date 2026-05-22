@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkBufferDeviceAddressCreateInfoEXT : IChainable<VkBufferCreateInfo>
 {
+    public VkBufferDeviceAddressCreateInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_CREATE_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_CREATE_INFO_EXT;
 }

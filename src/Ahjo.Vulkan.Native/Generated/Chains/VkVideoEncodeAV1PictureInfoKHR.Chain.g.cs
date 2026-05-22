@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkVideoEncodeAV1PictureInfoKHR : IChainable<VkVideoEncodeInfoKHR>
 {
+    public VkVideoEncodeAV1PictureInfoKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_VIDEO_ENCODE_AV1_PICTURE_INFO_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_VIDEO_ENCODE_AV1_PICTURE_INFO_KHR;
 }

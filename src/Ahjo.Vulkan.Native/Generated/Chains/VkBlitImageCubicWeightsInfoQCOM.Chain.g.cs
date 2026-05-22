@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkBlitImageCubicWeightsInfoQCOM : IChainable<VkBlitImageInfo2>
 {
+    public VkBlitImageCubicWeightsInfoQCOM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_BLIT_IMAGE_CUBIC_WEIGHTS_INFO_QCOM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_BLIT_IMAGE_CUBIC_WEIGHTS_INFO_QCOM;
 }

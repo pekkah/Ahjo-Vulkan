@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkCommandBufferInheritanceDescriptorHeapInfoEXT : IChainable<VkCommandBufferInheritanceInfo>
 {
+    public VkCommandBufferInheritanceDescriptorHeapInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_DESCRIPTOR_HEAP_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_DESCRIPTOR_HEAP_INFO_EXT;
 }

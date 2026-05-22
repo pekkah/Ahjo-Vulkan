@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDisplayModeStereoPropertiesNV : IChainable<VkDisplayModeProperties2KHR>
 {
+    public VkDisplayModeStereoPropertiesNV()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DISPLAY_MODE_STEREO_PROPERTIES_NV;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_DISPLAY_MODE_STEREO_PROPERTIES_NV;
 }

@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkQueueFamilyOwnershipTransferPropertiesKHR : IChainable<VkQueueFamilyProperties2>
 {
+    public VkQueueFamilyOwnershipTransferPropertiesKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_QUEUE_FAMILY_OWNERSHIP_TRANSFER_PROPERTIES_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_QUEUE_FAMILY_OWNERSHIP_TRANSFER_PROPERTIES_KHR;
 }

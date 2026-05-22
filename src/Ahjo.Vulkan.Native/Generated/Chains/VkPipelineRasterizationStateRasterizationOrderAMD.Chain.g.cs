@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPipelineRasterizationStateRasterizationOrderAMD : IChainable<VkPipelineRasterizationStateCreateInfo>
 {
+    public VkPipelineRasterizationStateRasterizationOrderAMD()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_RASTERIZATION_ORDER_AMD;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_RASTERIZATION_ORDER_AMD;
 }

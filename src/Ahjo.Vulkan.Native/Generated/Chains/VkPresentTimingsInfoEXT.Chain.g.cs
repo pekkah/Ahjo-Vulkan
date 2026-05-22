@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPresentTimingsInfoEXT : IChainable<VkPresentInfoKHR>
 {
+    public VkPresentTimingsInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PRESENT_TIMINGS_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PRESENT_TIMINGS_INFO_EXT;
 }

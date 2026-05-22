@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkMultiviewPerViewRenderAreasRenderPassBeginInfoQCOM : IChainable<VkRenderPassBeginInfo>, IChainable<VkRenderingInfo>
 {
+    public VkMultiviewPerViewRenderAreasRenderPassBeginInfoQCOM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_MULTIVIEW_PER_VIEW_RENDER_AREAS_RENDER_PASS_BEGIN_INFO_QCOM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_MULTIVIEW_PER_VIEW_RENDER_AREAS_RENDER_PASS_BEGIN_INFO_QCOM;
 }

@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkCuModuleTexturingModeCreateInfoNVX : IChainable<VkCuModuleCreateInfoNVX>
 {
+    public VkCuModuleTexturingModeCreateInfoNVX()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_CU_MODULE_TEXTURING_MODE_CREATE_INFO_NVX;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_CU_MODULE_TEXTURING_MODE_CREATE_INFO_NVX;
 }

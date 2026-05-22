@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkWriteDescriptorSetTensorARM : IChainable<VkWriteDescriptorSet>
 {
+    public VkWriteDescriptorSetTensorARM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_TENSOR_ARM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_TENSOR_ARM;
 }

@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSemaphoreTypeCreateInfo : IChainable<VkSemaphoreCreateInfo>, IChainable<VkPhysicalDeviceExternalSemaphoreInfo>
 {
+    public VkSemaphoreTypeCreateInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
 }

@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkQueryPoolPerformanceCreateInfoKHR : IChainable<VkQueryPoolCreateInfo>
 {
+    public VkQueryPoolPerformanceCreateInfoKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_QUERY_POOL_PERFORMANCE_CREATE_INFO_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_QUERY_POOL_PERFORMANCE_CREATE_INFO_KHR;
 }

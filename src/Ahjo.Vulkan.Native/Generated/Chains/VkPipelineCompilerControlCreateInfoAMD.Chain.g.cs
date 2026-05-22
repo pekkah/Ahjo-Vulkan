@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPipelineCompilerControlCreateInfoAMD : IChainable<VkGraphicsPipelineCreateInfo>, IChainable<VkComputePipelineCreateInfo>
 {
+    public VkPipelineCompilerControlCreateInfoAMD()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_COMPILER_CONTROL_CREATE_INFO_AMD;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_COMPILER_CONTROL_CREATE_INFO_AMD;
 }

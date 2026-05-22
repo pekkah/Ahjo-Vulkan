@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDeviceMemoryOverallocationCreateInfoAMD : IChainable<VkDeviceCreateInfo>
 {
+    public VkDeviceMemoryOverallocationCreateInfoAMD()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DEVICE_MEMORY_OVERALLOCATION_CREATE_INFO_AMD;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_DEVICE_MEMORY_OVERALLOCATION_CREATE_INFO_AMD;
 }

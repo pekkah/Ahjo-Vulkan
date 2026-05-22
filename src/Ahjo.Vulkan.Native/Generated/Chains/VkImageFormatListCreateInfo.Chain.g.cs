@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkImageFormatListCreateInfo : IChainable<VkImageCreateInfo>, IChainable<VkSwapchainCreateInfoKHR>, IChainable<VkPhysicalDeviceImageFormatInfo2>
 {
+    public VkImageFormatListCreateInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO;
 }

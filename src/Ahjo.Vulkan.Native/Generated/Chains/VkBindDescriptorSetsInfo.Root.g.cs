@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkBindDescriptorSetsInfo : IChainRoot
 {
+    public VkBindDescriptorSetsInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_SETS_INFO;
 }

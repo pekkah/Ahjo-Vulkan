@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPhysicalDeviceClusterCullingShaderVrsFeaturesHUAWEI : IChainable<VkPhysicalDeviceClusterCullingShaderFeaturesHUAWEI>
 {
+    public VkPhysicalDeviceClusterCullingShaderVrsFeaturesHUAWEI()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CLUSTER_CULLING_SHADER_VRS_FEATURES_HUAWEI;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CLUSTER_CULLING_SHADER_VRS_FEATURES_HUAWEI;
 }

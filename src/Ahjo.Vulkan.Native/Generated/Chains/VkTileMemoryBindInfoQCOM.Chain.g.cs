@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkTileMemoryBindInfoQCOM : IChainable<VkCommandBufferInheritanceInfo>
 {
+    public VkTileMemoryBindInfoQCOM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_TILE_MEMORY_BIND_INFO_QCOM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_TILE_MEMORY_BIND_INFO_QCOM;
 }

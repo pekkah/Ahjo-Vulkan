@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDescriptorGetTensorInfoARM : IChainable<VkDescriptorGetInfoEXT>
 {
+    public VkDescriptorGetTensorInfoARM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DESCRIPTOR_GET_TENSOR_INFO_ARM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_DESCRIPTOR_GET_TENSOR_INFO_ARM;
 }

@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkAttachmentFeedbackLoopInfoEXT : IChainable<VkRenderingAttachmentInfo>
 {
+    public VkAttachmentFeedbackLoopInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_ATTACHMENT_FEEDBACK_LOOP_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_ATTACHMENT_FEEDBACK_LOOP_INFO_EXT;
 }

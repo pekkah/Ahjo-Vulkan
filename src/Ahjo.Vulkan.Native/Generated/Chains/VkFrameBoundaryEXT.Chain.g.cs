@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkFrameBoundaryEXT : IChainable<VkSubmitInfo>, IChainable<VkSubmitInfo2>, IChainable<VkPresentInfoKHR>, IChainable<VkBindSparseInfo>
 {
+    public VkFrameBoundaryEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_FRAME_BOUNDARY_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_FRAME_BOUNDARY_EXT;
 }

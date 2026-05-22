@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkBufferImageCopy2 : IChainRoot
 {
+    public VkBufferImageCopy2()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2;
 }

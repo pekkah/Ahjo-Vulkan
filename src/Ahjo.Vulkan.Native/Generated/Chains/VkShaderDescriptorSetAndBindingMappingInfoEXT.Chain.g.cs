@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkShaderDescriptorSetAndBindingMappingInfoEXT : IChainable<VkPipelineShaderStageCreateInfo>, IChainable<VkShaderCreateInfoEXT>
 {
+    public VkShaderDescriptorSetAndBindingMappingInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT;
 }

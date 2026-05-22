@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkRenderPassCreationControlEXT : IChainable<VkRenderPassCreateInfo2>, IChainable<VkSubpassDescription2>
 {
+    public VkRenderPassCreationControlEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_CONTROL_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_CONTROL_EXT;
 }

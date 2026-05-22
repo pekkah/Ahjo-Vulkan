@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSubresourceLayout2 : IChainRoot
 {
+    public VkSubresourceLayout2()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SUBRESOURCE_LAYOUT_2;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_SUBRESOURCE_LAYOUT_2;
 }

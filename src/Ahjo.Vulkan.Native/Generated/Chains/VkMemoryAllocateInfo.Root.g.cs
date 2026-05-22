@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkMemoryAllocateInfo : IChainRoot
 {
+    public VkMemoryAllocateInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 }

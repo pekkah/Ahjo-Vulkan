@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkMultiviewPerViewAttributesInfoNVX : IChainable<VkCommandBufferInheritanceInfo>, IChainable<VkGraphicsPipelineCreateInfo>, IChainable<VkRenderingInfo>
 {
+    public VkMultiviewPerViewAttributesInfoNVX()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_MULTIVIEW_PER_VIEW_ATTRIBUTES_INFO_NVX;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_MULTIVIEW_PER_VIEW_ATTRIBUTES_INFO_NVX;
 }

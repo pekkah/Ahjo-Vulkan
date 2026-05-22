@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkResolveImageModeInfoKHR : IChainable<VkResolveImageInfo2>
 {
+    public VkResolveImageModeInfoKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_RESOLVE_IMAGE_MODE_INFO_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_RESOLVE_IMAGE_MODE_INFO_KHR;
 }

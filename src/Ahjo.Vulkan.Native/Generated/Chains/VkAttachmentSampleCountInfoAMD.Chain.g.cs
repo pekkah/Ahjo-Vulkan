@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkAttachmentSampleCountInfoAMD : IChainable<VkCommandBufferInheritanceInfo>, IChainable<VkGraphicsPipelineCreateInfo>
 {
+    public VkAttachmentSampleCountInfoAMD()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_ATTACHMENT_SAMPLE_COUNT_INFO_AMD;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_ATTACHMENT_SAMPLE_COUNT_INFO_AMD;
 }

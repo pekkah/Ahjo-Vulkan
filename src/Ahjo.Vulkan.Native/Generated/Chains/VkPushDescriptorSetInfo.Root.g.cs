@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPushDescriptorSetInfo : IChainRoot
 {
+    public VkPushDescriptorSetInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PUSH_DESCRIPTOR_SET_INFO;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_PUSH_DESCRIPTOR_SET_INFO;
 }

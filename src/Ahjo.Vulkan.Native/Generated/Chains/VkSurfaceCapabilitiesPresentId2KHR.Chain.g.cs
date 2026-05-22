@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSurfaceCapabilitiesPresentId2KHR : IChainable<VkSurfaceCapabilities2KHR>
 {
+    public VkSurfaceCapabilitiesPresentId2KHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_PRESENT_ID_2_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_PRESENT_ID_2_KHR;
 }

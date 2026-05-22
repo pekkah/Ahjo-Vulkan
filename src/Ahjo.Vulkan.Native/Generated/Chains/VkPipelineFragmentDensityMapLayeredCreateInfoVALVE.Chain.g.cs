@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPipelineFragmentDensityMapLayeredCreateInfoVALVE : IChainable<VkGraphicsPipelineCreateInfo>
 {
+    public VkPipelineFragmentDensityMapLayeredCreateInfoVALVE()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_DENSITY_MAP_LAYERED_CREATE_INFO_VALVE;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_DENSITY_MAP_LAYERED_CREATE_INFO_VALVE;
 }

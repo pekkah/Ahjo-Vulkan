@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkQueryPoolPerformanceQueryCreateInfoINTEL : IChainable<VkQueryPoolCreateInfo>
 {
+    public VkQueryPoolPerformanceQueryCreateInfoINTEL()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_QUERY_POOL_PERFORMANCE_QUERY_CREATE_INFO_INTEL;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_QUERY_POOL_PERFORMANCE_QUERY_CREATE_INFO_INTEL;
 }

@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPipelineRobustnessCreateInfo : IChainable<VkGraphicsPipelineCreateInfo>, IChainable<VkComputePipelineCreateInfo>, IChainable<VkPipelineShaderStageCreateInfo>, IChainable<VkRayTracingPipelineCreateInfoKHR>
 {
+    public VkPipelineRobustnessCreateInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO;
 }

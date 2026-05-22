@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkResolveImageInfo2 : IChainRoot
 {
+    public VkResolveImageInfo2()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_RESOLVE_IMAGE_INFO_2;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_RESOLVE_IMAGE_INFO_2;
 }

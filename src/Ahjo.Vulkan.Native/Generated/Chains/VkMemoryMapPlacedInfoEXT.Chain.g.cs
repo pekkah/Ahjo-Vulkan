@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkMemoryMapPlacedInfoEXT : IChainable<VkMemoryMapInfo>
 {
+    public VkMemoryMapPlacedInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_MEMORY_MAP_PLACED_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_MEMORY_MAP_PLACED_INFO_EXT;
 }

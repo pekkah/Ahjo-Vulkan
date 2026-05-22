@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkAttachmentDescriptionStencilLayout : IChainable<VkAttachmentDescription2>
 {
+    public VkAttachmentDescriptionStencilLayout()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_STENCIL_LAYOUT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_STENCIL_LAYOUT;
 }

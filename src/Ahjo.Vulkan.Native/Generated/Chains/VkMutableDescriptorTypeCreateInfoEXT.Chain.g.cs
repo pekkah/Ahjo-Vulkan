@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkMutableDescriptorTypeCreateInfoEXT : IChainable<VkDescriptorSetLayoutCreateInfo>, IChainable<VkDescriptorPoolCreateInfo>
 {
+    public VkMutableDescriptorTypeCreateInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT;
 }

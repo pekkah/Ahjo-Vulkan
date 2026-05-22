@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDisplaySurfaceStereoCreateInfoNV : IChainable<VkDisplaySurfaceCreateInfoKHR>
 {
+    public VkDisplaySurfaceStereoCreateInfoNV()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DISPLAY_SURFACE_STEREO_CREATE_INFO_NV;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_DISPLAY_SURFACE_STEREO_CREATE_INFO_NV;
 }

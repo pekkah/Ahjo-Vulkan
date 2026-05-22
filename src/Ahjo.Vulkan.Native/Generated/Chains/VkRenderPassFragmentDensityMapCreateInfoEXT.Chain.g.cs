@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkRenderPassFragmentDensityMapCreateInfoEXT : IChainable<VkRenderPassCreateInfo>, IChainable<VkRenderPassCreateInfo2>
 {
+    public VkRenderPassFragmentDensityMapCreateInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT;
 }

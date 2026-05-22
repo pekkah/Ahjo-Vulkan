@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkTimelineSemaphoreSubmitInfo : IChainable<VkSubmitInfo>, IChainable<VkBindSparseInfo>
 {
+    public VkTimelineSemaphoreSubmitInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
 }

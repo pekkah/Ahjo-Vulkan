@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPipelineLayoutCreateInfo : IChainable<VkBindDescriptorSetsInfo>, IChainable<VkPushConstantsInfo>, IChainable<VkPushDescriptorSetInfo>, IChainable<VkPushDescriptorSetWithTemplateInfo>, IChainable<VkSetDescriptorBufferOffsetsInfoEXT>, IChainable<VkBindDescriptorBufferEmbeddedSamplersInfoEXT>, IChainable<VkIndirectCommandsLayoutCreateInfoEXT>
 {
+    public VkPipelineLayoutCreateInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 }

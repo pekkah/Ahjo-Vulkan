@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDeviceAddressBindingCallbackDataEXT : IChainable<VkDebugUtilsMessengerCallbackDataEXT>
 {
+    public VkDeviceAddressBindingCallbackDataEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DEVICE_ADDRESS_BINDING_CALLBACK_DATA_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_DEVICE_ADDRESS_BINDING_CALLBACK_DATA_EXT;
 }

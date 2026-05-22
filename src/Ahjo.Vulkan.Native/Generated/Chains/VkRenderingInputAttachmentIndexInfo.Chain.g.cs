@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkRenderingInputAttachmentIndexInfo : IChainable<VkGraphicsPipelineCreateInfo>, IChainable<VkCommandBufferInheritanceInfo>
 {
+    public VkRenderingInputAttachmentIndexInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO;
 }

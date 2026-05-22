@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV : IChainable<VkRayTracingPipelineCreateInfoKHR>
 {
+    public VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CLUSTER_ACCELERATION_STRUCTURE_CREATE_INFO_NV;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CLUSTER_ACCELERATION_STRUCTURE_CREATE_INFO_NV;
 }

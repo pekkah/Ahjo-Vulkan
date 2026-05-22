@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkCommandPoolCreateInfo : IChainRoot
 {
+    public VkCommandPoolCreateInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
 }

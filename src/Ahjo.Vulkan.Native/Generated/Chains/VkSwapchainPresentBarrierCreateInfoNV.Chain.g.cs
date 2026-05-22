@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSwapchainPresentBarrierCreateInfoNV : IChainable<VkSwapchainCreateInfoKHR>
 {
+    public VkSwapchainPresentBarrierCreateInfoNV()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_BARRIER_CREATE_INFO_NV;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_BARRIER_CREATE_INFO_NV;
 }

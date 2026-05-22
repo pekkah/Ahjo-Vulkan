@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkCuModuleCreateInfoNVX : IChainRoot
 {
+    public VkCuModuleCreateInfoNVX()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_CU_MODULE_CREATE_INFO_NVX;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_CU_MODULE_CREATE_INFO_NVX;
 }

@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkQueueFamilyVideoPropertiesKHR : IChainable<VkQueueFamilyProperties2>
 {
+    public VkQueueFamilyVideoPropertiesKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_QUEUE_FAMILY_VIDEO_PROPERTIES_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_QUEUE_FAMILY_VIDEO_PROPERTIES_KHR;
 }

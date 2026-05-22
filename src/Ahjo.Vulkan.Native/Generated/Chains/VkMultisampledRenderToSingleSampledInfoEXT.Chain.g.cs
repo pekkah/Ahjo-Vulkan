@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkMultisampledRenderToSingleSampledInfoEXT : IChainable<VkSubpassDescription2>, IChainable<VkRenderingInfo>
 {
+    public VkMultisampledRenderToSingleSampledInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_INFO_EXT;
 }

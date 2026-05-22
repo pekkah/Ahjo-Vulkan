@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkRenderingAttachmentFlagsInfoKHR : IChainable<VkRenderingAttachmentInfo>
 {
+    public VkRenderingAttachmentFlagsInfoKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_FLAGS_INFO_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_FLAGS_INFO_KHR;
 }

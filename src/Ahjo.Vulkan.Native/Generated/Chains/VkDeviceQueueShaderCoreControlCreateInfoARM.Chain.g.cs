@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDeviceQueueShaderCoreControlCreateInfoARM : IChainable<VkDeviceQueueCreateInfo>, IChainable<VkDeviceCreateInfo>
 {
+    public VkDeviceQueueShaderCoreControlCreateInfoARM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DEVICE_QUEUE_SHADER_CORE_CONTROL_CREATE_INFO_ARM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_DEVICE_QUEUE_SHADER_CORE_CONTROL_CREATE_INFO_ARM;
 }

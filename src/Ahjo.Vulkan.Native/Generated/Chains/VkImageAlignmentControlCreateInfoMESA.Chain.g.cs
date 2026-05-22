@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkImageAlignmentControlCreateInfoMESA : IChainable<VkImageCreateInfo>
 {
+    public VkImageAlignmentControlCreateInfoMESA()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_IMAGE_ALIGNMENT_CONTROL_CREATE_INFO_MESA;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_IMAGE_ALIGNMENT_CONTROL_CREATE_INFO_MESA;
 }

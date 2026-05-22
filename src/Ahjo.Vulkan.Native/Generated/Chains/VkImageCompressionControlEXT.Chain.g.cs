@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkImageCompressionControlEXT : IChainable<VkImageCreateInfo>, IChainable<VkSwapchainCreateInfoKHR>, IChainable<VkPhysicalDeviceImageFormatInfo2>
 {
+    public VkImageCompressionControlEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_IMAGE_COMPRESSION_CONTROL_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_IMAGE_COMPRESSION_CONTROL_EXT;
 }

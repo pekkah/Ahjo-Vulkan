@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSurfacePresentModeKHR : IChainable<VkPhysicalDeviceSurfaceInfo2KHR>
 {
+    public VkSurfacePresentModeKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SURFACE_PRESENT_MODE_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_SURFACE_PRESENT_MODE_KHR;
 }

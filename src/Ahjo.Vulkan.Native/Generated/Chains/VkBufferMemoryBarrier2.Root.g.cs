@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkBufferMemoryBarrier2 : IChainRoot
 {
+    public VkBufferMemoryBarrier2()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
 }

@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSamplerCubicWeightsCreateInfoQCOM : IChainable<VkSamplerCreateInfo>
 {
+    public VkSamplerCubicWeightsCreateInfoQCOM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SAMPLER_CUBIC_WEIGHTS_CREATE_INFO_QCOM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_SAMPLER_CUBIC_WEIGHTS_CREATE_INFO_QCOM;
 }

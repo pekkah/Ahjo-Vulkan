@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkValidationFlagsEXT : IChainable<VkInstanceCreateInfo>
 {
+    public VkValidationFlagsEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_VALIDATION_FLAGS_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_VALIDATION_FLAGS_EXT;
 }

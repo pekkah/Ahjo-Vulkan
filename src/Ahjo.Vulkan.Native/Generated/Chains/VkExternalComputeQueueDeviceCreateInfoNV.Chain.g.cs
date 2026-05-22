@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkExternalComputeQueueDeviceCreateInfoNV : IChainable<VkDeviceCreateInfo>
 {
+    public VkExternalComputeQueueDeviceCreateInfoNV()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_EXTERNAL_COMPUTE_QUEUE_DEVICE_CREATE_INFO_NV;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_EXTERNAL_COMPUTE_QUEUE_DEVICE_CREATE_INFO_NV;
 }

@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkTensorDescriptionARM : IChainable<VkDataGraphPipelineResourceInfoARM>, IChainable<VkDataGraphPipelineConstantARM>
 {
+    public VkTensorDescriptionARM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_TENSOR_DESCRIPTION_ARM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_TENSOR_DESCRIPTION_ARM;
 }

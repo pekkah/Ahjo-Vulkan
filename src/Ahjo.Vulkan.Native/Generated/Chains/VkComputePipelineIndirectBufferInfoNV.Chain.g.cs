@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkComputePipelineIndirectBufferInfoNV : IChainable<VkComputePipelineCreateInfo>
 {
+    public VkComputePipelineIndirectBufferInfoNV()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_INDIRECT_BUFFER_INFO_NV;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_INDIRECT_BUFFER_INFO_NV;
 }

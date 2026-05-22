@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDescriptorSetVariableDescriptorCountLayoutSupport : IChainable<VkDescriptorSetLayoutSupport>
 {
+    public VkDescriptorSetVariableDescriptorCountLayoutSupport()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_LAYOUT_SUPPORT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_LAYOUT_SUPPORT;
 }

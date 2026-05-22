@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkTensorCreateInfoARM : IChainRoot
 {
+    public VkTensorCreateInfoARM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_TENSOR_CREATE_INFO_ARM;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_TENSOR_CREATE_INFO_ARM;
 }

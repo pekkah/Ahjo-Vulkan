@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPushDataInfoEXT : IChainRoot
 {
+    public VkPushDataInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PUSH_DATA_INFO_EXT;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_PUSH_DATA_INFO_EXT;
 }

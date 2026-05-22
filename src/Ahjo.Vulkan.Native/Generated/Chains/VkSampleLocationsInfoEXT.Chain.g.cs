@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSampleLocationsInfoEXT : IChainable<VkImageMemoryBarrier>, IChainable<VkImageMemoryBarrier2>
 {
+    public VkSampleLocationsInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT;
 }

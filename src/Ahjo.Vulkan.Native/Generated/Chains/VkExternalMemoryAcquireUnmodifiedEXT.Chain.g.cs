@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkExternalMemoryAcquireUnmodifiedEXT : IChainable<VkBufferMemoryBarrier>, IChainable<VkBufferMemoryBarrier2>, IChainable<VkImageMemoryBarrier>, IChainable<VkImageMemoryBarrier2>
 {
+    public VkExternalMemoryAcquireUnmodifiedEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_ACQUIRE_UNMODIFIED_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_ACQUIRE_UNMODIFIED_EXT;
 }

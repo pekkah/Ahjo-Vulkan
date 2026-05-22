@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPerformanceQuerySubmitInfoKHR : IChainable<VkSubmitInfo>, IChainable<VkSubmitInfo2>
 {
+    public VkPerformanceQuerySubmitInfoKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PERFORMANCE_QUERY_SUBMIT_INFO_KHR;
 }

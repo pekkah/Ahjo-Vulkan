@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkHdrVividDynamicMetadataHUAWEI : IChainable<VkHdrMetadataEXT>
 {
+    public VkHdrVividDynamicMetadataHUAWEI()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_HDR_VIVID_DYNAMIC_METADATA_HUAWEI;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_HDR_VIVID_DYNAMIC_METADATA_HUAWEI;
 }

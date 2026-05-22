@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSwapchainCalibratedTimestampInfoEXT : IChainable<VkCalibratedTimestampInfoKHR>
 {
+    public VkSwapchainCalibratedTimestampInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SWAPCHAIN_CALIBRATED_TIMESTAMP_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_SWAPCHAIN_CALIBRATED_TIMESTAMP_INFO_EXT;
 }

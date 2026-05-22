@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDebugUtilsObjectNameInfoEXT : IChainable<VkPipelineShaderStageCreateInfo>, IChainable<VkResourceDescriptorInfoEXT>, IChainable<VkSamplerCreateInfo>
 {
+    public VkDebugUtilsObjectNameInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
 }

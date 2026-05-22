@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkGeneratedCommandsShaderInfoEXT : IChainable<VkGeneratedCommandsInfoEXT>, IChainable<VkGeneratedCommandsMemoryRequirementsInfoEXT>
 {
+    public VkGeneratedCommandsShaderInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_GENERATED_COMMANDS_SHADER_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_GENERATED_COMMANDS_SHADER_INFO_EXT;
 }

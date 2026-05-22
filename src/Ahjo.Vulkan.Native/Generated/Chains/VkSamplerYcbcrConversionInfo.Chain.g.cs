@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSamplerYcbcrConversionInfo : IChainable<VkSamplerCreateInfo>, IChainable<VkImageViewCreateInfo>
 {
+    public VkSamplerYcbcrConversionInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
 }

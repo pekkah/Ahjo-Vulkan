@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkCustomResolveCreateInfoEXT : IChainable<VkGraphicsPipelineCreateInfo>, IChainable<VkCommandBufferInheritanceInfo>, IChainable<VkShaderCreateInfoEXT>
 {
+    public VkCustomResolveCreateInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_CUSTOM_RESOLVE_CREATE_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_CUSTOM_RESOLVE_CREATE_INFO_EXT;
 }

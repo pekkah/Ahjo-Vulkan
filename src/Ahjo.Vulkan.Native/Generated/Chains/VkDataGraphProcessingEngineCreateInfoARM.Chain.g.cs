@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDataGraphProcessingEngineCreateInfoARM : IChainable<VkDataGraphPipelineCreateInfoARM>, IChainable<VkDescriptorPoolCreateInfo>, IChainable<VkCommandPoolCreateInfo>
 {
+    public VkDataGraphProcessingEngineCreateInfoARM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DATA_GRAPH_PROCESSING_ENGINE_CREATE_INFO_ARM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_DATA_GRAPH_PROCESSING_ENGINE_CREATE_INFO_ARM;
 }

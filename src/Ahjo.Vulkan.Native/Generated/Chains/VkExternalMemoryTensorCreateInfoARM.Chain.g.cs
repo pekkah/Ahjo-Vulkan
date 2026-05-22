@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkExternalMemoryTensorCreateInfoARM : IChainable<VkTensorCreateInfoARM>
 {
+    public VkExternalMemoryTensorCreateInfoARM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_TENSOR_CREATE_INFO_ARM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_TENSOR_CREATE_INFO_ARM;
 }

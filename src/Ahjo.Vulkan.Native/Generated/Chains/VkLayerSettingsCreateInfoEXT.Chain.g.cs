@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkLayerSettingsCreateInfoEXT : IChainable<VkInstanceCreateInfo>
 {
+    public VkLayerSettingsCreateInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT;
 }

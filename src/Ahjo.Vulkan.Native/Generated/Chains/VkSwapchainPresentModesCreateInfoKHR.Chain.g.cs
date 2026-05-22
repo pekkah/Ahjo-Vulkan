@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSwapchainPresentModesCreateInfoKHR : IChainable<VkSwapchainCreateInfoKHR>
 {
+    public VkSwapchainPresentModesCreateInfoKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODES_CREATE_INFO_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODES_CREATE_INFO_KHR;
 }

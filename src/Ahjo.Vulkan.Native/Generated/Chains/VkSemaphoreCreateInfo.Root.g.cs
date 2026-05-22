@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSemaphoreCreateInfo : IChainRoot
 {
+    public VkSemaphoreCreateInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 }

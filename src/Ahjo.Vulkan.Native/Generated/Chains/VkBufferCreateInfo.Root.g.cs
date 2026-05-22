@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkBufferCreateInfo : IChainRoot
 {
+    public VkBufferCreateInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 }

@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDirectDriverLoadingListLUNARG : IChainable<VkInstanceCreateInfo>
 {
+    public VkDirectDriverLoadingListLUNARG()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DIRECT_DRIVER_LOADING_LIST_LUNARG;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_DIRECT_DRIVER_LOADING_LIST_LUNARG;
 }

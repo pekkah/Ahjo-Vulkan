@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSamplerCustomBorderColorIndexCreateInfoEXT : IChainable<VkSamplerCreateInfo>
 {
+    public VkSamplerCustomBorderColorIndexCreateInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_INDEX_CREATE_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_INDEX_CREATE_INFO_EXT;
 }

@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSamplerYcbcrConversionYcbcrDegammaCreateInfoQCOM : IChainable<VkSamplerYcbcrConversionCreateInfo>
 {
+    public VkSamplerYcbcrConversionYcbcrDegammaCreateInfoQCOM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_YCBCR_DEGAMMA_CREATE_INFO_QCOM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_YCBCR_DEGAMMA_CREATE_INFO_QCOM;
 }

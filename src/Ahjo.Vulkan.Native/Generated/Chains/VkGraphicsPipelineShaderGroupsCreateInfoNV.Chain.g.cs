@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkGraphicsPipelineShaderGroupsCreateInfoNV : IChainable<VkGraphicsPipelineCreateInfo>
 {
+    public VkGraphicsPipelineShaderGroupsCreateInfoNV()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_SHADER_GROUPS_CREATE_INFO_NV;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_SHADER_GROUPS_CREATE_INFO_NV;
 }

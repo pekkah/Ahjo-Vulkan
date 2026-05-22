@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkFrameBoundaryTensorsARM : IChainable<VkSubmitInfo>, IChainable<VkSubmitInfo2>, IChainable<VkPresentInfoKHR>, IChainable<VkBindSparseInfo>
 {
+    public VkFrameBoundaryTensorsARM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_FRAME_BOUNDARY_TENSORS_ARM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_FRAME_BOUNDARY_TENSORS_ARM;
 }

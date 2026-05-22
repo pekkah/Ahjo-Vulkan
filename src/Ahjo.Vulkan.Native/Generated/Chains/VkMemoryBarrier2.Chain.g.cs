@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkMemoryBarrier2 : IChainable<VkSubpassDependency2>
 {
+    public VkMemoryBarrier2()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
 }

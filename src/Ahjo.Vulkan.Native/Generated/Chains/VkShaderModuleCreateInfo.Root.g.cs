@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkShaderModuleCreateInfo : IChainRoot
 {
+    public VkShaderModuleCreateInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 }

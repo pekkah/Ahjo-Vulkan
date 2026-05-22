@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkHostImageCopyDevicePerformanceQuery : IChainable<VkImageFormatProperties2>
 {
+    public VkHostImageCopyDevicePerformanceQuery()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_HOST_IMAGE_COPY_DEVICE_PERFORMANCE_QUERY;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_HOST_IMAGE_COPY_DEVICE_PERFORMANCE_QUERY;
 }

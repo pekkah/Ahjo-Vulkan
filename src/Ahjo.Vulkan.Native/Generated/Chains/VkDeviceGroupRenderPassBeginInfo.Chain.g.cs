@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDeviceGroupRenderPassBeginInfo : IChainable<VkRenderPassBeginInfo>, IChainable<VkRenderingInfo>
 {
+    public VkDeviceGroupRenderPassBeginInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO;
 }

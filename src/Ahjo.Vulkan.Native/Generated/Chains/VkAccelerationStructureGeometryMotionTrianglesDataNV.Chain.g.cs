@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkAccelerationStructureGeometryMotionTrianglesDataNV : IChainable<VkAccelerationStructureGeometryTrianglesDataKHR>
 {
+    public VkAccelerationStructureGeometryMotionTrianglesDataNV()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_MOTION_TRIANGLES_DATA_NV;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_MOTION_TRIANGLES_DATA_NV;
 }

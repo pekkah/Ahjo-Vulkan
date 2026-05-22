@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSubresourceHostMemcpySize : IChainable<VkSubresourceLayout2>
 {
+    public VkSubresourceHostMemcpySize()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SUBRESOURCE_HOST_MEMCPY_SIZE;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_SUBRESOURCE_HOST_MEMCPY_SIZE;
 }

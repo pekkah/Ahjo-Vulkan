@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkRenderPassPerformanceCountersByRegionBeginInfoARM : IChainable<VkRenderPassBeginInfo>, IChainable<VkRenderingInfo>
 {
+    public VkRenderPassPerformanceCountersByRegionBeginInfoARM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_RENDER_PASS_PERFORMANCE_COUNTERS_BY_REGION_BEGIN_INFO_ARM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_RENDER_PASS_PERFORMANCE_COUNTERS_BY_REGION_BEGIN_INFO_ARM;
 }

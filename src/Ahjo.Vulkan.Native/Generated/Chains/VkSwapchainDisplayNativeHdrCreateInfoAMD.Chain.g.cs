@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSwapchainDisplayNativeHdrCreateInfoAMD : IChainable<VkSwapchainCreateInfoKHR>
 {
+    public VkSwapchainDisplayNativeHdrCreateInfoAMD()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SWAPCHAIN_DISPLAY_NATIVE_HDR_CREATE_INFO_AMD;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_SWAPCHAIN_DISPLAY_NATIVE_HDR_CREATE_INFO_AMD;
 }

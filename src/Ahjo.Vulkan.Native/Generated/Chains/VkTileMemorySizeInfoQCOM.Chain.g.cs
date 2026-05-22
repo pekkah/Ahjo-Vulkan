@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkTileMemorySizeInfoQCOM : IChainable<VkRenderPassCreateInfo>, IChainable<VkRenderPassCreateInfo2>, IChainable<VkRenderingInfo>
 {
+    public VkTileMemorySizeInfoQCOM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_TILE_MEMORY_SIZE_INFO_QCOM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_TILE_MEMORY_SIZE_INFO_QCOM;
 }

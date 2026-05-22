@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPushConstantBankInfoNV : IChainable<VkDescriptorSetAndBindingMappingEXT>, IChainable<VkPushDataInfoEXT>, IChainable<VkPushConstantsInfo>, IChainable<VkIndirectCommandsLayoutTokenEXT>
 {
+    public VkPushConstantBankInfoNV()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PUSH_CONSTANT_BANK_INFO_NV;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PUSH_CONSTANT_BANK_INFO_NV;
 }

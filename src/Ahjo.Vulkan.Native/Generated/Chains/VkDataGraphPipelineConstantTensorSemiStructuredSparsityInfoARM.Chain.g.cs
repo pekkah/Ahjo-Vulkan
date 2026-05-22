@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDataGraphPipelineConstantTensorSemiStructuredSparsityInfoARM : IChainable<VkDataGraphPipelineConstantARM>
 {
+    public VkDataGraphPipelineConstantTensorSemiStructuredSparsityInfoARM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DATA_GRAPH_PIPELINE_CONSTANT_TENSOR_SEMI_STRUCTURED_SPARSITY_INFO_ARM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_DATA_GRAPH_PIPELINE_CONSTANT_TENSOR_SEMI_STRUCTURED_SPARSITY_INFO_ARM;
 }

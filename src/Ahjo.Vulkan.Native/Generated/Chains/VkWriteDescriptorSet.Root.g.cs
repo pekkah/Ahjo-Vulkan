@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkWriteDescriptorSet : IChainRoot
 {
+    public VkWriteDescriptorSet()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 }

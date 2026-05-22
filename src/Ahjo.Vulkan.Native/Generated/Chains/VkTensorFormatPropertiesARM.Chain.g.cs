@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkTensorFormatPropertiesARM : IChainable<VkFormatProperties2>
 {
+    public VkTensorFormatPropertiesARM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_TENSOR_FORMAT_PROPERTIES_ARM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_TENSOR_FORMAT_PROPERTIES_ARM;
 }

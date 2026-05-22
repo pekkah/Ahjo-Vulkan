@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkIndirectCommandsLayoutPushDataTokenNV : IChainable<VkIndirectCommandsLayoutTokenNV>
 {
+    public VkIndirectCommandsLayoutPushDataTokenNV()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_PUSH_DATA_TOKEN_NV;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_INDIRECT_COMMANDS_LAYOUT_PUSH_DATA_TOKEN_NV;
 }

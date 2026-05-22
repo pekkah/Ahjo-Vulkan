@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkTensorMemoryBarrierARM : IChainable<VkDependencyInfo>
 {
+    public VkTensorMemoryBarrierARM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_TENSOR_MEMORY_BARRIER_ARM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_TENSOR_MEMORY_BARRIER_ARM;
 }

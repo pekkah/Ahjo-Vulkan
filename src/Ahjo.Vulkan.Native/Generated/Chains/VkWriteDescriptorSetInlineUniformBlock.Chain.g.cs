@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkWriteDescriptorSetInlineUniformBlock : IChainable<VkWriteDescriptorSet>
 {
+    public VkWriteDescriptorSetInlineUniformBlock()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_INLINE_UNIFORM_BLOCK;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_INLINE_UNIFORM_BLOCK;
 }

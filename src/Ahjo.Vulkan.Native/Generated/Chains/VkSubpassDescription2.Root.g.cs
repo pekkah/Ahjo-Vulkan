@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSubpassDescription2 : IChainRoot
 {
+    public VkSubpassDescription2()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2;
 }

@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkImageViewCreateInfo : IChainRoot
 {
+    public VkImageViewCreateInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 }

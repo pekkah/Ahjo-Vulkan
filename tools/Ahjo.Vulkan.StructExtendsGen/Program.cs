@@ -10,15 +10,34 @@ namespace Ahjo.Vulkan.StructExtendsGen;
 // Output:
 //   - For each chainable struct X with structextends = [A, B, C]:
 //       partial struct X : IChainable<A>, IChainable<B>, IChainable<C>
-//       { public static VkStructureType SType => VK_STRUCTURE_TYPE_X; }
+//       {
+//           public X() { sType = VK_STRUCTURE_TYPE_X; }  // only when X isn't also a root
+//           public static VkStructureType SType => VK_STRUCTURE_TYPE_X;
+//       }
 //   - For each unique target T appearing in any structextends:
 //       partial struct T : IChainRoot
-//       { public static VkStructureType RootSType => VK_STRUCTURE_TYPE_T; }
+//       {
+//           public T() { sType = VK_STRUCTURE_TYPE_T; }
+//           public static VkStructureType RootSType => VK_STRUCTURE_TYPE_T;
+//       }
+//
+// The parameterless ctor makes `new VkX { ... }` object-initializer syntax
+// write a valid sType (issue #94). Four structs are both roots and
+// chainables; the ctor lives in their Root.g.cs partial only, so the two
+// partial declarations don't both declare a parameterless ctor (CS0111).
+//
+// `default(T)`, `stackalloc`, and array-element initialization still
+// produce sType=0 — they don't run user-defined struct ctors. Caller
+// responsibility there; out of scope for this fix.
 //
 // Skipped:
 //   - Aliases (alias attribute set).
 //   - Structs whose sType identifier is not present in VkStructureType.cs
 //     (i.e. gated behind a platform we don't ship — VK_USE_PLATFORM_*).
+//   - Structs whose ClangSharp emit is absent — these are platform-gated
+//     types (Android/Win32/Metal/FUCHSIA/QNX/OHOS/GGP) whose sType enum
+//     value is unconditional but whose struct body is not. Writing a
+//     parameterless ctor that touches `sType` would fail to compile.
 //   - structextends targets whose sType is similarly missing.
 internal static class Program
 {
@@ -37,6 +56,11 @@ internal static class Program
         var availableSTypes = ReadAvailableSTypes(structureTypePath);
         Console.WriteLine($"VkStructureType.cs declares {availableSTypes.Count} sType values.");
 
+        var clangSharpOutputDir = Path.GetDirectoryName(structureTypePath)
+            ?? throw new InvalidOperationException("structureTypePath has no directory.");
+        var availableStructs = ReadAvailableStructs(clangSharpOutputDir);
+        Console.WriteLine($"ClangSharp emit declares {availableStructs.Count} structs in {clangSharpOutputDir}.");
+
         var (chainables, structToSType) = ReadChainables(vkXmlPath);
         Console.WriteLine($"vk.xml lists {chainables.Count} structs with non-empty structextends.");
 
@@ -49,16 +73,25 @@ internal static class Program
             File.Delete(stale);
         }
 
-        var emittedExtenders = 0;
         var emittedRoots = new HashSet<string>(StringComparer.Ordinal);
         var skippedForMissingSType = 0;
+        var skippedForMissingStruct = 0;
         var skippedForMissingTargetSType = 0;
+        var skippedForMissingTargetStruct = 0;
 
+        // Pre-compute the root set so EmitExtender knows whether to skip the
+        // parameterless ctor (it lives in Root.g.cs for dual-membership structs).
+        var includedEntries = new List<(ChainEntry entry, List<string> targets)>();
         foreach (var entry in chainables.OrderBy(e => e.StructName, StringComparer.Ordinal))
         {
             if (!availableSTypes.Contains(entry.STypeIdentifier))
             {
                 skippedForMissingSType++;
+                continue;
+            }
+            if (!availableStructs.Contains(entry.StructName))
+            {
+                skippedForMissingStruct++;
                 continue;
             }
 
@@ -71,6 +104,11 @@ internal static class Program
                     skippedForMissingTargetSType++;
                     continue;
                 }
+                if (!availableStructs.Contains(target))
+                {
+                    skippedForMissingTargetStruct++;
+                    continue;
+                }
                 includedTargets.Add(target);
             }
 
@@ -79,13 +117,19 @@ internal static class Program
                 continue;
             }
 
-            EmitExtender(outputDir, entry.StructName, entry.STypeIdentifier, includedTargets);
-            emittedExtenders++;
-
+            includedEntries.Add((entry, includedTargets));
             foreach (var target in includedTargets)
             {
                 emittedRoots.Add(target);
             }
+        }
+
+        var emittedExtenders = 0;
+        foreach (var (entry, includedTargets) in includedEntries)
+        {
+            var alsoRoot = emittedRoots.Contains(entry.StructName);
+            EmitExtender(outputDir, entry.StructName, entry.STypeIdentifier, includedTargets, alsoRoot);
+            emittedExtenders++;
         }
 
         foreach (var rootName in emittedRoots.OrderBy(s => s, StringComparer.Ordinal))
@@ -94,8 +138,22 @@ internal static class Program
         }
 
         Console.WriteLine($"Emitted {emittedExtenders} IChainable partials and {emittedRoots.Count} IChainRoot partials.");
-        Console.WriteLine($"Skipped: {skippedForMissingSType} structs (sType absent from VkStructureType.cs), {skippedForMissingTargetSType} target slots (target sType absent).");
+        Console.WriteLine($"Skipped: {skippedForMissingSType} structs (sType absent from VkStructureType.cs), {skippedForMissingStruct} structs (struct body absent from ClangSharp emit), {skippedForMissingTargetSType} target slots (target sType absent), {skippedForMissingTargetStruct} target slots (target struct body absent).");
         return 0;
+    }
+
+    private static HashSet<string> ReadAvailableStructs(string clangSharpOutputDir)
+    {
+        // ClangSharp emits one file per struct, named "<StructName>.cs". The
+        // filename is a reliable proxy for the struct's emitted body — much
+        // cheaper than parsing every file. We restrict to top-level entries
+        // (not the Chains/ subdirectory we own).
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var path in Directory.EnumerateFiles(clangSharpOutputDir, "Vk*.cs", SearchOption.TopDirectoryOnly))
+        {
+            set.Add(Path.GetFileNameWithoutExtension(path));
+        }
+        return set;
     }
 
     private static HashSet<string> ReadAvailableSTypes(string path)
@@ -158,7 +216,7 @@ internal static class Program
         return (entries, structToSType);
     }
 
-    private static void EmitExtender(string outputDir, string structName, string sType, List<string> targets)
+    private static void EmitExtender(string outputDir, string structName, string sType, List<string> targets, bool alsoRoot)
     {
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated />");
@@ -175,6 +233,10 @@ internal static class Program
         }
         sb.AppendLine();
         sb.AppendLine("{");
+        if (!alsoRoot)
+        {
+            EmitParameterlessCtor(sb, structName, sType);
+        }
         sb.Append("    public static VkStructureType SType => VkStructureType.").Append(sType).AppendLine(";");
         sb.AppendLine("}");
 
@@ -191,9 +253,19 @@ internal static class Program
         sb.AppendLine();
         sb.Append("public unsafe partial struct ").Append(structName).AppendLine(" : IChainRoot");
         sb.AppendLine("{");
+        EmitParameterlessCtor(sb, structName, sType);
         sb.Append("    public static VkStructureType RootSType => VkStructureType.").Append(sType).AppendLine(";");
         sb.AppendLine("}");
 
         File.WriteAllText(Path.Combine(outputDir, structName + ".Root.g.cs"), sb.ToString());
+    }
+
+    private static void EmitParameterlessCtor(StringBuilder sb, string structName, string sType)
+    {
+        sb.Append("    public ").Append(structName).AppendLine("()");
+        sb.AppendLine("    {");
+        sb.Append("        sType = VkStructureType.").Append(sType).AppendLine(";");
+        sb.AppendLine("    }");
+        sb.AppendLine();
     }
 }

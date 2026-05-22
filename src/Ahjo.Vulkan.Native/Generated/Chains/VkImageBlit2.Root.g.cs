@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkImageBlit2 : IChainRoot
 {
+    public VkImageBlit2()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_IMAGE_BLIT_2;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_IMAGE_BLIT_2;
 }

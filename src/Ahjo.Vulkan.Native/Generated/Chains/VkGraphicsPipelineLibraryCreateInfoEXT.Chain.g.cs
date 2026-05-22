@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkGraphicsPipelineLibraryCreateInfoEXT : IChainable<VkGraphicsPipelineCreateInfo>
 {
+    public VkGraphicsPipelineLibraryCreateInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT;
 }

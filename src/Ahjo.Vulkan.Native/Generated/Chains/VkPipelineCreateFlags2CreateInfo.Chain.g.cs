@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPipelineCreateFlags2CreateInfo : IChainable<VkComputePipelineCreateInfo>, IChainable<VkGraphicsPipelineCreateInfo>, IChainable<VkRayTracingPipelineCreateInfoNV>, IChainable<VkRayTracingPipelineCreateInfoKHR>
 {
+    public VkPipelineCreateFlags2CreateInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO;
 }

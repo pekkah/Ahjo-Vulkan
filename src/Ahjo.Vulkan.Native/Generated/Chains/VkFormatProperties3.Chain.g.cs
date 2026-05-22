@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkFormatProperties3 : IChainable<VkFormatProperties2>
 {
+    public VkFormatProperties3()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3;
 }

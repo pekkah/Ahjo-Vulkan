@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDisplayNativeHdrSurfaceCapabilitiesAMD : IChainable<VkSurfaceCapabilities2KHR>
 {
+    public VkDisplayNativeHdrSurfaceCapabilitiesAMD()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DISPLAY_NATIVE_HDR_SURFACE_CAPABILITIES_AMD;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_DISPLAY_NATIVE_HDR_SURFACE_CAPABILITIES_AMD;
 }

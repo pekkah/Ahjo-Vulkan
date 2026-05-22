@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkOpticalFlowSessionCreatePrivateDataInfoNV : IChainable<VkOpticalFlowSessionCreateInfoNV>
 {
+    public VkOpticalFlowSessionCreatePrivateDataInfoNV()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_OPTICAL_FLOW_SESSION_CREATE_PRIVATE_DATA_INFO_NV;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_OPTICAL_FLOW_SESSION_CREATE_PRIVATE_DATA_INFO_NV;
 }

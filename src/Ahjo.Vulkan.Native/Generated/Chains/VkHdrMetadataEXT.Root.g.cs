@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkHdrMetadataEXT : IChainRoot
 {
+    public VkHdrMetadataEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_HDR_METADATA_EXT;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_HDR_METADATA_EXT;
 }

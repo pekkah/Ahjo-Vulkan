@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPresentIdKHR : IChainable<VkPresentInfoKHR>
 {
+    public VkPresentIdKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PRESENT_ID_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PRESENT_ID_KHR;
 }

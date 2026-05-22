@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDepthBiasRepresentationInfoEXT : IChainable<VkDepthBiasInfoEXT>, IChainable<VkPipelineRasterizationStateCreateInfo>
 {
+    public VkDepthBiasRepresentationInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DEPTH_BIAS_REPRESENTATION_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_DEPTH_BIAS_REPRESENTATION_INFO_EXT;
 }

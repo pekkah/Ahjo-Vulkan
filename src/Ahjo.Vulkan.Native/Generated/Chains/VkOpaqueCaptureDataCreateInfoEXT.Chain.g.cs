@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkOpaqueCaptureDataCreateInfoEXT : IChainable<VkImageCreateInfo>, IChainable<VkTensorCreateInfoARM>
 {
+    public VkOpaqueCaptureDataCreateInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_OPAQUE_CAPTURE_DATA_CREATE_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_OPAQUE_CAPTURE_DATA_CREATE_INFO_EXT;
 }

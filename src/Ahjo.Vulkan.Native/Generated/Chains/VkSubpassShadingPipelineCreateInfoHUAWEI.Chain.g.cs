@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSubpassShadingPipelineCreateInfoHUAWEI : IChainable<VkComputePipelineCreateInfo>
 {
+    public VkSubpassShadingPipelineCreateInfoHUAWEI()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SUBPASS_SHADING_PIPELINE_CREATE_INFO_HUAWEI;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_SUBPASS_SHADING_PIPELINE_CREATE_INFO_HUAWEI;
 }

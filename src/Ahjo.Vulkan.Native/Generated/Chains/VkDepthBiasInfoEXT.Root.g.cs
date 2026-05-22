@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDepthBiasInfoEXT : IChainRoot
 {
+    public VkDepthBiasInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DEPTH_BIAS_INFO_EXT;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_DEPTH_BIAS_INFO_EXT;
 }

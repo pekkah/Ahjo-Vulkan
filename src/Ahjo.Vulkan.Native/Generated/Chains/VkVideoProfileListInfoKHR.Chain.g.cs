@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkVideoProfileListInfoKHR : IChainable<VkPhysicalDeviceImageFormatInfo2>, IChainable<VkPhysicalDeviceVideoFormatInfoKHR>, IChainable<VkImageCreateInfo>, IChainable<VkBufferCreateInfo>
 {
+    public VkVideoProfileListInfoKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_VIDEO_PROFILE_LIST_INFO_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_VIDEO_PROFILE_LIST_INFO_KHR;
 }

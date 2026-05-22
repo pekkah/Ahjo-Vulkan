@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDeviceCreateInfo : IChainRoot
 {
+    public VkDeviceCreateInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 }

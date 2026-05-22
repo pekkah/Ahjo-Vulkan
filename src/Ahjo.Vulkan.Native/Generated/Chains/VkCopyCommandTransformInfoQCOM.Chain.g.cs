@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkCopyCommandTransformInfoQCOM : IChainable<VkBufferImageCopy2>, IChainable<VkImageBlit2>
 {
+    public VkCopyCommandTransformInfoQCOM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_COPY_COMMAND_TRANSFORM_INFO_QCOM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_COPY_COMMAND_TRANSFORM_INFO_QCOM;
 }

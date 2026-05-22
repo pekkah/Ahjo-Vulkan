@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkQueryPoolVideoEncodeFeedbackCreateInfoKHR : IChainable<VkQueryPoolCreateInfo>
 {
+    public VkQueryPoolVideoEncodeFeedbackCreateInfoKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_QUERY_POOL_VIDEO_ENCODE_FEEDBACK_CREATE_INFO_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_QUERY_POOL_VIDEO_ENCODE_FEEDBACK_CREATE_INFO_KHR;
 }

@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSurfaceFormat2KHR : IChainRoot
 {
+    public VkSurfaceFormat2KHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR;
 }

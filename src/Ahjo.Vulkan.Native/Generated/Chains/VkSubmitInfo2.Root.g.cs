@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkSubmitInfo2 : IChainRoot
 {
+    public VkSubmitInfo2()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
 }

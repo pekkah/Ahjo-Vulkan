@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkBindImageMemoryInfo : IChainRoot
 {
+    public VkBindImageMemoryInfo()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_INFO;
+    }
+
     public static VkStructureType RootSType => VkStructureType.VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_INFO;
 }

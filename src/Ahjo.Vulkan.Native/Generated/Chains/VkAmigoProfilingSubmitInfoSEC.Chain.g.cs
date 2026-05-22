@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkAmigoProfilingSubmitInfoSEC : IChainable<VkSubmitInfo>
 {
+    public VkAmigoProfilingSubmitInfoSEC()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_AMIGO_PROFILING_SUBMIT_INFO_SEC;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_AMIGO_PROFILING_SUBMIT_INFO_SEC;
 }

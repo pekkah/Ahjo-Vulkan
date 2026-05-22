@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkPipelineBinaryInfoKHR : IChainable<VkGraphicsPipelineCreateInfo>, IChainable<VkComputePipelineCreateInfo>, IChainable<VkRayTracingPipelineCreateInfoKHR>
 {
+    public VkPipelineBinaryInfoKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_BINARY_INFO_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_BINARY_INFO_KHR;
 }

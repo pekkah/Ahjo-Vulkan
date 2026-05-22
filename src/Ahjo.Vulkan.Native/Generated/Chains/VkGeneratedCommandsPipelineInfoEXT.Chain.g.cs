@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkGeneratedCommandsPipelineInfoEXT : IChainable<VkGeneratedCommandsInfoEXT>, IChainable<VkGeneratedCommandsMemoryRequirementsInfoEXT>
 {
+    public VkGeneratedCommandsPipelineInfoEXT()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_GENERATED_COMMANDS_PIPELINE_INFO_EXT;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_GENERATED_COMMANDS_PIPELINE_INFO_EXT;
 }

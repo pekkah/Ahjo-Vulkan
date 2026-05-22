@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkDevicePipelineBinaryInternalCacheControlKHR : IChainable<VkDeviceCreateInfo>
 {
+    public VkDevicePipelineBinaryInternalCacheControlKHR()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_DEVICE_PIPELINE_BINARY_INTERNAL_CACHE_CONTROL_KHR;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_DEVICE_PIPELINE_BINARY_INTERNAL_CACHE_CONTROL_KHR;
 }

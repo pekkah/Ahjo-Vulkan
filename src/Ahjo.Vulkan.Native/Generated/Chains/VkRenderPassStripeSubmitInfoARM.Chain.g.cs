@@ -5,5 +5,10 @@ namespace Ahjo.Vulkan.Native;
 
 public unsafe partial struct VkRenderPassStripeSubmitInfoARM : IChainable<VkCommandBufferSubmitInfo>
 {
+    public VkRenderPassStripeSubmitInfoARM()
+    {
+        sType = VkStructureType.VK_STRUCTURE_TYPE_RENDER_PASS_STRIPE_SUBMIT_INFO_ARM;
+    }
+
     public static VkStructureType SType => VkStructureType.VK_STRUCTURE_TYPE_RENDER_PASS_STRIPE_SUBMIT_INFO_ARM;
 }
