@@ -63,6 +63,42 @@ public class ChainStructDefaultSTypeTests
     }
 
     [Fact]
+    public void ObjectInitializer_LeafStruct_SetsSType()
+    {
+        // The exact repro from #95 / pekkah/logos-engine#376: VkCommandBufferAllocateInfo
+        // has an sType field but doesn't participate in any pNext chain, so the
+        // #94 codegen skipped it. Issue #95 closes that gap.
+        var info = new VkCommandBufferAllocateInfo
+        {
+            level = VkCommandBufferLevel.VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            commandBufferCount = 1,
+        };
+
+        Assert.Equal(VkStructureType.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, info.sType);
+        Assert.Equal(VkCommandBufferLevel.VK_COMMAND_BUFFER_LEVEL_PRIMARY, info.level);
+        Assert.Equal(1u, info.commandBufferCount);
+    }
+
+    [Fact]
+    public void NewExpression_ApplicationInfo_ResolvesToCorrectEnum()
+    {
+        // VkApplicationInfo deserves a dedicated test because its sType value
+        // is exactly the zero literal the bug originally aliased to — a
+        // regression here would silently look identical to the pre-fix state.
+        var info = new VkApplicationInfo();
+
+        Assert.Equal(VkStructureType.VK_STRUCTURE_TYPE_APPLICATION_INFO, info.sType);
+    }
+
+    [Fact]
+    public void NewExpression_LeafMemoryBarrier_SetsSType()
+    {
+        var barrier = new VkMemoryBarrier();
+
+        Assert.Equal(VkStructureType.VK_STRUCTURE_TYPE_MEMORY_BARRIER, barrier.sType);
+    }
+
+    [Fact]
     public void Default_StillZeroInits_NotCovered()
     {
         // default(T) doesn't run user-defined struct ctors; documents the
