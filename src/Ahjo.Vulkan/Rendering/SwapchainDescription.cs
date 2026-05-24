@@ -21,12 +21,18 @@ public ref struct SwapchainDescription
     public uint PreferredImageCount;
 
     /// <summary>
-    /// Preferred surface format. Default
-    /// (<c>VK_FORMAT_UNDEFINED</c>) means "first format from
+    /// Preferred surface formats in priority order. The constructor walks
+    /// this list and picks the first one the surface reports as supported.
+    /// Default (empty span) means "first format from
     /// <c>vkGetPhysicalDeviceSurfaceFormatsKHR</c>" — drivers list their
     /// preferred format first.
+    ///
+    /// Pass multiple sRGB variants to stay portable across drivers /
+    /// platforms — e.g. <c>[B8G8R8A8_SRGB, R8G8B8A8_SRGB]</c> covers
+    /// desktop NVIDIA / AMD / Intel and the BGRA-light mobile / tile-
+    /// based GPUs.
     /// </summary>
-    public VkSurfaceFormatKHR PreferredFormat;
+    public ReadOnlySpan<VkSurfaceFormatKHR> PreferredFormats;
 
     /// <summary>
     /// Preferred present mode. Default

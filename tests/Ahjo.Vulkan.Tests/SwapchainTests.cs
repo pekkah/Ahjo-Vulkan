@@ -157,6 +157,95 @@ public sealed unsafe class SwapchainTests
     }
 
     /// <summary>
+    /// Covers <see cref="SwapchainDescription.PreferredFormats"/>: the
+    /// negotiator walks the list in priority order and returns the first
+    /// surface-supported entry. An unsupported synthetic format at the
+    /// head is skipped; an unrelated supported format that follows wins
+    /// over <c>formats[0]</c>. Backs the engine's
+    /// <c>[BGRA8_SRGB, RGBA8_SRGB]</c> cross-platform sRGB recipe.
+    /// </summary>
+    [Fact]
+    public void NegotiateFormat_Walks_PreferredFormats_In_Priority_Order()
+    {
+        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out _);
+
+        // Query surface formats so the test stays driver-agnostic.
+        uint count = 0;
+        Vk.vkGetPhysicalDeviceSurfaceFormatsKHR(device.PhysicalDevice.Handle, surface.Handle, &count, null).ThrowIfFailed();
+        Assert.True(count >= 1, "Surface reports zero formats.");
+        var supported = new VkSurfaceFormatKHR[count];
+        fixed (VkSurfaceFormatKHR* p = supported)
+            Vk.vkGetPhysicalDeviceSurfaceFormatsKHR(device.PhysicalDevice.Handle, surface.Handle, &count, p).ThrowIfFailed();
+
+        // Pick a non-first supported format to prove the negotiator
+        // actually prefers the caller's list over `formats[0]`. If the
+        // surface only exposes one, the priority-order claim is
+        // vacuously true and we fall through to the no-op assertion.
+        VkSurfaceFormatKHR? secondary = null;
+        for (int i = 1; i < supported.Length; i++)
+        {
+            if (supported[i].format != supported[0].format ||
+                supported[i].colorSpace != supported[0].colorSpace)
+            {
+                secondary = supported[i];
+                break;
+            }
+        }
+
+        // Synthetic format that no surface implements as a swapchain
+        // colour attachment — drives the "skip unsupported, take next"
+        // path.
+        var synthetic = new VkSurfaceFormatKHR
+        {
+            format     = VkFormat.VK_FORMAT_R8_USCALED,
+            colorSpace = VkColorSpaceKHR.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+        };
+
+        // (a) Empty list → driver's formats[0].
+        TryCreate(device, in surface, window, ReadOnlySpan<VkSurfaceFormatKHR>.Empty, supported[0]);
+
+        // (b) Single supported preference → exactly that format.
+        if (secondary is { } s)
+        {
+            VkSurfaceFormatKHR[] one = [s];
+            TryCreate(device, in surface, window, one, s);
+
+            // (c) Unsupported synthetic at head, supported at tail → tail wins.
+            VkSurfaceFormatKHR[] two = [synthetic, s];
+            TryCreate(device, in surface, window, two, s);
+        }
+        else
+        {
+            // (b') Single supported preference matching formats[0] still
+            // returns formats[0] — sanity check.
+            VkSurfaceFormatKHR[] only = [supported[0]];
+            TryCreate(device, in surface, window, only, supported[0]);
+        }
+
+        static void TryCreate(Device device, in Surface surface, Win32Window window,
+            ReadOnlySpan<VkSurfaceFormatKHR> preferred, VkSurfaceFormatKHR expected)
+        {
+            var desc = new SwapchainDescription
+            {
+                Surface           = surface,
+                Width             = window.Width,
+                Height            = window.Height,
+                PreferredFormats  = preferred,
+            };
+            using var swap = new Swapchain(device, in desc);
+            Assert.Equal(expected.format,     swap.Format);
+            Assert.Equal(expected.colorSpace, swap.ColorSpace);
+        }
+    }
+
+    /// <summary>
     /// Picks the first physical device whose graphics queue family also
     /// supports presenting to <paramref name="surface"/>, then creates a
     /// device with VK_KHR_swapchain enabled.
