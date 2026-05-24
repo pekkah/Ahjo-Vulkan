@@ -513,12 +513,18 @@ public sealed unsafe class Swapchain : IDisposable
         fixed (VkSurfaceFormatKHR* p = formats)
             Vk.vkGetPhysicalDeviceSurfaceFormatsKHR(gpu, _surface.Handle, &count, p).ThrowIfFailed();
 
-        if (desc.PreferredFormat.format != VkFormat.VK_FORMAT_UNDEFINED)
+        // Walk the caller's priority list once; first match wins. Spec
+        // doesn't guarantee any specific format/colorSpace pair other
+        // than (count > 0), so callers that care about a specific
+        // encoding (e.g. sRGB) should pass several variants.
+        for (int p = 0; p < desc.PreferredFormats.Length; p++)
         {
+            var want = desc.PreferredFormats[p];
+            if (want.format == VkFormat.VK_FORMAT_UNDEFINED) continue;
             for (int i = 0; i < formats.Length; i++)
             {
-                if (formats[i].format     == desc.PreferredFormat.format &&
-                    formats[i].colorSpace == desc.PreferredFormat.colorSpace)
+                if (formats[i].format     == want.format &&
+                    formats[i].colorSpace == want.colorSpace)
                     return formats[i];
             }
         }
