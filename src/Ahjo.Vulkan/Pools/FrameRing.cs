@@ -383,8 +383,21 @@ public sealed unsafe class FrameRing : IDisposable
                 WaitState state = InFlightHandle.Wait(Timeout.InfiniteTimeSpan);
                 fenceSignaled = state == WaitState.Signaled;
                 if (!fenceSignaled)
+                {
                     AhjoDiagnostics.Write(DiagnosticSeverity.Warning, "FrameRing",
                         $"FrameRing.Slot.Dispose: in-flight fence wait returned {state}; teardown proceeds.");
+                    // The wait may have fast-returned via Device.IsLost
+                    // without reaching the driver — and on a multi-device
+                    // false positive (see Device.IsLost remarks) the
+                    // submitted work is real and still executing. A
+                    // best-effort vkDeviceWaitIdle is a bounded-time no-op
+                    // on a truly lost device and an actual drain on a
+                    // falsely-marked one, so the pool teardown below never
+                    // destroys fences/command pools with work in flight.
+                    // Result deliberately ignored: the wait state was
+                    // already logged and teardown must proceed either way.
+                    _ = Vk.vkDeviceWaitIdle(_device.Handle);
+                }
             }
             _pendingSubmit = false;
 

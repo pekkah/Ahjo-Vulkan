@@ -242,6 +242,15 @@ public sealed unsafe class Swapchain : IDisposable
         }
         catch
         {
+            // CreateOrRecreate assigns _handle before LoadImagesAndViews;
+            // a throw from the image/view step would otherwise orphan the
+            // freshly created swapchain. Destroying it immediately is
+            // legal — none of its images were acquired or presented. (Its
+            // fresh RenderingDone semaphores stay tracked by
+            // _semaphorePool and are recovered at Dispose.)
+            VkSwapchainKHR_T* created = _handle;
+            if (created != null && created != old)
+                Vk.vkDestroySwapchainKHR(_device.Handle, created, null);
             // Passing oldSwapchain retires it even when creation fails
             // (#112): the object must not keep referencing the retired
             // handle, and a retry must not pass it as oldSwapchain again.
@@ -254,10 +263,11 @@ public sealed unsafe class Swapchain : IDisposable
 
         if (_state == SwapchainState.Minimized)
         {
-            // Window minimized during the drain; nothing was created or
-            // retired — old handle and semaphores remain current (views
-            // were destroyed; the next successful Recreate rebuilds them).
-            _renderingDone = oldSems;
+            // Window minimized during the drain; CreateOrRecreate returned
+            // before creating or touching anything — the old handle and
+            // _renderingDone (== oldSems) remain current. Views were
+            // destroyed above; the next successful Recreate rebuilds them
+            // and the ThrowIfNotPresentable guard covers the gap.
             return _state;
         }
 
@@ -327,7 +337,7 @@ public sealed unsafe class Swapchain : IDisposable
             signaled.Handle, fence: null,
             &idx);
         imageIndex = idx;
-        return MapPresentationResult(r, "vkAcquireNextImageKHR");
+        return MapPresentationResult(r, "vkAcquireNextImageKHR", fromAcquire: true);
     }
 
     /// <summary>
@@ -338,8 +348,11 @@ public sealed unsafe class Swapchain : IDisposable
     /// <c>DEVICE_LOST</c> → mark the device + poison, then throw.
     /// <c>Suboptimal</c> deliberately leaves the state untouched — the
     /// image is presentable per spec; recreating stays the caller's choice.
+    /// <c>TIMEOUT</c>/<c>NOT_READY</c> are in <c>vkAcquireNextImageKHR</c>'s
+    /// result set only — a present returning them is a broken ICD and
+    /// throws instead of mapping to a benign retry.
     /// </summary>
-    private AcquireResult MapPresentationResult(VkResult r, string fn)
+    private AcquireResult MapPresentationResult(VkResult r, string fn, bool fromAcquire)
     {
         switch (r)
         {
@@ -353,9 +366,9 @@ public sealed unsafe class Swapchain : IDisposable
             case VkResult.VK_ERROR_SURFACE_LOST_KHR:
                 _state = SwapchainState.Poisoned;
                 return AcquireResult.SurfaceLost;
-            case VkResult.VK_TIMEOUT:
+            case VkResult.VK_TIMEOUT when fromAcquire:
                 return AcquireResult.Timeout;
-            case VkResult.VK_NOT_READY:
+            case VkResult.VK_NOT_READY when fromAcquire:
                 return AcquireResult.NotReady;
             case VkResult.VK_ERROR_DEVICE_LOST:
                 _device.MarkLost();
@@ -429,7 +442,7 @@ public sealed unsafe class Swapchain : IDisposable
             pImageIndices      = &idx,
         };
         VkResult r = Vk.vkQueuePresentKHR(queue.Handle, &info);
-        return MapPresentationResult(r, "vkQueuePresentKHR");
+        return MapPresentationResult(r, "vkQueuePresentKHR", fromAcquire: false);
     }
 
     public void Dispose()
