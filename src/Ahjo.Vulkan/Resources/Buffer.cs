@@ -164,6 +164,10 @@ public readonly unsafe struct Buffer : IVulkanHandle<Buffer>, IDisposable
     public void Dispose()
     {
         if (Handle == null) return;
+        // FromRaw produces a borrowed handle with no owning Allocator — the
+        // caller owns the lifetime; calling vmaDestroyBuffer through a null
+        // allocator would crash. Skip the destroy.
+        if (Owner.IsNull) return;
         VmaApi.vmaDestroyBuffer(Owner.Handle, Handle, AllocationHandle);
     }
 }

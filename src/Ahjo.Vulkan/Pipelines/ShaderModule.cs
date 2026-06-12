@@ -32,6 +32,10 @@ public readonly unsafe struct ShaderModule : IVulkanHandle<ShaderModule>, IDispo
     public void Dispose()
     {
         if (Handle == null) return;
+        // FromRaw produces a borrowed handle with no DeviceHandle — the
+        // caller owns the lifetime; calling vkDestroyShaderModule with a
+        // null device handle would crash on every loader.
+        if (DeviceHandle == null) return;
         Vk.vkDestroyShaderModule(DeviceHandle, Handle, null);
     }
 }

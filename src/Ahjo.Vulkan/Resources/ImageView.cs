@@ -37,6 +37,10 @@ public readonly unsafe struct ImageView : IVulkanHandle<ImageView>, IDisposable
     public void Dispose()
     {
         if (Handle == null) return;
+        // FromRaw produces a borrowed handle with no DeviceHandle — the
+        // caller owns the lifetime; calling vkDestroyImageView with a null
+        // device handle would crash on every loader.
+        if (DeviceHandle == null) return;
         Vk.vkDestroyImageView(DeviceHandle, Handle, null);
     }
 }

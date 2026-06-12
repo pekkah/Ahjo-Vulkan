@@ -90,6 +90,11 @@ public readonly unsafe struct PipelineLayout : IVulkanHandle<PipelineLayout>, ID
     public void Dispose()
     {
         if (Handle == null) return;
+        // FromRaw produces a borrowed handle with no DeviceHandle — the
+        // caller owns the lifetime; calling vkDestroyPipelineLayout with a
+        // null device handle would crash on every loader. There is no
+        // side-table entry for a FromRaw'd layout, so skip unregistration too.
+        if (DeviceHandle == null) return;
         UnregisterMetadata(Handle);
         Vk.vkDestroyPipelineLayout(DeviceHandle, Handle, null);
     }

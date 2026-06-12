@@ -40,11 +40,23 @@ public readonly unsafe struct DescriptorSetLayout : IVulkanHandle<DescriptorSetL
     /// </summary>
     public DescriptorTemplate<T> CreateUpdateTemplate<T>(ReadOnlySpan<DescriptorBinding> bindings)
         where T : unmanaged
-        => DescriptorTemplateBuilder.CreateForSet<T>(DeviceHandle, Handle, bindings);
+    {
+        // FromRaw'd layouts carry no DeviceHandle; the template create call
+        // would dispatch through a null device. Fail loudly instead.
+        if (DeviceHandle == null)
+            throw new InvalidOperationException(
+                "DescriptorSetLayout.CreateUpdateTemplate requires an owning device; " +
+                "a FromRaw-constructed (borrowed) layout has none.");
+        return DescriptorTemplateBuilder.CreateForSet<T>(DeviceHandle, Handle, bindings);
+    }
 
     public void Dispose()
     {
         if (Handle == null) return;
+        // FromRaw produces a borrowed handle with no DeviceHandle — the
+        // caller owns the lifetime; calling vkDestroyDescriptorSetLayout
+        // with a null device handle would crash on every loader.
+        if (DeviceHandle == null) return;
         Vk.vkDestroyDescriptorSetLayout(DeviceHandle, Handle, null);
     }
 }

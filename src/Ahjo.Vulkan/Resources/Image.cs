@@ -113,6 +113,11 @@ public readonly unsafe struct Image : IVulkanHandle<Image>, IDisposable
     public void Dispose()
     {
         if (Handle == null) return;
+        // FromRaw produces a borrowed handle with no owning Allocator — the
+        // caller owns the lifetime. Crucially, a swapchain-owned image is
+        // not a VMA allocation and must never reach vmaDestroyImage; the
+        // guard makes the borrow contract real. Skip the destroy.
+        if (Owner.IsNull) return;
         VmaApi.vmaDestroyImage(Owner.Handle, Handle, AllocationHandle);
     }
 }

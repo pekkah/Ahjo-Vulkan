@@ -36,6 +36,10 @@ public readonly unsafe struct Sampler : IVulkanHandle<Sampler>, IDisposable
     public void Dispose()
     {
         if (Handle == null) return;
+        // FromRaw produces a borrowed handle with no DeviceHandle — the
+        // caller owns the lifetime; calling vkDestroySampler with a null
+        // device handle would crash on every loader.
+        if (DeviceHandle == null) return;
         Vk.vkDestroySampler(DeviceHandle, Handle, null);
     }
 }
