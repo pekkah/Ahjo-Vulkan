@@ -51,7 +51,17 @@ internal static class Program
 
         foreach (var (aliasName, target) in aliases)
         {
-            if (canonical.TryGetValue(target, out var codes) && codes.Length > 1)
+            // Resolve transitively: vk.xml can in principle chain aliases
+            // (A -> B -> C) where only C is the canonical command. Today's
+            // pinned headers have no chained aliases, but a future bump might,
+            // and a single-level lookup would silently drop the entry.
+            var current = target;
+            while (!canonical.ContainsKey(current) && aliases.TryGetValue(current, out var next))
+            {
+                current = next;
+            }
+
+            if (canonical.TryGetValue(current, out var codes) && codes.Length > 1)
             {
                 multiSuccess[aliasName] = codes;
             }
