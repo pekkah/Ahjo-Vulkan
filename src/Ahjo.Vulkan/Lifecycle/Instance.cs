@@ -234,7 +234,7 @@ public sealed unsafe class Instance : IDisposable
 
         // 1. Enumerate device handles.
         uint count = 0;
-        Vk.vkEnumeratePhysicalDevices(Handle, &count, null).ThrowIfFailed();
+        Vk.vkEnumeratePhysicalDevices(Handle, &count, null).ThrowIfErrored();
         if (count == 0)
             throw new VulkanException(VkResult.VK_ERROR_INITIALIZATION_FAILED,
                 "No Vulkan physical devices reported by the driver.");
@@ -243,7 +243,7 @@ public sealed unsafe class Instance : IDisposable
             ? stackalloc nint[(int)count]
             : new nint[count];
         fixed (nint* p = deviceHandles)
-            Vk.vkEnumeratePhysicalDevices(Handle, &count, (VkPhysicalDevice_T**)p).ThrowIfFailed();
+            Vk.vkEnumeratePhysicalDevices(Handle, &count, (VkPhysicalDevice_T**)p).ThrowIfErrored();
 
         // 2. Reusable per-device scratch.
         Span<byte>                         propsChain    = stackalloc byte[1024];
@@ -315,7 +315,7 @@ public sealed unsafe class Instance : IDisposable
 
                 // 2e. Device extensions — pool-rent, grow once across iterations.
                 uint extCount = 0;
-                Vk.vkEnumerateDeviceExtensionProperties(d, null, &extCount, null).ThrowIfFailed();
+                Vk.vkEnumerateDeviceExtensionProperties(d, null, &extCount, null).ThrowIfErrored();
                 if (extBuf.Length < extCount)
                 {
                     if (extBuf.Length != 0) extPool.Return(extBuf);
@@ -324,7 +324,7 @@ public sealed unsafe class Instance : IDisposable
                 if (extCount > 0)
                 {
                     fixed (VkExtensionProperties* ep = extBuf)
-                        Vk.vkEnumerateDeviceExtensionProperties(d, null, &extCount, ep).ThrowIfFailed();
+                        Vk.vkEnumerateDeviceExtensionProperties(d, null, &extCount, ep).ThrowIfErrored();
                 }
 
                 // 2f. Build the picker view and dispatch.
@@ -379,7 +379,7 @@ public sealed unsafe class Instance : IDisposable
     private PhysicalDevice PopulateCacheAndFind(VkPhysicalDevice_T* handle)
     {
         uint count = 0;
-        Vk.vkEnumeratePhysicalDevices(Handle, &count, null).ThrowIfFailed();
+        Vk.vkEnumeratePhysicalDevices(Handle, &count, null).ThrowIfErrored();
 
         var fresh = new PhysicalDevice[count];
         if (count > 0)
@@ -388,7 +388,7 @@ public sealed unsafe class Instance : IDisposable
                 ? stackalloc nint[(int)count]
                 : new nint[count];
             fixed (nint* p = raw)
-                Vk.vkEnumeratePhysicalDevices(Handle, &count, (VkPhysicalDevice_T**)p).ThrowIfFailed();
+                Vk.vkEnumeratePhysicalDevices(Handle, &count, (VkPhysicalDevice_T**)p).ThrowIfErrored();
 
             for (int i = 0; i < (int)count; i++)
                 fresh[i] = new PhysicalDevice(this, (VkPhysicalDevice_T*)raw[i]);
@@ -483,7 +483,7 @@ public sealed unsafe class Instance : IDisposable
     private static void EnsureInstanceLayerPresent(ReadOnlySpan<byte> layerName)
     {
         uint count = 0;
-        Vk.vkEnumerateInstanceLayerProperties(&count, null).ThrowIfFailed();
+        Vk.vkEnumerateInstanceLayerProperties(&count, null).ThrowIfErrored();
         if (count == 0)
             throw new VulkanException(VkResult.VK_ERROR_LAYER_NOT_PRESENT,
                 $"EnableValidation = true but the loader reports no instance layers — install the Vulkan SDK validation layers, or set EnableValidation = false (looking for '{System.Text.Encoding.UTF8.GetString(layerName)}').");
@@ -493,7 +493,7 @@ public sealed unsafe class Instance : IDisposable
         try
         {
             fixed (VkLayerProperties* p = buf)
-                Vk.vkEnumerateInstanceLayerProperties(&count, p).ThrowIfFailed();
+                Vk.vkEnumerateInstanceLayerProperties(&count, p).ThrowIfErrored();
             for (int i = 0; i < (int)count; i++)
             {
                 ref readonly var first = ref buf[i].layerName.e0;
@@ -511,7 +511,7 @@ public sealed unsafe class Instance : IDisposable
     private static void EnsureInstanceExtensionPresent(ReadOnlySpan<byte> extensionName)
     {
         uint count = 0;
-        Vk.vkEnumerateInstanceExtensionProperties(null, &count, null).ThrowIfFailed();
+        Vk.vkEnumerateInstanceExtensionProperties(null, &count, null).ThrowIfErrored();
         if (count == 0)
             throw new VulkanException(VkResult.VK_ERROR_EXTENSION_NOT_PRESENT,
                 $"EnableValidation = true but the loader reports no instance extensions — install the Vulkan SDK, or set EnableValidation = false (looking for '{System.Text.Encoding.UTF8.GetString(extensionName)}').");
@@ -521,7 +521,7 @@ public sealed unsafe class Instance : IDisposable
         try
         {
             fixed (VkExtensionProperties* p = buf)
-                Vk.vkEnumerateInstanceExtensionProperties(null, &count, p).ThrowIfFailed();
+                Vk.vkEnumerateInstanceExtensionProperties(null, &count, p).ThrowIfErrored();
             for (int i = 0; i < (int)count; i++)
             {
                 ref readonly var first = ref buf[i].extensionName.e0;

@@ -40,12 +40,47 @@ internal static class ResultExtensions
     /// anything other than <see cref="VkResult.VK_SUCCESS"/>. Use only on
     /// APIs whose contract has a single successful code; multi-code APIs
     /// (e.g. <c>vkAcquireNextImageKHR</c>) return the <see cref="VkResult"/>
-    /// directly instead.
+    /// directly, or — for the <c>count → fill</c> two-call idiom — use
+    /// <see cref="ThrowIfErrored"/>.
     /// </summary>
+    /// <remarks>
+    /// "Single successful code" is no longer a doc-comment honour system: the
+    /// <c>ResultPolicyGuardTests</c> guard test (issue #117) scans the wrapper
+    /// for <c>vk…().ThrowIfFailed()</c> and fails the build on any command that
+    /// vk.xml lists with more than one <c>successcode</c>.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void ThrowIfFailed(this VkResult result, [CallerMemberName] string fn = "")
     {
         if (result != VkResult.VK_SUCCESS)
+        {
+            Throw(result, fn);
+        }
+    }
+
+    /// <summary>
+    /// Throws <see cref="VulkanException"/> only when <paramref name="result"/>
+    /// is an <em>error</em> code (negative <see cref="VkResult"/>); any of the
+    /// non-error success codes — <c>VK_SUCCESS</c>, <c>VK_INCOMPLETE</c>,
+    /// <c>VK_SUBOPTIMAL_KHR</c>, <c>VK_TIMEOUT</c>, <c>VK_NOT_READY</c>, … —
+    /// pass through and are returned to the caller to branch on.
+    /// </summary>
+    /// <remarks>
+    /// This is the correct guard for the second (fill) call of the two-call
+    /// <c>count → fill</c> idiom and other multi-success-code entry points:
+    /// the underlying set can legally grow between the size query and the
+    /// fill, and the driver signals that with <c>VK_INCOMPLETE</c> — a
+    /// spec-defined success, not a failure (issue #97). Vulkan encodes every
+    /// error as a negative <see cref="VkResult"/> and every success/partial
+    /// outcome as non-negative, so the sign test is the spec's own partition.
+    /// The <c>ResultPolicyGuardTests</c> guard test (issue #117) enforces that
+    /// multi-success commands use this helper instead of
+    /// <see cref="ThrowIfFailed"/>.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void ThrowIfErrored(this VkResult result, [CallerMemberName] string fn = "")
+    {
+        if ((int)result < 0)
         {
             Throw(result, fn);
         }

@@ -61,30 +61,49 @@ public readonly unsafe struct PipelineCache : IVulkanHandle<PipelineCache>, IDis
         if (Handle == null)
             throw new InvalidOperationException("PipelineCache.Save called on a null handle.");
 
-        nuint size = 0;
-        Vk.vkGetPipelineCacheData(DeviceHandle, Handle, &size, null).ThrowIfFailed();
-        if (size == 0)
+        // Two-call query (size → fill) wrapped in a retry loop. The cache can
+        // grow between the two calls whenever another thread is still building
+        // pipelines — per-thread caches + Merge is an advertised pattern (see
+        // Merge's doc comment) — and the driver then writes a partial buffer
+        // and returns VK_INCOMPLETE. Persisting that truncated blob would
+        // poison the next run's cache load, so we re-query the now-larger size
+        // and refill rather than writing a short buffer (issue #97). The fill
+        // call is a multi-success command, so it uses ThrowIfErrored (throws
+        // only on an actual error code) and we branch on VK_INCOMPLETE
+        // ourselves (issue #117).
+        while (true)
         {
-            // Nothing to persist (no pipelines built yet, or the driver
-            // declined to populate). Write a zero-byte file so the next
-            // run still finds something — the loader treats short reads
-            // as "no usable cache" and starts fresh.
-            WriteAtomic(path, ReadOnlySpan<byte>.Empty);
-            return;
-        }
-        if (size > int.MaxValue)
-            throw new InvalidOperationException(
-                $"Pipeline cache exceeds 2 GiB ({size} bytes); refusing to allocate.");
+            nuint size = 0;
+            Vk.vkGetPipelineCacheData(DeviceHandle, Handle, &size, null).ThrowIfErrored();
+            if (size == 0)
+            {
+                // Nothing to persist (no pipelines built yet, or the driver
+                // declined to populate). Write a zero-byte file so the next
+                // run still finds something — the loader treats short reads
+                // as "no usable cache" and starts fresh.
+                WriteAtomic(path, ReadOnlySpan<byte>.Empty);
+                return;
+            }
+            if (size > int.MaxValue)
+                throw new InvalidOperationException(
+                    $"Pipeline cache exceeds 2 GiB ({size} bytes); refusing to allocate.");
 
-        int len = (int)size;
-        byte[] buf = ArrayPool<byte>.Shared.Rent(len);
-        try
-        {
-            fixed (byte* p = buf)
-                Vk.vkGetPipelineCacheData(DeviceHandle, Handle, &size, p).ThrowIfFailed();
-            WriteAtomic(path, buf.AsSpan(0, (int)size));
+            int len = (int)size;
+            byte[] buf = ArrayPool<byte>.Shared.Rent(len);
+            try
+            {
+                nuint written = size;
+                VkResult result;
+                fixed (byte* p = buf)
+                    result = Vk.vkGetPipelineCacheData(DeviceHandle, Handle, &written, p);
+                result.ThrowIfErrored();
+                if (result == VkResult.VK_INCOMPLETE)
+                    continue; // Cache grew between the two calls; re-query and refill.
+                WriteAtomic(path, buf.AsSpan(0, (int)written));
+                return;
+            }
+            finally { ArrayPool<byte>.Shared.Return(buf); }
         }
-        finally { ArrayPool<byte>.Shared.Return(buf); }
     }
 
     /// <summary>

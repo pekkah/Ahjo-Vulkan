@@ -78,6 +78,50 @@ public sealed class ResultPolicyTests
         Assert.NotSame(first, second);
     }
 
+    [Theory]
+    [InlineData(VkResult.VK_SUCCESS)]
+    [InlineData(VkResult.VK_INCOMPLETE)]
+    [InlineData(VkResult.VK_SUBOPTIMAL_KHR)]
+    [InlineData(VkResult.VK_TIMEOUT)]
+    [InlineData(VkResult.VK_NOT_READY)]
+    [InlineData(VkResult.VK_EVENT_SET)]
+    public void ThrowIfErrored_NonErrorCodesPassThrough(VkResult result)
+    {
+        // Every non-error (non-negative) VkResult is a legal success/partial
+        // outcome and must not throw — that's the whole point of the helper
+        // for the count→fill idiom (issue #97).
+        result.ThrowIfErrored();
+    }
+
+    [Theory]
+    [InlineData(VkResult.VK_ERROR_OUT_OF_HOST_MEMORY)]
+    [InlineData(VkResult.VK_ERROR_DEVICE_LOST)]
+    [InlineData(VkResult.VK_ERROR_INITIALIZATION_FAILED)]
+    [InlineData(VkResult.VK_ERROR_SURFACE_LOST_KHR)]
+    public void ThrowIfErrored_ErrorCodesThrow(VkResult result)
+    {
+        var ex = Assert.Throws<VulkanException>(() => result.ThrowIfErrored());
+        Assert.Equal(result, ex.Result);
+    }
+
+    [Fact]
+    public void ThrowIfErrored_NonErrorIsZeroAllocation()
+    {
+        for (var i = 0; i < 1_000; i++)
+        {
+            VkResult.VK_INCOMPLETE.ThrowIfErrored();
+        }
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1_000_000; i++)
+        {
+            VkResult.VK_INCOMPLETE.ThrowIfErrored();
+        }
+        var after = GC.GetAllocatedBytesForCurrentThread();
+
+        Assert.Equal(0, after - before);
+    }
+
     private static void CallSiteBoundary()
     {
         VkResult.VK_ERROR_INITIALIZATION_FAILED.ThrowIfFailed();
