@@ -53,7 +53,9 @@ Use this table to look up the expected benchmark for each changed file. If a fil
 | `Pipelines/ComputePipelineBuilder.cs`  | `GraphicsPipelineBuilderBenchmarks.cs` (similar shape) |
 | `Pipelines/SpecializationInfo.cs`      | `SpecializationInfoBenchmarks.cs`                      |
 | `Pipelines/PushConstantRange.cs`       | `PushConstantsBenchmarks.cs`                           |
-| `Pipelines/PipelineLayout.cs`          | `PushConstantsBenchmarks.cs`                           |
+| `Pipelines/PipelineLayout.cs`          | `PushConstantsBenchmarks.cs` + `HandleOwnershipBenchmarks.cs` (metadata field) |
+| `Internal/IVulkanHandle.cs`            | `HandleOwnershipBenchmarks.cs`                         |
+| `Diagnostics/DebugMarker.cs`           | `HandleOwnershipBenchmarks.cs` (constrained dispatch)  |
 | `Internal/ResultPolicy*`               | `ResultPolicyBenchmarks.cs`                            |
 | `Internal/PhysicalDevicePicker*`       | `PhysicalDevicePickerBenchmark.cs`                     |
 
