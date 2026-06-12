@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using Ahjo.Vulkan.Tests.Generated;
@@ -211,16 +210,27 @@ public sealed partial class ResultPolicyGuardTests
 
     private static string WrapperRoot { get; } = ResolveWrapperRoot();
 
-    private static string ResolveWrapperRoot([CallerFilePath] string thisFile = "")
+    private static string ResolveWrapperRoot()
     {
-        // thisFile = <repo>/tests/Ahjo.Vulkan.Tests/ResultPolicyGuardTests.cs
-        var testDir = Path.GetDirectoryName(thisFile)!;          // tests/Ahjo.Vulkan.Tests
-        var repoRoot = Path.GetFullPath(Path.Combine(testDir, "..", ".."));
-        var wrapper = Path.Combine(repoRoot, "src", "Ahjo.Vulkan");
-        if (!Directory.Exists(wrapper))
-            throw new DirectoryNotFoundException(
-                $"Wrapper source root not found at '{wrapper}'. Expected to resolve it "
-                + "relative to this test file via [CallerFilePath].");
-        return wrapper;
+        // Walk up from the test binary directory to the repo root (the dir
+        // holding the solution file) and locate the wrapper sources there.
+        // [CallerFilePath] is unusable: deterministic CI builds path-map source
+        // files to "/_/…", so the compile-time path doesn't exist on the
+        // runner (it resolved to a nonexistent "D:\_\src\Ahjo.Vulkan"). The bin
+        // directory is always inside the checked-out tree, locally and in CI.
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            if (!File.Exists(Path.Combine(dir.FullName, "Ahjo.Vulkan.slnx")))
+                continue;
+
+            var wrapper = Path.Combine(dir.FullName, "src", "Ahjo.Vulkan");
+            if (Directory.Exists(wrapper))
+                return wrapper;
+        }
+
+        throw new DirectoryNotFoundException(
+            "Could not locate the repository root (Ahjo.Vulkan.slnx) by walking up from "
+            + $"'{AppContext.BaseDirectory}'. The result-policy guard scans the wrapper "
+            + "sources and must run from within the repository tree.");
     }
 }
