@@ -64,8 +64,15 @@ using var instance = Instance.Create(new InstanceDescription
 ```
 
 A `default(InstanceDescription)` is also legal — `ApiVersion` falls back to
-`VulkanVersion.V1_4` and the wrapper uses a default callback that writes to
-`Console.Error`.
+`VulkanVersion.V1_4` and the wrapper uses a default callback that routes
+through `AhjoDiagnostics.Sink` (stderr by default). Every diagnostic the
+wrapper emits — debug-utils messages, dispose-time warnings, VMA leak
+reports — flows through that one static sink; replace it once at startup to
+capture everything in your engine's logger:
+
+```csharp
+AhjoDiagnostics.Sink = (severity, source, message) => myLogger.Log(severity, source, message);
+```
 
 ## Layered design
 
