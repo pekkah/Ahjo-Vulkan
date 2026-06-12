@@ -52,6 +52,45 @@ public sealed class HandleConventionsTests
         Assert.Equal(VkObjectType.VK_OBJECT_TYPE_QUEUE, Queue.ObjectType);
     }
 
+    [Fact]
+    public void FromRawHandles_Dispose_IsNoOp()
+    {
+        // A FromRaw'd (borrowed) handle carries no owning device/allocator,
+        // so Dispose must short-circuit rather than dispatch
+        // vkDestroy*/vmaDestroy* through a null device/allocator (issue #106).
+        // A missing guard would segfault the loader trampoline here rather
+        // than fail an assertion.
+        nint raw = 0x1234_5678;
+        Buffer.FromRaw(raw).Dispose();
+        Image.FromRaw(raw).Dispose();
+        ImageView.FromRaw(raw).Dispose();
+        Sampler.FromRaw(raw).Dispose();
+        ShaderModule.FromRaw(raw).Dispose();
+        DescriptorSetLayout.FromRaw(raw).Dispose();
+        PipelineLayout.FromRaw(raw).Dispose();
+    }
+
+    [Fact]
+    public void FromRawDescriptorSetLayout_CreateUpdateTemplate_Throws()
+    {
+        // CreateUpdateTemplate would dispatch through the null device of a
+        // borrowed layout; it must fail loudly instead of crashing (issue #106).
+        DescriptorSetLayout layout = DescriptorSetLayout.FromRaw(0x1234_5678);
+        Assert.Throws<InvalidOperationException>(
+            () => { _ = layout.CreateUpdateTemplate<int>(default); });
+    }
+
+    [Fact]
+    public void FromRawPipelineLayout_CreatePushDescriptorTemplate_Throws()
+    {
+        // Same null-device hazard as DescriptorSetLayout.CreateUpdateTemplate:
+        // fail loudly on a borrowed layout instead of crashing (issue #106).
+        PipelineLayout layout = PipelineLayout.FromRaw(0x1234_5678);
+        Assert.Throws<InvalidOperationException>(
+            () => { _ = layout.CreatePushDescriptorTemplate<int>(
+                0, VkPipelineBindPoint.VK_PIPELINE_BIND_POINT_GRAPHICS, default); });
+    }
+
     private static T MakeFromRaw<T>(nint raw) where T : unmanaged, IVulkanHandle<T>
         => T.FromRaw(raw);
 

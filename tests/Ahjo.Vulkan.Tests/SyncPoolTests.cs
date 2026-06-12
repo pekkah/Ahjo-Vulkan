@@ -125,6 +125,31 @@ public sealed class SyncPoolTests
     }
 
     /// <summary>
+    /// The <c>Release(Fence, bool)</c> overload routes by the caller-supplied
+    /// state without calling <c>vkGetFenceStatus</c> — the device-lost
+    /// teardown path (issue #107) where the status query would itself throw.
+    /// Proven by handing an unsignaled fence back as "known signaled": it
+    /// lands on the signaled stack, which the status-querying overload could
+    /// never do.
+    /// </summary>
+    [Fact]
+    public void FencePool_Release_KnownState_SkipsStatusQuery()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+        using var pool     = new FencePool(device);
+
+        var unsignaled = pool.Acquire(initiallySignaled: false);
+        Assert.False(unsignaled.IsSignaled);
+
+        pool.Release(unsignaled, knownSignaled: true);
+        Assert.Equal(1, pool.IdleSignaledCount);
+        Assert.Equal(0, pool.IdleUnsignaledCount);
+    }
+
+    /// <summary>
     /// Discard destroys the underlying VkSemaphore and removes it from
     /// pool tracking — the escape hatch for stuck binary semaphores
     /// (signaled by AcquireNextImage but never waited-on by submit

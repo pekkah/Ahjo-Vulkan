@@ -85,11 +85,24 @@ public readonly unsafe struct PipelineLayout : IVulkanHandle<PipelineLayout>, ID
         VkPipelineBindPoint             bindPoint,
         ReadOnlySpan<DescriptorBinding> bindings)
         where T : unmanaged
-        => DescriptorTemplateBuilder.CreateForPush<T>(DeviceHandle, Handle, bindPoint, set, bindings);
+    {
+        // FromRaw'd layouts carry no DeviceHandle; the template create call
+        // would dispatch through a null device. Fail loudly instead.
+        if (DeviceHandle == null)
+            throw new InvalidOperationException(
+                "PipelineLayout.CreatePushDescriptorTemplate requires an owning device; " +
+                "a FromRaw-constructed (borrowed) layout has none.");
+        return DescriptorTemplateBuilder.CreateForPush<T>(DeviceHandle, Handle, bindPoint, set, bindings);
+    }
 
     public void Dispose()
     {
         if (Handle == null) return;
+        // FromRaw produces a borrowed handle with no DeviceHandle — the
+        // caller owns the lifetime; calling vkDestroyPipelineLayout with a
+        // null device handle would crash on every loader. There is no
+        // side-table entry for a FromRaw'd layout, so skip unregistration too.
+        if (DeviceHandle == null) return;
         UnregisterMetadata(Handle);
         Vk.vkDestroyPipelineLayout(DeviceHandle, Handle, null);
     }

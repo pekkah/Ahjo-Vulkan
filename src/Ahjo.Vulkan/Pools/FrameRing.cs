@@ -362,19 +362,32 @@ public sealed unsafe class FrameRing : IDisposable
             // a slot whose fence was reset by BeginFrame but never
             // re-submitted has an unsignaled fence with no GPU work
             // behind it, and waiting on it would hang Dispose forever.
+            //
+            // The signaled state we hand to FencePool.Release is derived
+            // WITHOUT a vkGetFenceStatus query: after device loss that query
+            // returns VK_ERROR_DEVICE_LOST, which the status-querying
+            // Release(Fence) overload would rethrow and strand the remaining
+            // slots' pools (issue #107). The bucket the fence lands in is
+            // immaterial — FencePool.Dispose destroys every handle next — so a
+            // non-pending slot (no GPU work behind the fence; whether it's
+            // signaled depends on create-signaled vs. a prior Reset) routes to
+            // unsignaled rather than guess. Only the pending-submit path, where
+            // the wait result is authoritative, reports a real state.
+            bool fenceSignaled = false;
             if (_pendingSubmit)
             {
                 // Dispose mustn't throw — log a lost-device or unexpected
                 // wait outcome and let teardown proceed. vkDestroy* on a
                 // lost device is spec-legal.
                 WaitState state = InFlightHandle.Wait(Timeout.InfiniteTimeSpan);
-                if (state != WaitState.Signaled)
+                fenceSignaled = state == WaitState.Signaled;
+                if (!fenceSignaled)
                     Console.Error.WriteLine(
                         $"FrameRing.Slot.Dispose: in-flight fence wait returned {state}; teardown proceeds.");
             }
             _pendingSubmit = false;
 
-            FencePool.Release(InFlightHandle);
+            FencePool.Release(InFlightHandle, fenceSignaled);
             SemaphorePool.Release(ImageAcquired);
             DescriptorSets?.Dispose();
             Staging.Dispose();
