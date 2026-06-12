@@ -95,6 +95,15 @@ public sealed unsafe class FencePool : IDisposable
     /// but the parameterless <see cref="Release(Fence)"/> would let the
     /// exception escape <c>Dispose</c> and strand the remaining handles.
     /// </summary>
+    /// <remarks>
+    /// Precondition: outside an imminent <see cref="Dispose"/>,
+    /// <paramref name="knownSignaled"/> MUST match the fence's actual state.
+    /// A wrong value files the fence on the wrong free-list and breaks
+    /// <see cref="Acquire(bool)"/>'s guarantee to hand back a fence in the
+    /// requested state. This overload exists only for the device-lost
+    /// teardown path; per-frame recycling must use the status-querying
+    /// <see cref="Release(Fence)"/>.
+    /// </remarks>
     public void Release(Fence fence, bool knownSignaled)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
