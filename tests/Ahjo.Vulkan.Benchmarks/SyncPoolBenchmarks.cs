@@ -97,4 +97,30 @@ public class SyncPoolBenchmarks
             _semaphorePool.Release(s);
         }
     }
+
+    [Benchmark(OperationsPerInvoke = CallsPerInvoke)]
+    public ulong Sync_HostOps_RoundTrip()
+    {
+        // The host-side per-frame sync surface: Fence.IsSignaled/Reset and
+        // TimelineSemaphore.Signal/WaitFor/Value all carry the borrowed-
+        // handle guard added by #102/#118 — this keeps the branch under the
+        // 0 B/op canary. Acquire/Release bracket the ops so the pool returns
+        // to steady state each iteration.
+        ulong sum = 0;
+        for (int i = 0; i < CallsPerInvoke; i++)
+        {
+            var f = _fencePool.Acquire();
+            if (f.IsSignaled) sum++;
+            f.Reset();
+            _fencePool.Release(f);
+
+            var t = _semaphorePool.AcquireTimeline();
+            ulong next = t.Value + 1;
+            t.Signal(next);
+            t.WaitFor(next, TimeSpan.Zero);
+            sum += t.Value;
+            _semaphorePool.Release(t);
+        }
+        return sum;
+    }
 }

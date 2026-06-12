@@ -43,6 +43,9 @@ public readonly unsafe struct PipelineCache : IVulkanHandle<PipelineCache>, IDis
     public ulong RawHandle => (ulong)Handle;
     public bool IsNull => Handle == null;
 
+    /// <inheritdoc/>
+    public bool OwnsHandle => DeviceHandle != null;
+
     /// <summary>
     /// Reads the cache contents via <c>vkGetPipelineCacheData</c> and
     /// writes them to <paramref name="path"/> atomically (write-then-rename
@@ -135,7 +138,7 @@ public readonly unsafe struct PipelineCache : IVulkanHandle<PipelineCache>, IDis
     public void Dispose()
     {
         if (Handle == null) return;
-        if (DeviceHandle == null) return; // FromRaw — borrowed handle.
+        if (!OwnsHandle) return; // FromRaw — borrowed handle.
         Vk.vkDestroyPipelineCache(DeviceHandle, Handle, null);
     }
 

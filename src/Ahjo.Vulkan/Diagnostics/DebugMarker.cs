@@ -54,7 +54,7 @@ public static unsafe class ObjectName
     /// inside the span and pass the whole length.
     /// </summary>
     public static void Set<T>(Device device, T handle, ReadOnlySpan<byte> name)
-        where T : unmanaged, IVulkanHandle<T>
+        where T : struct, IVulkanHandle<T>
     {
         ArgumentNullException.ThrowIfNull(device);
         if (name.IsEmpty)

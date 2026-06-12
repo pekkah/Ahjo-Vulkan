@@ -25,13 +25,16 @@ public readonly unsafe struct GraphicsPipeline : IVulkanHandle<GraphicsPipeline>
     public ulong RawHandle => (ulong)Handle;
     public bool IsNull => Handle == null;
 
+    /// <inheritdoc/>
+    public bool OwnsHandle => DeviceHandle != null;
+
     public void Dispose()
     {
         if (Handle == null) return;
         // FromRaw produces a borrowed handle with no DeviceHandle — the
         // caller already owns the lifetime; calling vkDestroyPipeline with
         // a null device handle would crash on every loader.
-        if (DeviceHandle == null) return;
+        if (!OwnsHandle) return;
         Vk.vkDestroyPipeline(DeviceHandle, Handle, null);
     }
 }

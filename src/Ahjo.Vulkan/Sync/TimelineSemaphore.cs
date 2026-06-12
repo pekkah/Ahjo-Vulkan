@@ -26,11 +26,18 @@ public readonly unsafe struct TimelineSemaphore : IVulkanHandle<TimelineSemaphor
     public ulong RawHandle => (ulong)Handle;
     public bool IsNull => Handle == null;
 
+    /// <summary>
+    /// Always <see langword="false"/>: <see cref="SemaphorePool"/> owns the
+    /// <c>VkSemaphore</c>'s lifetime; the struct never destroys it.
+    /// </summary>
+    public bool OwnsHandle => false;
+
     /// <summary>Current counter value via <c>vkGetSemaphoreCounterValue</c>.</summary>
     public ulong Value
     {
         get
         {
+            ThrowIfBorrowed();
             ulong v = 0;
             Vk.vkGetSemaphoreCounterValue(DeviceHandle, Handle, &v).ThrowIfFailed();
             return v;
@@ -45,6 +52,7 @@ public readonly unsafe struct TimelineSemaphore : IVulkanHandle<TimelineSemaphor
     /// </summary>
     public void Signal(ulong value)
     {
+        ThrowIfBorrowed();
         var info = new VkSemaphoreSignalInfo
         {
             sType     = VkStructureType.VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO,
@@ -67,6 +75,7 @@ public readonly unsafe struct TimelineSemaphore : IVulkanHandle<TimelineSemaphor
     /// </summary>
     public WaitState WaitFor(ulong value, TimeSpan timeout)
     {
+        ThrowIfBorrowed();
         VkSemaphore_T* h = Handle;
         var info = new VkSemaphoreWaitInfo
         {
@@ -76,5 +85,16 @@ public readonly unsafe struct TimelineSemaphore : IVulkanHandle<TimelineSemaphor
             pValues        = &value,
         };
         return Vk.vkWaitSemaphores(DeviceHandle, &info, timeout.ToVulkanTimeout()).ToWaitState();
+    }
+
+    // FromRaw produces a borrowed semaphore with no DeviceHandle; dispatching
+    // through it would dereference the loader's null dispatch table and
+    // access-violate the process (issue #102). Fail loudly instead.
+    private void ThrowIfBorrowed()
+    {
+        if (DeviceHandle == null)
+            throw new InvalidOperationException(
+                "TimelineSemaphore requires an owning device for value/signal/wait calls; " +
+                "a FromRaw-constructed (borrowed) semaphore has none.");
     }
 }

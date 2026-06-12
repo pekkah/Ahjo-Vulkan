@@ -36,4 +36,11 @@ public readonly unsafe struct DescriptorSet : IVulkanHandle<DescriptorSet>
     public static DescriptorSet FromRaw(nint handle) => new((VkDescriptorSet_T*)handle);
     public ulong RawHandle => (ulong)Handle;
     public bool IsNull => Handle == null;
+
+    /// <summary>
+    /// Always <see langword="false"/>: <see cref="DescriptorSetPool"/> owns
+    /// the <c>VkDescriptorSet</c>'s lifetime. The <see cref="Layout"/>
+    /// pointer is release-routing metadata, not ownership.
+    /// </summary>
+    public bool OwnsHandle => false;
 }

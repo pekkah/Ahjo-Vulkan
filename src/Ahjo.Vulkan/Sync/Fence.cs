@@ -33,6 +33,12 @@ public readonly unsafe struct Fence : IVulkanHandle<Fence>
     public bool IsNull => Handle == null;
 
     /// <summary>
+    /// Always <see langword="false"/>: <see cref="FencePool"/> owns the
+    /// <c>VkFence</c>'s lifetime; the struct never destroys it.
+    /// </summary>
+    public bool OwnsHandle => false;
+
+    /// <summary>
     /// Cheap, non-blocking signaled check. Wraps <c>vkGetFenceStatus</c>;
     /// returns <see langword="true"/> on <c>VK_SUCCESS</c> and
     /// <see langword="false"/> on <c>VK_NOT_READY</c>. Any other code
@@ -53,6 +59,7 @@ public readonly unsafe struct Fence : IVulkanHandle<Fence>
         get
         {
             if (Handle == null) return true;
+            ThrowIfBorrowed();
             VkResult r = Vk.vkGetFenceStatus(DeviceHandle, Handle);
             return r switch
             {
@@ -75,6 +82,7 @@ public readonly unsafe struct Fence : IVulkanHandle<Fence>
     public WaitState Wait(TimeSpan timeout)
     {
         if (Handle == null) return WaitState.Signaled;
+        ThrowIfBorrowed();
         VkFence_T* h = Handle;
         return Vk.vkWaitForFences(DeviceHandle, 1, &h, waitAll: 1, timeout.ToVulkanTimeout()).ToWaitState();
     }
@@ -87,7 +95,19 @@ public readonly unsafe struct Fence : IVulkanHandle<Fence>
     public void Reset()
     {
         if (Handle == null) return;
+        ThrowIfBorrowed();
         VkFence_T* h = Handle;
         Vk.vkResetFences(DeviceHandle, 1, &h).ThrowIfFailed();
+    }
+
+    // FromRaw produces a borrowed fence with no DeviceHandle; dispatching
+    // through it would dereference the loader's null dispatch table and
+    // access-violate the process (issue #102). Fail loudly instead.
+    private void ThrowIfBorrowed()
+    {
+        if (DeviceHandle == null)
+            throw new InvalidOperationException(
+                "Fence requires an owning device for status/wait/reset calls; " +
+                "a FromRaw-constructed (borrowed) fence has none.");
     }
 }

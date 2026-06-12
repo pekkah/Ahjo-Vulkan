@@ -176,9 +176,12 @@ public readonly unsafe struct Surface : IVulkanHandle<Surface>, IDisposable
         return new Surface(raw, instance.Handle);
     }
 
+    /// <inheritdoc/>
+    public bool OwnsHandle => InstanceHandle != null;
+
     public void Dispose()
     {
-        if (Handle == null || InstanceHandle == null) return;
+        if (Handle == null || !OwnsHandle) return;
         Vk.vkDestroySurfaceKHR(InstanceHandle, Handle, null);
     }
 }

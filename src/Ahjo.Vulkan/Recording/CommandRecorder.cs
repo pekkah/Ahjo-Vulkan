@@ -240,11 +240,12 @@ public unsafe ref struct CommandRecorder : IDisposable
     [Conditional("DEBUG")]
     private static void AssertSetsMatchLayout(in PipelineLayout layout, uint firstSet, ReadOnlySpan<DescriptorSet> sets)
     {
-        var declared = PipelineLayout.TryGetSetLayouts(layout.Handle);
-        // PipelineLayout.FromRaw / a layout built without set layouts
-        // has no entry — there's nothing to validate against. The bind
-        // still fires; the driver / validation layer is the backstop.
-        if (declared is null) return;
+        nint[]? declared = layout.Metadata?.SetLayouts;
+        // PipelineLayout.FromRaw carries no metadata, and a layout built
+        // without set layouts declares none — there's nothing to validate
+        // against. The bind still fires; the driver / validation layer is
+        // the backstop.
+        if (declared is null || declared.Length == 0) return;
 
         for (int i = 0; i < sets.Length; i++)
         {
@@ -290,11 +291,12 @@ public unsafe ref struct CommandRecorder : IDisposable
     [Conditional("DEBUG")]
     private static void AssertPushRangeFits(in PipelineLayout layout, ShaderStages stages, uint offset, uint size)
     {
-        var ranges = PipelineLayout.TryGetPushRanges(layout.Handle);
-        // PipelineLayout.FromRaw / a layout built without push ranges
-        // has no entry — there's nothing to validate against. The call
-        // still fires; the driver / validation layer is the backstop.
-        if (ranges is null) return;
+        PushConstantRange[]? ranges = layout.Metadata?.PushRanges;
+        // PipelineLayout.FromRaw carries no metadata, and a layout built
+        // without push ranges declares none — there's nothing to validate
+        // against. The call still fires; the driver / validation layer is
+        // the backstop.
+        if (ranges is null || ranges.Length == 0) return;
 
         for (int i = 0; i < ranges.Length; i++)
         {
