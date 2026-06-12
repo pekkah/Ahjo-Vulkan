@@ -18,6 +18,16 @@ namespace Ahjo.Vulkan;
 /// <see cref="Aspect"/>. The subresource-range and view-type fields default to
 /// values that map to a valid <c>VkImageViewCreateInfo</c>; a zero-default here
 /// used to produce <c>levelCount = 0</c> (invalid).</para>
+/// <para>The default targets the dominant <b>single-layer 2D image</b>: with
+/// <see cref="ViewType"/> = <c>2D</c> and <see cref="LayerCount"/> =
+/// <c>VK_REMAINING_ARRAY_LAYERS</c>, the resolved layer count is 1 (the parent
+/// image's only layer), which is valid. For an <b>array / cube / 3D</b> image
+/// you must set <see cref="ViewType"/> (e.g. <c>2D_ARRAY</c>, <c>CUBE</c>) and
+/// the matching <see cref="LayerCount"/> explicitly — a 2D view type with a
+/// resolved layer count &gt; 1 is rejected
+/// (<c>VUID-VkImageViewCreateInfo-imageViewType-04973</c>). That reject is the
+/// desired loud failure for "2D view of an array image" rather than a silent
+/// view of layer 0.</para>
 /// </remarks>
 public readonly record struct ImageViewDescription
 {

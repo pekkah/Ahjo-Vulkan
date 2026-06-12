@@ -79,6 +79,20 @@ spec-blessed "rest of the image" sentinels and are valid in a view's
 subresource range — they make a default view cover the whole image, which is
 the dominant intent and strictly better than today's invalid `levelCount = 0`.
 
+**`ViewType = 2D` + `LayerCount = REMAINING` interaction (validation-review
+finding).** For the dominant **single-layer 2D image** the resolved layer count
+is 1, which a 2D view type requires
+(`VUID-VkImageViewCreateInfo-imageViewType-04973`) — defaults are mutually
+consistent. For an **array/cube/3D** parent image a bare
+`new ImageViewDescription { Aspect }` keeps `ViewType = 2D` and resolves
+`layerCount > 1`, which validation rejects. We **keep REMAINING** (per the
+issue) rather than defaulting `LayerCount = 1`, because: (a) for the common
+single-layer case the two are identical; (b) on a multi-layer image a *loud*
+04973 reject is better than `LayerCount = 1` silently viewing only layer 0; and
+(c) array/cube/3D callers must set `ViewType` explicitly anyway (a 2D view of an
+array image is itself the mistake). The single-layer assumption is documented on
+the struct.
+
 ### `ref struct` field initializers need an explicit parameterless ctor
 
 Record structs synthesize a parameterless constructor that runs field

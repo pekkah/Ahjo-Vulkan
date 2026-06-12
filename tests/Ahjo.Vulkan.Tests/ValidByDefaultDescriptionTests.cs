@@ -125,6 +125,41 @@ public sealed class ValidByDefaultDescriptionTests
     }
 
     [Fact]
+    public void CreateView_ArrayImage_RemainingLayersValidOnceViewTypeSet()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+            "Software ICD (Mesa lavapipe): hangs inside the driver during image-view creation.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+
+        // A 4-layer 2D image. The whole-image default LayerCount =
+        // VK_REMAINING_ARRAY_LAYERS resolves to 4 here — valid for a 2D_ARRAY
+        // view type, rejected for a plain 2D view (VUID-...-imageViewType-04973).
+        // Prove the documented array path: set ViewType, leave the counts at the
+        // valid-by-default REMAINING, and the view builds.
+        using var image = device.Allocator.CreateImage(
+            new ImageDescription
+            {
+                Format      = VkFormat.VK_FORMAT_R8G8B8A8_UNORM,
+                Width       = 32,
+                Height      = 32,
+                ArrayLayers = 4,
+                Tiling      = VkImageTiling.VK_IMAGE_TILING_OPTIMAL,
+                Usage       = ImageUsage.Sampled,
+            },
+            new AllocationDescription { Usage = MemoryUsage.AutoPreferDevice });
+
+        using var arrayView = image.CreateView(device, new ImageViewDescription
+        {
+            ViewType = VkImageViewType.VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+            Aspect   = VkImageAspectFlagBits.VK_IMAGE_ASPECT_COLOR_BIT,
+        });
+        Assert.False(arrayView.IsNull);
+    }
+
+    [Fact]
     public void CreateDescriptorSetLayout_DefaultBindingElement_NormalizesCount()
     {
         Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
