@@ -33,6 +33,21 @@ public sealed unsafe class Device : IDisposable
     // always taking the lock is negligible and removes the
     // double-create race on concurrent first access.
     private  readonly object              _allocatorLock = new();
+    // Set once when any wrapper call observes VK_ERROR_DEVICE_LOST; never
+    // cleared. volatile (not Interlocked) because the flag is monotonic —
+    // there is no lost-update hazard, and both race directions are benign:
+    // a reader that misses a just-set flag performs the real Vulkan call
+    // and observes DEVICE_LOST from the driver itself.
+    private  volatile bool                _lost;
+
+    // Process-wide registry of live devices so the context-free
+    // ResultExtensions choke point can mark loss without threading device
+    // identity through every ThrowIfFailed call site. WeakReference so the
+    // registry never roots an undisposed Device past user reachability —
+    // the leak-backstop finalizer must stay able to run. Every touch is
+    // cold-path (ctor, Dispose, an already-throwing loss path).
+    private  static readonly List<WeakReference<Device>> s_live     = [];
+    private  static readonly object                      s_liveLock = new();
 
     internal Device(VkDevice_T* handle, PhysicalDevice physicalDevice, Queue[] queues)
     {
@@ -40,6 +55,78 @@ public sealed unsafe class Device : IDisposable
         Functions      = new DeviceFunctionTable(handle);
         PhysicalDevice = physicalDevice;
         _queues        = queues;
+
+        lock (s_liveLock)
+        {
+            PruneDeadLocked();
+            s_live.Add(new WeakReference<Device>(this));
+        }
+    }
+
+    /// <summary>
+    /// <see langword="true"/> once any wrapper call has observed
+    /// <c>VK_ERROR_DEVICE_LOST</c> for this device (or, in a multi-device
+    /// process, for any live device — see remarks). Set-once; never
+    /// cleared. After loss the wrapper applies one policy everywhere:
+    /// <see cref="Fence.Wait"/> / <see cref="TimelineSemaphore.WaitFor"/>
+    /// return <see cref="WaitState.DeviceLost"/> immediately,
+    /// <see cref="Fence.IsSignaled"/> throws deterministically without
+    /// calling the driver, <see cref="FencePool.Release(Fence)"/> skips
+    /// its status query, and <see cref="Swapchain.Recreate"/> fails fast.
+    /// Recovery is to dispose every dependent resource, dispose the
+    /// device, and rebuild from a fresh <see cref="PhysicalDevice"/>.
+    /// </summary>
+    /// <remarks>
+    /// A <c>DEVICE_LOST</c> observed at the context-free
+    /// <c>ResultExtensions</c> choke point marks <i>every</i> live device,
+    /// because the throw site has no device identity. In the wrapper's
+    /// target shape (one device per process) that is exact; in a
+    /// multi-device process a healthy sibling is marked conservatively —
+    /// its teardown still drains properly because
+    /// <see cref="Dispose"/> never skips its real <c>vkDeviceWaitIdle</c>.
+    /// </remarks>
+    public bool IsLost => _lost;
+
+    internal void MarkLost() => _lost = true;
+
+    /// <summary>
+    /// Called by <c>ResultExtensions.Throw</c> when a wrapper call fails
+    /// with <c>VK_ERROR_DEVICE_LOST</c> outside any device context. Marks
+    /// every live device lost and prunes collected entries.
+    /// </summary>
+    internal static void NotifyDeviceLossObserved()
+    {
+        lock (s_liveLock)
+        {
+            for (int i = s_live.Count - 1; i >= 0; i--)
+            {
+                if (s_live[i].TryGetTarget(out Device? device))
+                    device.MarkLost();
+                else
+                    s_live.RemoveAt(i);
+            }
+        }
+    }
+
+    private void Unregister()
+    {
+        lock (s_liveLock)
+        {
+            for (int i = s_live.Count - 1; i >= 0; i--)
+            {
+                if (!s_live[i].TryGetTarget(out Device? device) || ReferenceEquals(device, this))
+                    s_live.RemoveAt(i);
+            }
+        }
+    }
+
+    private static void PruneDeadLocked()
+    {
+        for (int i = s_live.Count - 1; i >= 0; i--)
+        {
+            if (!s_live[i].TryGetTarget(out _))
+                s_live.RemoveAt(i);
+        }
     }
 
     /// <summary>
@@ -233,9 +320,9 @@ public sealed unsafe class Device : IDisposable
     /// Loads a <see cref="PipelineCache"/> from <paramref name="path"/> if
     /// the file exists and its header matches this device (vendor ID,
     /// device ID, cache UUID); otherwise creates an empty cache.
-    /// Mismatches are logged to <see cref="Console.Error"/> so the
-    /// "user copied a cache from another machine" / "driver UUID
-    /// rotated" cases surface visibly.
+    /// Mismatches are reported through <see cref="AhjoDiagnostics.Sink"/>
+    /// (stderr by default) so the "user copied a cache from another
+    /// machine" / "driver UUID rotated" cases surface visibly.
     /// </summary>
     public PipelineCache LoadOrCreatePipelineCache(string path)
     {
@@ -263,7 +350,7 @@ public sealed unsafe class Device : IDisposable
 
                     if (!HeaderMatchesDevice(rented.AsSpan(0, dataLen)))
                     {
-                        Console.Error.WriteLine(
+                        AhjoDiagnostics.Write(DiagnosticSeverity.Warning, "PipelineCache",
                             $"PipelineCache: header in '{path}' does not match this device (vendor/device/UUID); discarding and starting empty.");
                         ArrayPool<byte>.Shared.Return(rented);
                         rented  = null;
@@ -459,11 +546,18 @@ public sealed unsafe class Device : IDisposable
                 // Best-effort wait-idle before destroy; Dispose mustn't throw on
                 // the success path. A failing wait-idle (lost device, OOM)
                 // already implies the device is going away — destroy still runs.
-                // Surface the VkResult to stderr so a shutdown after a crash
-                // doesn't look like a clean exit in the logs.
+                // Surface the VkResult through the sink so a shutdown after a
+                // crash doesn't look like a clean exit in the logs.
+                //
+                // Deliberately unconditional even when IsLost: on a truly lost
+                // device vkDeviceWaitIdle returns DEVICE_LOST in bounded time,
+                // and on a device conservatively marked by the context-free
+                // loss registry (multi-device process) it actually drains —
+                // skipping it would turn the registry's conservatism into a
+                // destroy-while-pending UB.
                 VkResult idleResult = Vk.vkDeviceWaitIdle(Handle);
                 if (idleResult != VkResult.VK_SUCCESS)
-                    Console.Error.WriteLine(
+                    AhjoDiagnostics.Write(DiagnosticSeverity.Warning, "Device",
                         $"Device.Dispose: vkDeviceWaitIdle returned {idleResult}; destroy proceeds anyway.");
                 // Allocator must die before the VkDevice — vmaDestroyAllocator
                 // calls into the device's function table.
@@ -480,6 +574,7 @@ public sealed unsafe class Device : IDisposable
             // tradeoff is that a destroy failure leaks the handle for the
             // rest of the process — preferable to UB.
             _disposed = true;
+            Unregister();
             GC.SuppressFinalize(this);
         }
     }

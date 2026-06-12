@@ -54,7 +54,7 @@ public sealed unsafe class FencePool : IDisposable
 
         Stack<nint> preferred = initiallySignaled ? _freeSignaled : _freeUnsignaled;
         if (preferred.Count > 0)
-            return new Fence((VkFence_T*)preferred.Pop(), _device.Handle);
+            return new Fence((VkFence_T*)preferred.Pop(), _device);
 
         // Pre-grow _allHandles so the Add below can't OOM after
         // vkCreateFence and orphan the just-created VkFence.
@@ -68,7 +68,7 @@ public sealed unsafe class FencePool : IDisposable
         VkFence_T* raw = null;
         Vk.vkCreateFence(_device.Handle, &ci, null, &raw).ThrowIfFailed();
         _allHandles.Add((nint)raw);
-        return new Fence(raw, _device.Handle);
+        return new Fence(raw, _device);
     }
 
     /// <summary>
@@ -81,7 +81,14 @@ public sealed unsafe class FencePool : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (fence.IsNull) return;
-        Stack<nint> bucket = fence.IsSignaled ? _freeSignaled : _freeUnsignaled;
+        // After device loss the status query would throw DEVICE_LOST
+        // (issue #107 hit exactly this through Slot.Dispose). Skip it and
+        // file unsignaled — the bucket is immaterial because the only
+        // legal next step after loss is Dispose, which destroys every
+        // handle regardless of list (issue #120's one-policy rule).
+        Stack<nint> bucket = _device.IsLost || !fence.IsSignaled
+            ? _freeUnsignaled
+            : _freeSignaled;
         bucket.Push((nint)fence.Handle);
     }
 

@@ -14,15 +14,27 @@ public readonly unsafe struct TimelineSemaphore : IVulkanHandle<TimelineSemaphor
 {
     public readonly VkSemaphore_T* Handle;
     internal readonly VkDevice_T*  DeviceHandle;
+    // The managed Device wrapper, when known (pool-acquired semaphores) —
+    // see Fence.Owner for the full rationale (#120). Null on FromRaw /
+    // raw-pointer ctors.
+    internal readonly Device?      Owner;
 
     internal TimelineSemaphore(VkSemaphore_T* handle, VkDevice_T* device)
     {
         Handle       = handle;
         DeviceHandle = device;
+        Owner        = null;
+    }
+
+    internal TimelineSemaphore(VkSemaphore_T* handle, Device owner)
+    {
+        Handle       = handle;
+        DeviceHandle = owner.Handle;
+        Owner        = owner;
     }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_SEMAPHORE;
-    public static TimelineSemaphore FromRaw(nint handle) => new((VkSemaphore_T*)handle, null);
+    public static TimelineSemaphore FromRaw(nint handle) => new((VkSemaphore_T*)handle, (VkDevice_T*)null);
     public ulong RawHandle => (ulong)Handle;
     public bool IsNull => Handle == null;
 
@@ -76,6 +88,9 @@ public readonly unsafe struct TimelineSemaphore : IVulkanHandle<TimelineSemaphor
     public WaitState WaitFor(ulong value, TimeSpan timeout)
     {
         ThrowIfBorrowed();
+        // Post-loss waits return immediately — same policy and same
+        // one-volatile-read cost as Fence.Wait (#120).
+        if (Owner is { IsLost: true }) return WaitState.DeviceLost;
         VkSemaphore_T* h = Handle;
         var info = new VkSemaphoreWaitInfo
         {
@@ -84,7 +99,10 @@ public readonly unsafe struct TimelineSemaphore : IVulkanHandle<TimelineSemaphor
             pSemaphores    = &h,
             pValues        = &value,
         };
-        return Vk.vkWaitSemaphores(DeviceHandle, &info, timeout.ToVulkanTimeout()).ToWaitState();
+        WaitState state = Vk.vkWaitSemaphores(DeviceHandle, &info, timeout.ToVulkanTimeout()).ToWaitState();
+        if (state == WaitState.DeviceLost)
+            Owner?.MarkLost();
+        return state;
     }
 
     // FromRaw produces a borrowed semaphore with no DeviceHandle; dispatching
