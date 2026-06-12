@@ -246,6 +246,83 @@ public sealed unsafe class SwapchainTests
     }
 
     /// <summary>
+    /// Regression for issue #103: <see cref="Swapchain.AcquireNextImage"/>
+    /// must write its <c>out</c> image index correctly even when the
+    /// caller's argument targets a GC-heap location — a class field or an
+    /// array element (<c>out _frameState.ImageIndex</c> is natural calling
+    /// code). The old implementation captured an unpinned pointer to the
+    /// out param via <c>Unsafe.AsPointer</c> and passed it to
+    /// <c>vkAcquireNextImageKHR</c>, which can block for up to the timeout
+    /// while the driver holds the pointer; a compacting GC mid-wait would
+    /// move the object and the driver would write through a stale pointer.
+    /// The fix routes through a stack local. This test drives the natural
+    /// heap-target calling pattern and asserts a valid index round-trips,
+    /// then completes a clean acquire→present cycle so device teardown is
+    /// validation-clean.
+    /// </summary>
+    [Fact]
+    public void AcquireNextImage_Writes_ImageIndex_Into_HeapTarget()
+    {
+        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out uint family);
+
+        var desc = new SwapchainDescription { Surface = surface, Width = window.Width, Height = window.Height };
+        using var swap = new Swapchain(device, in desc);
+
+        using var ring = new FrameRing(device, framesInFlight: 1, queueFamily: family);
+        var queue = device.GetQueue(family, 0);
+
+        // The out target is a GC-heap array element — the exact pattern
+        // from issue #103. Pre-seed with a sentinel the driver can never
+        // return so a missed write would surface as an out-of-range index.
+        uint[] heapTarget = new uint[1];
+        heapTarget[0] = uint.MaxValue;
+
+        using var fc = ring.BeginFrame();
+        var acq = swap.AcquireNextImage(fc.ImageAcquired, TimeSpan.FromSeconds(1), out heapTarget[0]);
+        Assert.True(acq is AcquireResult.Success or AcquireResult.Suboptimal,
+            $"AcquireNextImage returned {acq}.");
+
+        uint imageIndex = heapTarget[0];
+        Assert.True(imageIndex < swap.ImageCount,
+            $"imageIndex {imageIndex} is out of range (ImageCount {swap.ImageCount}).");
+
+        fc.MarkImageAcquireSignaled();
+
+        // Consume the acquire semaphore and present the image so device
+        // teardown stays validation-clean (a host-signaled-but-unwaited
+        // binary semaphore can't be destroyed). UNDEFINED→PRESENT_SRC is a
+        // legal direct transition; no rendering needed.
+        var rec = fc.CommandBuffers.Begin();
+        try
+        {
+            var barrier = new ImageBarrier
+            {
+                Image          = swap.GetImageHandle(imageIndex),
+                SrcStage       = Stage.TopOfPipe,    SrcAccess = Access.None,
+                DstStage       = Stage.BottomOfPipe, DstAccess = Access.None,
+                OldLayout      = VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
+                NewLayout      = VkImageLayout.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                Aspect         = VkImageAspectFlagBits.VK_IMAGE_ASPECT_COLOR_BIT,
+                BaseMipLevel   = 0, LevelCount = 1,
+                BaseArrayLayer = 0, LayerCount = 1,
+            };
+            rec.PipelineBarrier(barrier);
+            fc.Submit(queue, ref rec, swap, imageIndex);
+        }
+        finally { rec.Dispose(); }
+
+        swap.Present(queue, imageIndex);
+        device.WaitIdle();
+    }
+
+    /// <summary>
     /// Picks the first physical device whose graphics queue family also
     /// supports presenting to <paramref name="surface"/>, then creates a
     /// device with VK_KHR_swapchain enabled.
