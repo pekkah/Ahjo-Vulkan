@@ -36,14 +36,14 @@ public readonly record struct ImageCopyRegion
         => new()
         {
             SrcAspect     = aspect,
-            SrcLayerCount = src.ArrayLayers == 0 ? 1u : src.ArrayLayers,
+            SrcLayerCount = src.ArrayLayers,
             DstAspect     = aspect,
-            DstLayerCount = dst.ArrayLayers == 0 ? 1u : dst.ArrayLayers,
+            DstLayerCount = dst.ArrayLayers,
             Extent        = new VkExtent3D
             {
                 width  = src.Width,
                 height = src.Height,
-                depth  = src.Depth == 0 ? 1u : src.Depth,
+                depth  = src.Depth,
             },
         };
 

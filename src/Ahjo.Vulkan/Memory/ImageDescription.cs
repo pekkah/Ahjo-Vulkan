@@ -8,22 +8,30 @@ namespace Ahjo.Vulkan;
 /// <c>pNext</c>, queue-sharing fields).
 /// </summary>
 /// <remarks>
-/// Vulkan-native enums (<c>VkFormat</c>, <c>VkImageType</c>,
+/// <para>Vulkan-native enums (<c>VkFormat</c>, <c>VkImageType</c>,
 /// <c>VkImageTiling</c>, <c>VkImageLayout</c>, <c>VkSampleCountFlagBits</c>)
 /// pass through from the bindings; only the bit-field types
 /// (<see cref="ImageUsage"/>) are shadowed because flag enums benefit most
-/// from <c>[Flags]</c> + IDE type-help.
+/// from <c>[Flags]</c> + IDE type-help.</para>
+/// <para><b>Valid-by-default (issue #119):</b> <c>new ImageDescription { … }</c>
+/// is a valid create-info on its own. The dimension/sample/type fields default
+/// to the overwhelmingly common single-mip, single-layer, non-multisampled 2D
+/// image, so callers only set <see cref="Format"/>, <see cref="Width"/>,
+/// <see cref="Height"/>, and <see cref="Usage"/> for the typical case. A
+/// zero-default here used to produce an *invalid* <c>VkImageCreateInfo</c>
+/// (<c>mipLevels = 0</c>, <c>samples = 0</c>); the field initializers fix that
+/// at the type level rather than via call-site normalization.</para>
 /// </remarks>
 public readonly record struct ImageDescription
 {
-    public VkImageType            ImageType     { get; init; }
+    public VkImageType            ImageType     { get; init; } = VkImageType.VK_IMAGE_TYPE_2D;
     public VkFormat               Format        { get; init; }
     public uint                   Width         { get; init; }
     public uint                   Height        { get; init; }
-    public uint                   Depth         { get; init; }
-    public uint                   MipLevels     { get; init; }
-    public uint                   ArrayLayers   { get; init; }
-    public VkSampleCountFlagBits  Samples       { get; init; }
+    public uint                   Depth         { get; init; } = 1;
+    public uint                   MipLevels     { get; init; } = 1;
+    public uint                   ArrayLayers   { get; init; } = 1;
+    public VkSampleCountFlagBits  Samples       { get; init; } = VkSampleCountFlagBits.VK_SAMPLE_COUNT_1_BIT;
     public VkImageTiling          Tiling        { get; init; }
     public ImageUsage             Usage         { get; init; }
     public VkImageLayout          InitialLayout { get; init; }
@@ -39,4 +47,13 @@ public readonly record struct ImageDescription
     /// bits with <c>|</c> on the enum stays inside the enum's type.
     /// </summary>
     public VkImageCreateFlagBits Flags { get; init; }
+
+    /// <summary>
+    /// Runs the valid-by-default field initializers (issue #119). C# requires
+    /// a struct with field initializers to declare a constructor explicitly
+    /// (CS8983); this is what makes <c>new ImageDescription()</c> /
+    /// <c>new ImageDescription { … }</c> start from the 2D, single-mip,
+    /// single-layer, single-sample baseline.
+    /// </summary>
+    public ImageDescription() { }
 }

@@ -8,6 +8,17 @@ namespace Ahjo.Vulkan;
 /// surface caps and falls back to a known-good default when the
 /// requested value isn't supported.
 /// </summary>
+/// <remarks>
+/// <b>Valid-by-default (issue #119):</b> build with
+/// <c>new SwapchainDescription { … }</c> so the field initializers run.
+/// <see cref="PreferredPresentMode"/> then defaults to the spec-guaranteed
+/// <c>VK_PRESENT_MODE_FIFO_KHR</c> rather than the zero enum value
+/// (<c>VK_PRESENT_MODE_IMMEDIATE_KHR</c>), which makes IMMEDIATE distinguishable
+/// from "unset" and therefore requestable (fixes issue #105). Because this is a
+/// <c>ref struct</c>, the field initializer only runs through the explicit
+/// parameterless constructor below — <c>default(SwapchainDescription)</c> skips
+/// it and is not a supported way to build the description.
+/// </remarks>
 public ref struct SwapchainDescription
 {
     /// <summary>Required. The platform surface this swapchain renders to.</summary>
@@ -38,9 +49,12 @@ public ref struct SwapchainDescription
     /// Preferred present mode. Default
     /// (<c>VK_PRESENT_MODE_FIFO_KHR</c>) is guaranteed available per the
     /// spec — anyone wanting <c>MAILBOX</c> or <c>IMMEDIATE</c> sets it
-    /// explicitly and accepts the FIFO fallback.
+    /// explicitly and accepts the FIFO fallback. The FIFO default comes from
+    /// the field initializer (not the zero enum value), so an explicit
+    /// <c>VK_PRESENT_MODE_IMMEDIATE_KHR</c> (which is <c>0</c>) is honoured
+    /// rather than mistaken for "unset" — see issue #105.
     /// </summary>
-    public VkPresentModeKHR PreferredPresentMode;
+    public VkPresentModeKHR PreferredPresentMode = VkPresentModeKHR.VK_PRESENT_MODE_FIFO_KHR;
 
     /// <summary>
     /// Image usage flags. Default <see cref="ImageUsage.ColorAttachment"/>
@@ -60,4 +74,13 @@ public ref struct SwapchainDescription
     /// </summary>
     public uint Width;
     public uint Height;
+
+    /// <summary>
+    /// Runs the field initializers. A <c>ref struct</c> does not synthesize a
+    /// parameterless constructor for them the way a record struct does, so this
+    /// explicit one is what gives <c>new SwapchainDescription()</c> /
+    /// <c>new SwapchainDescription { … }</c> the FIFO present-mode default
+    /// (issue #119 / #105).
+    /// </summary>
+    public SwapchainDescription() { }
 }

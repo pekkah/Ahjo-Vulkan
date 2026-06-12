@@ -323,6 +323,50 @@ public sealed unsafe class SwapchainTests
     }
 
     /// <summary>
+    /// Regression for issue #105 (fixed via #119's valid-by-default
+    /// descriptions): <c>VK_PRESENT_MODE_IMMEDIATE_KHR</c> is the zero enum
+    /// value, so the old "<c>PreferredPresentMode == default</c> means unset →
+    /// ship FIFO" logic made IMMEDIATE unrequestable. Now FIFO is the field
+    /// initializer default and IMMEDIATE survives as an explicit request. This
+    /// test asks for IMMEDIATE and asserts the swapchain honours it when the
+    /// surface supports it (skips when it doesn't — SwiftShader/headless ICDs
+    /// may expose FIFO only).
+    /// </summary>
+    [Fact]
+    public void Request_ImmediatePresentMode_IsHonouredWhenSupported()
+    {
+        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out _);
+
+        // Does the surface support IMMEDIATE at all?
+        uint count = 0;
+        Vk.vkGetPhysicalDeviceSurfacePresentModesKHR(device.PhysicalDevice.Handle, surface.Handle, &count, null).ThrowIfFailed();
+        var modes = new VkPresentModeKHR[count];
+        fixed (VkPresentModeKHR* p = modes)
+            Vk.vkGetPhysicalDeviceSurfacePresentModesKHR(device.PhysicalDevice.Handle, surface.Handle, &count, p).ThrowIfFailed();
+
+        bool supportsImmediate = Array.IndexOf(modes, VkPresentModeKHR.VK_PRESENT_MODE_IMMEDIATE_KHR) >= 0;
+        Assert.SkipUnless(supportsImmediate, "Surface does not expose VK_PRESENT_MODE_IMMEDIATE_KHR.");
+
+        var desc = new SwapchainDescription
+        {
+            Surface              = surface,
+            Width                = window.Width,
+            Height               = window.Height,
+            PreferredPresentMode = VkPresentModeKHR.VK_PRESENT_MODE_IMMEDIATE_KHR,
+        };
+        using var swap = new Swapchain(device, in desc);
+
+        Assert.Equal(VkPresentModeKHR.VK_PRESENT_MODE_IMMEDIATE_KHR, swap.PresentMode);
+    }
+
+    /// <summary>
     /// Picks the first physical device whose graphics queue family also
     /// supports presenting to <paramref name="surface"/>, then creates a
     /// device with VK_KHR_swapchain enabled.

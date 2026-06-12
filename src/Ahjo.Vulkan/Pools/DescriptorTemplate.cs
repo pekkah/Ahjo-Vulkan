@@ -162,6 +162,8 @@ internal static unsafe class DescriptorTemplateBuilder
         for (int i = 0; i < bindings.Length; i++)
         {
             ref readonly DescriptorBinding b = ref bindings[i];
+            // Count defaults to 1 via field initializer (issue #119); guard a
+            // default(DescriptorBinding) span element that bypasses it.
             uint  count = b.Count == 0 ? 1u : b.Count;
             nuint end   = runningOffset + (nuint)count * DescriptorWriteStride;
             if (end > structSize)

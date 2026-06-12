@@ -37,12 +37,12 @@ public readonly record struct BufferImageCopy
             Aspect         = aspect,
             MipLevel       = 0,
             BaseArrayLayer = 0,
-            LayerCount     = image.ArrayLayers == 0 ? 1u : image.ArrayLayers,
+            LayerCount     = image.ArrayLayers,
             ImageExtent    = new VkExtent3D
             {
                 width  = image.Width,
                 height = image.Height,
-                depth  = image.Depth == 0 ? 1u : image.Depth,
+                depth  = image.Depth,
             },
         };
 
