@@ -101,16 +101,20 @@ public class SyncPoolBenchmarks
     [Benchmark(OperationsPerInvoke = CallsPerInvoke)]
     public ulong Sync_HostOps_RoundTrip()
     {
-        // The host-side per-frame sync surface: Fence.IsSignaled/Reset and
-        // TimelineSemaphore.Signal/WaitFor/Value all carry the borrowed-
-        // handle guard added by #102/#118 — this keeps the branch under the
-        // 0 B/op canary. Acquire/Release bracket the ops so the pool returns
-        // to steady state each iteration.
+        // The host-side per-frame sync surface: Fence.IsSignaled/Wait/Reset
+        // and TimelineSemaphore.Signal/WaitFor/Value all carry the borrowed-
+        // handle guard added by #102/#118 and the Device.IsLost fast-path
+        // read added by #120 — this keeps both branches under the 0 B/op
+        // canary. Wait(Zero) on the unsignaled fence is a non-blocking poll
+        // (returns Timeout immediately), so the Wait guard is exercised
+        // without a queue submit. Acquire/Release bracket the ops so the
+        // pool returns to steady state each iteration.
         ulong sum = 0;
         for (int i = 0; i < CallsPerInvoke; i++)
         {
             var f = _fencePool.Acquire();
             if (f.IsSignaled) sum++;
+            if (f.Wait(TimeSpan.Zero) == WaitState.Timeout) sum++;
             f.Reset();
             _fencePool.Release(f);
 
