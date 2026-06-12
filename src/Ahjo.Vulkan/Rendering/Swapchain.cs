@@ -361,7 +361,7 @@ public sealed unsafe class Swapchain : IDisposable
     private void LoadImagesAndViews()
     {
         uint imageCount = 0;
-        Vk.vkGetSwapchainImagesKHR(_device.Handle, _handle, &imageCount, null).ThrowIfFailed();
+        Vk.vkGetSwapchainImagesKHR(_device.Handle, _handle, &imageCount, null).ThrowIfErrored();
 
         _images = new VkImage_T*[imageCount];
         _views  = new ImageView[imageCount];
@@ -378,7 +378,7 @@ public sealed unsafe class Swapchain : IDisposable
         AllocateRenderingDoneSemaphores((int)imageCount);
 
         fixed (VkImage_T** p = _images)
-            Vk.vkGetSwapchainImagesKHR(_device.Handle, _handle, &imageCount, p).ThrowIfFailed();
+            Vk.vkGetSwapchainImagesKHR(_device.Handle, _handle, &imageCount, p).ThrowIfErrored();
 
         for (uint i = 0; i < imageCount; i++)
         {
@@ -502,7 +502,7 @@ public sealed unsafe class Swapchain : IDisposable
     private VkSurfaceFormatKHR NegotiateFormat(VkPhysicalDevice_T* gpu, in SwapchainDescription desc)
     {
         uint count = 0;
-        Vk.vkGetPhysicalDeviceSurfaceFormatsKHR(gpu, _surface.Handle, &count, null).ThrowIfFailed();
+        Vk.vkGetPhysicalDeviceSurfaceFormatsKHR(gpu, _surface.Handle, &count, null).ThrowIfErrored();
         if (count == 0)
             throw new VulkanException(VkResult.VK_ERROR_INITIALIZATION_FAILED,
                 "Surface reports zero supported formats.");
@@ -511,7 +511,7 @@ public sealed unsafe class Swapchain : IDisposable
             ? stackalloc VkSurfaceFormatKHR[(int)count]
             : new VkSurfaceFormatKHR[count];
         fixed (VkSurfaceFormatKHR* p = formats)
-            Vk.vkGetPhysicalDeviceSurfaceFormatsKHR(gpu, _surface.Handle, &count, p).ThrowIfFailed();
+            Vk.vkGetPhysicalDeviceSurfaceFormatsKHR(gpu, _surface.Handle, &count, p).ThrowIfErrored();
 
         // Walk the caller's priority list once; first match wins. Spec
         // doesn't guarantee any specific format/colorSpace pair other
@@ -540,12 +540,12 @@ public sealed unsafe class Swapchain : IDisposable
             return VkPresentModeKHR.VK_PRESENT_MODE_FIFO_KHR;
 
         uint count = 0;
-        Vk.vkGetPhysicalDeviceSurfacePresentModesKHR(gpu, _surface.Handle, &count, null).ThrowIfFailed();
+        Vk.vkGetPhysicalDeviceSurfacePresentModesKHR(gpu, _surface.Handle, &count, null).ThrowIfErrored();
         Span<VkPresentModeKHR> modes = count <= 8
             ? stackalloc VkPresentModeKHR[(int)count]
             : new VkPresentModeKHR[count];
         fixed (VkPresentModeKHR* p = modes)
-            Vk.vkGetPhysicalDeviceSurfacePresentModesKHR(gpu, _surface.Handle, &count, p).ThrowIfFailed();
+            Vk.vkGetPhysicalDeviceSurfacePresentModesKHR(gpu, _surface.Handle, &count, p).ThrowIfErrored();
 
         for (int i = 0; i < modes.Length; i++)
             if (modes[i] == desc.PreferredPresentMode) return desc.PreferredPresentMode;

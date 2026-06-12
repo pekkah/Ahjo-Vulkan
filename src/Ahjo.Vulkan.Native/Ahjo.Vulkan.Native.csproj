@@ -155,4 +155,33 @@
     <Message Importance="high" Text="Generated chain partials written to $(_ChainsOutputDir)" />
   </Target>
 
+  <!--
+    RegenerateResultPolicy: parses vk.xml's per-command successcodes and emits
+    the table of multi-success commands consumed by the ResultPolicyGuardTests
+    guard test (issue #117). Output lands in the test project's Generated/ dir
+    and is committed alongside the rest of the bindings.
+
+    Not wired into Build — same policy as Regenerate/RegenerateChains. Run after
+    a Vulkan-Headers bump.
+
+    Usage: dotnet build src/Ahjo.Vulkan.Native /t:RegenerateResultPolicy
+  -->
+  <Target Name="RegenerateResultPolicy" DependsOnTargets="CopyGeneratedHeaders">
+    <PropertyGroup>
+      <_ResultPolicyGenProj>$(ToolsDir)Ahjo.Vulkan.ResultPolicyGen\Ahjo.Vulkan.ResultPolicyGen.csproj</_ResultPolicyGenProj>
+      <_ResultPolicyVkXmlPath>$(_VulkanIncludeStaging)vulkan\vk.xml</_ResultPolicyVkXmlPath>
+      <_ResultPolicyOutput>$(RepositoryRoot)tests\Ahjo.Vulkan.Tests\Generated\ResultPolicyData.g.cs</_ResultPolicyOutput>
+    </PropertyGroup>
+
+    <Error
+      Condition="!Exists('$(_ResultPolicyVkXmlPath)')"
+      Text="vk.xml not staged at $(_ResultPolicyVkXmlPath); run CopyGeneratedHeaders first." />
+
+    <Exec
+      Command="dotnet run --project &quot;$(_ResultPolicyGenProj)&quot; -c Release -- &quot;$(_ResultPolicyVkXmlPath)&quot; &quot;$(_ResultPolicyOutput)&quot;"
+      WorkingDirectory="$(RepositoryRoot)" />
+
+    <Message Importance="high" Text="Generated result-policy table written to $(_ResultPolicyOutput)" />
+  </Target>
+
 </Project>
