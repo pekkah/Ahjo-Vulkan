@@ -73,8 +73,15 @@ public readonly unsafe struct Image : IVulkanHandle<Image>, IDisposable
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_IMAGE;
 
+    // Valid-by-default (issue #119): a wrapped raw handle reports 1 mip, 1
+    // array layer, depth 1 — correct for any single raw VkImage you'd wrap
+    // (swapchain images are exactly that), and it makes the whole-image
+    // subresource helpers (ImageBarrier.Transition, *Region.WholeImage,
+    // GenerateMips, Clear*) read a valid >=1 count without a == 0 ? 1 guard.
+    // Width/Height stay 0 — unknown for a bare handle and unused by those
+    // helpers' subresource ranges.
     public static Image FromRaw(nint handle) =>
-        new((VkImage_T*)handle, null, default, default, 0, 0, 0, 0, 0, ImageUsage.None, null);
+        new((VkImage_T*)handle, null, default, default, 0, 0, 1, 1, 1, ImageUsage.None, null);
 
     public ulong RawHandle => (ulong)Handle;
 

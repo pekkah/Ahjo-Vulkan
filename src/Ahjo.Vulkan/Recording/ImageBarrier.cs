@@ -74,9 +74,9 @@ public unsafe readonly record struct ImageBarrier
             DstQueueFamilyIndex = QueueFamilyIgnored,
             Aspect              = aspect,
             BaseMipLevel        = 0,
-            LevelCount          = image.MipLevels   == 0 ? 1u : image.MipLevels,
+            LevelCount          = image.MipLevels,
             BaseArrayLayer      = 0,
-            LayerCount          = image.ArrayLayers == 0 ? 1u : image.ArrayLayers,
+            LayerCount          = image.ArrayLayers,
         };
 
     /// <summary>
@@ -110,9 +110,9 @@ public unsafe readonly record struct ImageBarrier
             DstQueueFamilyIndex = toQueueFamily,
             Aspect              = aspect,
             BaseMipLevel        = 0,
-            LevelCount          = image.MipLevels   == 0 ? 1u : image.MipLevels,
+            LevelCount          = image.MipLevels,
             BaseArrayLayer      = 0,
-            LayerCount          = image.ArrayLayers == 0 ? 1u : image.ArrayLayers,
+            LayerCount          = image.ArrayLayers,
         };
 
     /// <summary>
@@ -144,9 +144,9 @@ public unsafe readonly record struct ImageBarrier
             DstQueueFamilyIndex = toQueueFamily,
             Aspect              = aspect,
             BaseMipLevel        = 0,
-            LevelCount          = image.MipLevels   == 0 ? 1u : image.MipLevels,
+            LevelCount          = image.MipLevels,
             BaseArrayLayer      = 0,
-            LayerCount          = image.ArrayLayers == 0 ? 1u : image.ArrayLayers,
+            LayerCount          = image.ArrayLayers,
         };
 
     internal VkImageMemoryBarrier2 ToNative()
@@ -173,6 +173,10 @@ public unsafe readonly record struct ImageBarrier
             srcQueueFamilyIndex = SrcQueueFamilyIndex,
             dstQueueFamilyIndex = DstQueueFamilyIndex,
             image               = (VkImage_T*)Image,
+            // levelCount/layerCount fall back to 1 when zero: belt-and-braces
+            // for a default(ImageBarrier) element in a span, which bypasses the
+            // valid-by-default convention's field initializers (issue #119).
+            // Factories and direct `new ImageBarrier { … }` set real counts.
             subresourceRange    = new VkImageSubresourceRange
             {
                 aspectMask     = (uint)Aspect,

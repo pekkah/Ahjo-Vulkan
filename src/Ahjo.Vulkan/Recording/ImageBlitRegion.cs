@@ -38,20 +38,20 @@ public readonly record struct ImageBlitRegion
         => new()
         {
             SrcAspect     = aspect,
-            SrcLayerCount = src.ArrayLayers == 0 ? 1u : src.ArrayLayers,
+            SrcLayerCount = src.ArrayLayers,
             SrcOffset1    = new VkOffset3D
             {
                 x = (int)src.Width,
                 y = (int)src.Height,
-                z = (int)(src.Depth == 0 ? 1u : src.Depth),
+                z = (int)src.Depth,
             },
             DstAspect     = aspect,
-            DstLayerCount = dst.ArrayLayers == 0 ? 1u : dst.ArrayLayers,
+            DstLayerCount = dst.ArrayLayers,
             DstOffset1    = new VkOffset3D
             {
                 x = (int)dst.Width,
                 y = (int)dst.Height,
-                z = (int)(dst.Depth == 0 ? 1u : dst.Depth),
+                z = (int)dst.Depth,
             },
         };
 

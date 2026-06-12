@@ -755,8 +755,8 @@ public unsafe ref struct CommandRecorder : IDisposable
         VkFilter              filter = VkFilter.VK_FILTER_LINEAR,
         VkImageAspectFlagBits aspect = VkImageAspectFlagBits.VK_IMAGE_ASPECT_COLOR_BIT)
     {
-        uint mipLevels   = image.MipLevels   == 0 ? 1u : image.MipLevels;
-        uint arrayLayers = image.ArrayLayers == 0 ? 1u : image.ArrayLayers;
+        uint mipLevels   = image.MipLevels;
+        uint arrayLayers = image.ArrayLayers;
 
         // Single-mip image: only thing left is to put mip 0 into the
         // requested final layout.
@@ -811,7 +811,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         // Step 2: per-mip downsample loop.
         int srcW = (int)image.Width;
         int srcH = (int)image.Height;
-        int srcD = (int)(image.Depth == 0 ? 1u : image.Depth);
+        int srcD = (int)image.Depth;
 
         for (uint i = 1; i < mipLevels; i++)
         {
@@ -995,8 +995,8 @@ public unsafe ref struct CommandRecorder : IDisposable
         var range = new VkImageSubresourceRange
         {
             aspectMask     = (uint)VkImageAspectFlagBits.VK_IMAGE_ASPECT_COLOR_BIT,
-            baseMipLevel   = 0, levelCount = image.MipLevels   == 0 ? 1u : image.MipLevels,
-            baseArrayLayer = 0, layerCount = image.ArrayLayers == 0 ? 1u : image.ArrayLayers,
+            baseMipLevel   = 0, levelCount = image.MipLevels,
+            baseArrayLayer = 0, layerCount = image.ArrayLayers,
         };
         ClearColorImage(in image, layout, in color, MemoryMarshal.CreateReadOnlySpan(ref range, 1));
     }
@@ -1039,8 +1039,8 @@ public unsafe ref struct CommandRecorder : IDisposable
         var range = new VkImageSubresourceRange
         {
             aspectMask     = (uint)aspect,
-            baseMipLevel   = 0, levelCount = image.MipLevels   == 0 ? 1u : image.MipLevels,
-            baseArrayLayer = 0, layerCount = image.ArrayLayers == 0 ? 1u : image.ArrayLayers,
+            baseMipLevel   = 0, levelCount = image.MipLevels,
+            baseArrayLayer = 0, layerCount = image.ArrayLayers,
         };
         ClearDepthStencilImage(in image, layout, in depthStencil, MemoryMarshal.CreateReadOnlySpan(ref range, 1));
     }

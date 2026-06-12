@@ -541,10 +541,14 @@ public sealed unsafe class Swapchain : IDisposable
 
     private VkPresentModeKHR NegotiatePresentMode(VkPhysicalDevice_T* gpu, in SwapchainDescription desc)
     {
-        // FIFO is required by the spec — if the caller didn't request
-        // anything else, ship FIFO without an extra round-trip query.
-        if (desc.PreferredPresentMode == default ||
-            desc.PreferredPresentMode == VkPresentModeKHR.VK_PRESENT_MODE_FIFO_KHR)
+        // FIFO is required by the spec — if that's the request (the
+        // valid-by-default value, see SwapchainDescription / issue #105), ship
+        // it without an extra round-trip query. Note: we deliberately do NOT
+        // treat the zero enum value as "unset" here. The description's field
+        // initializer already makes FIFO the default, so a present mode of 0
+        // means the caller explicitly asked for VK_PRESENT_MODE_IMMEDIATE_KHR
+        // and we honour it below.
+        if (desc.PreferredPresentMode == VkPresentModeKHR.VK_PRESENT_MODE_FIFO_KHR)
             return VkPresentModeKHR.VK_PRESENT_MODE_FIFO_KHR;
 
         uint count = 0;

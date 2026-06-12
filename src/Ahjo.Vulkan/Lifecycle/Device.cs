@@ -116,6 +116,10 @@ public sealed unsafe class Device : IDisposable
             {
                 binding         = b.Slot,
                 descriptorType  = b.Type,
+                // DescriptorBinding.Count defaults to 1 via field initializer
+                // (issue #119); this == 0 ? 1 guard is belt-and-braces for a
+                // default(DescriptorBinding) element in the bindings span, which
+                // bypasses the initializer.
                 descriptorCount = b.Count == 0 ? 1u : b.Count,
                 stageFlags      = (uint)b.Stages,
             };
