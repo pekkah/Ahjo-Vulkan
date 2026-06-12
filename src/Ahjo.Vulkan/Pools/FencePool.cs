@@ -85,6 +85,24 @@ public sealed unsafe class FencePool : IDisposable
         bucket.Push((nint)fence.Handle);
     }
 
+    /// <summary>
+    /// Returns a fence to a free-list without querying
+    /// <c>vkGetFenceStatus</c>, routing by the caller-supplied
+    /// <paramref name="knownSignaled"/> state. Use this on a teardown path
+    /// after device loss, where the status query would itself throw
+    /// <c>VK_ERROR_DEVICE_LOST</c> (see issue #107): the bucket choice is
+    /// immaterial since <see cref="Dispose"/> destroys every handle next,
+    /// but the parameterless <see cref="Release(Fence)"/> would let the
+    /// exception escape <c>Dispose</c> and strand the remaining handles.
+    /// </summary>
+    public void Release(Fence fence, bool knownSignaled)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (fence.IsNull) return;
+        Stack<nint> bucket = knownSignaled ? _freeSignaled : _freeUnsignaled;
+        bucket.Push((nint)fence.Handle);
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
