@@ -1,7 +1,25 @@
-using System.Collections.Generic;
 using Ahjo.Vulkan.Native;
 
 namespace Ahjo.Vulkan;
+
+/// <summary>
+/// Constraints declared at <c>vkCreatePipelineLayout</c> time — the
+/// push-constant ranges and descriptor-set-layout handles the layout was
+/// built from. Rides on the <see cref="PipelineLayout"/> struct as its one
+/// managed reference field (issue #118; the relaxed
+/// <see cref="IVulkanHandle{TSelf}"/> contract permits it), so the data is
+/// device-scoped, copies with the handle, and dies with the last copy —
+/// no process-global side table, no lock, no raw-pointer key exposed to
+/// driver handle reuse. Read by <c>CommandRecorder</c>'s debug-only
+/// assertions (PushConstants's range-fits check and BindDescriptorSets's
+/// set-layout-matches check). Allocated once per layout at create time —
+/// never on a per-frame path.
+/// </summary>
+internal sealed class PipelineLayoutMetadata
+{
+    public required PushConstantRange[] PushRanges { get; init; }
+    public required nint[] SetLayouts { get; init; }
+}
 
 /// <summary>
 /// Wrapper handle for a <c>VkPipelineLayout</c>. <c>readonly struct</c> +
@@ -13,10 +31,16 @@ public readonly unsafe struct PipelineLayout : IVulkanHandle<PipelineLayout>, ID
     public readonly VkPipelineLayout_T* Handle;
     internal readonly VkDevice_T* DeviceHandle;
 
-    internal PipelineLayout(VkPipelineLayout_T* handle, VkDevice_T* device)
+    // Declared constraints for CommandRecorder's debug assertions. Null for
+    // FromRaw-constructed (borrowed) layouts and default — the assertions
+    // gracefully no-op in that case.
+    internal readonly PipelineLayoutMetadata? Metadata;
+
+    internal PipelineLayout(VkPipelineLayout_T* handle, VkDevice_T* device, PipelineLayoutMetadata? metadata = null)
     {
         Handle       = handle;
         DeviceHandle = device;
+        Metadata     = metadata;
     }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_PIPELINE_LAYOUT;
@@ -24,51 +48,8 @@ public readonly unsafe struct PipelineLayout : IVulkanHandle<PipelineLayout>, ID
     public ulong RawHandle => (ulong)Handle;
     public bool IsNull => Handle == null;
 
-    // Constraints declared at create time, keyed by raw handle.
-    // PipelineLayout is a `readonly struct` constrained to `unmanaged` by
-    // IVulkanHandle, so it can't carry managed-reference fields — the
-    // declared push-constant ranges and descriptor-set-layout handles
-    // live in these side-tables, populated by Device.CreatePipelineLayout
-    // and read by CommandRecorder's debug-only assertions
-    // (PushConstants's range-fits check and BindDescriptorSets's
-    // set-layout-matches check). Layout creation/disposal is not on a
-    // hot path; the dictionary lock and the small heap allocations per
-    // layout are acceptable. FromRaw'd layouts have no entry here — the
-    // assertions gracefully no-op in that case.
-    private static readonly Dictionary<nint, PushConstantRange[]> s_pushRanges = new();
-    private static readonly Dictionary<nint, nint[]>              s_setLayouts = new();
-    private static readonly object s_metadataLock = new();
-
-    internal static void RegisterPushRanges(VkPipelineLayout_T* handle, PushConstantRange[] ranges)
-    {
-        lock (s_metadataLock) s_pushRanges[(nint)handle] = ranges;
-    }
-
-    internal static PushConstantRange[]? TryGetPushRanges(VkPipelineLayout_T* handle)
-    {
-        lock (s_metadataLock)
-            return s_pushRanges.TryGetValue((nint)handle, out var ranges) ? ranges : null;
-    }
-
-    internal static void RegisterSetLayouts(VkPipelineLayout_T* handle, nint[] setLayoutHandles)
-    {
-        lock (s_metadataLock) s_setLayouts[(nint)handle] = setLayoutHandles;
-    }
-
-    internal static nint[]? TryGetSetLayouts(VkPipelineLayout_T* handle)
-    {
-        lock (s_metadataLock)
-            return s_setLayouts.TryGetValue((nint)handle, out var layouts) ? layouts : null;
-    }
-
-    private static void UnregisterMetadata(VkPipelineLayout_T* handle)
-    {
-        lock (s_metadataLock)
-        {
-            s_pushRanges.Remove((nint)handle);
-            s_setLayouts.Remove((nint)handle);
-        }
-    }
+    /// <inheritdoc/>
+    public bool OwnsHandle => DeviceHandle != null;
 
     /// <summary>
     /// Builds a <see cref="DescriptorTemplate{T}"/> for the per-frame
@@ -100,10 +81,8 @@ public readonly unsafe struct PipelineLayout : IVulkanHandle<PipelineLayout>, ID
         if (Handle == null) return;
         // FromRaw produces a borrowed handle with no DeviceHandle — the
         // caller owns the lifetime; calling vkDestroyPipelineLayout with a
-        // null device handle would crash on every loader. There is no
-        // side-table entry for a FromRaw'd layout, so skip unregistration too.
-        if (DeviceHandle == null) return;
-        UnregisterMetadata(Handle);
+        // null device handle would crash on every loader.
+        if (!OwnsHandle) return;
         Vk.vkDestroyPipelineLayout(DeviceHandle, Handle, null);
     }
 }

@@ -30,6 +30,9 @@ public readonly unsafe struct DescriptorSetLayout : IVulkanHandle<DescriptorSetL
     public ulong RawHandle => (ulong)Handle;
     public bool IsNull => Handle == null;
 
+    /// <inheritdoc/>
+    public bool OwnsHandle => DeviceHandle != null;
+
     /// <summary>
     /// Builds a <see cref="DescriptorTemplate{T}"/> for the long-lived
     /// <c>vkUpdateDescriptorSetWithTemplate</c> path. The template's update
@@ -56,7 +59,7 @@ public readonly unsafe struct DescriptorSetLayout : IVulkanHandle<DescriptorSetL
         // FromRaw produces a borrowed handle with no DeviceHandle — the
         // caller owns the lifetime; calling vkDestroyDescriptorSetLayout
         // with a null device handle would crash on every loader.
-        if (DeviceHandle == null) return;
+        if (!OwnsHandle) return;
         Vk.vkDestroyDescriptorSetLayout(DeviceHandle, Handle, null);
     }
 }

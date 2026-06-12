@@ -71,8 +71,11 @@ A `default(InstanceDescription)` is also legal — `ApiVersion` falls back to
 
 - **Struct handles.** `Buffer`, `Image`, `Pipeline`, `Queue`, `CommandBuffer`,
   etc. are `readonly struct`s that satisfy `IVulkanHandle<TSelf>` (one or two
-  raw `Vk*_T*` fields, `default(T)` is a legal null handle, copy-by-value, no
-  finalizer). Disposal is deterministic at the call site; double-dispose is
+  raw `Vk*_T*` fields plus optional creation-time metadata, `default(T)` is a
+  legal null handle, copy-by-value, no finalizer). Ownership is part of the
+  contract: `OwnsHandle` reports whether `Dispose` destroys; `FromRaw` and
+  `default` produce borrowed handles with a no-op `Dispose`. Disposal is
+  deterministic at the call site; double-dispose is
   undefined behavior — the wrapper does not zero-on-release. `Instance` and
   `Device` are the exceptions: they are `sealed class`es with finalizers
   because they're once-per-process and worth backstopping.

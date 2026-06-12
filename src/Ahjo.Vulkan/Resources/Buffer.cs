@@ -82,6 +82,14 @@ public readonly unsafe struct Buffer : IVulkanHandle<Buffer>, IDisposable
     public bool IsNull => Handle == null;
 
     /// <summary>
+    /// <see langword="true"/> when this struct owns the VMA allocation —
+    /// i.e. <see cref="Dispose"/> destroys it. <see langword="false"/> for
+    /// <see cref="FromRaw"/>-constructed (borrowed) handles and
+    /// <c>default</c>.
+    /// </summary>
+    public bool OwnsHandle => !Owner.IsNull;
+
+    /// <summary>
     /// GPU virtual address for use with <c>bufferDeviceAddress</c> features.
     /// Caller must have created the buffer with <see cref="BufferUsage.ShaderDeviceAddress"/>.
     /// </summary>
@@ -167,7 +175,7 @@ public readonly unsafe struct Buffer : IVulkanHandle<Buffer>, IDisposable
         // FromRaw produces a borrowed handle with no owning Allocator — the
         // caller owns the lifetime; calling vmaDestroyBuffer through a null
         // allocator would crash. Skip the destroy.
-        if (Owner.IsNull) return;
+        if (!OwnsHandle) return;
         VmaApi.vmaDestroyBuffer(Owner.Handle, Handle, AllocationHandle);
     }
 }

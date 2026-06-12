@@ -26,4 +26,10 @@ public readonly unsafe struct BinarySemaphore : IVulkanHandle<BinarySemaphore>
     public static BinarySemaphore FromRaw(nint handle) => new((VkSemaphore_T*)handle);
     public ulong RawHandle => (ulong)Handle;
     public bool IsNull => Handle == null;
+
+    /// <summary>
+    /// Always <see langword="false"/>: <see cref="SemaphorePool"/> owns the
+    /// <c>VkSemaphore</c>'s lifetime; the struct never destroys it.
+    /// </summary>
+    public bool OwnsHandle => false;
 }

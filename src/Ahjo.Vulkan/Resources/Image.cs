@@ -88,6 +88,14 @@ public readonly unsafe struct Image : IVulkanHandle<Image>, IDisposable
     public bool IsNull => Handle == null;
 
     /// <summary>
+    /// <see langword="true"/> when this struct owns the VMA allocation —
+    /// i.e. <see cref="Dispose"/> destroys it. <see langword="false"/> for
+    /// <see cref="FromRaw"/>-constructed (borrowed) handles (notably
+    /// swapchain-owned images) and <c>default</c>.
+    /// </summary>
+    public bool OwnsHandle => !Owner.IsNull;
+
+    /// <summary>
     /// Creates an <see cref="ImageView"/> over this image. Caller owns the
     /// returned view's lifetime — dispose it before this <see cref="Image"/>
     /// goes away.
@@ -124,7 +132,7 @@ public readonly unsafe struct Image : IVulkanHandle<Image>, IDisposable
         // caller owns the lifetime. Crucially, a swapchain-owned image is
         // not a VMA allocation and must never reach vmaDestroyImage; the
         // guard makes the borrow contract real. Skip the destroy.
-        if (Owner.IsNull) return;
+        if (!OwnsHandle) return;
         VmaApi.vmaDestroyImage(Owner.Handle, Handle, AllocationHandle);
     }
 }

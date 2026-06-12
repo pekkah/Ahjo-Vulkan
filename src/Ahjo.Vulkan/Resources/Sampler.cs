@@ -8,8 +8,8 @@ namespace Ahjo.Vulkan;
 /// </summary>
 /// <remarks>
 /// Holds a raw <c>VkDevice_T*</c> rather than a <see cref="Device"/>
-/// reference so the struct stays <c>unmanaged</c> and satisfies the
-/// <see cref="IVulkanHandle{TSelf}"/> constraint. The pointer is valid as
+/// reference — the struct needs only a destroy target, not the managed
+/// wrapper. The pointer is valid as
 /// long as the parent <see cref="Device"/> hasn't been disposed.
 /// <c>default(Sampler)</c> is a legal null handle: <see cref="IsNull"/>
 /// returns <see langword="true"/> and <see cref="Dispose"/> is a no-op.
@@ -33,13 +33,16 @@ public readonly unsafe struct Sampler : IVulkanHandle<Sampler>, IDisposable
 
     public bool IsNull => Handle == null;
 
+    /// <inheritdoc/>
+    public bool OwnsHandle => DeviceHandle != null;
+
     public void Dispose()
     {
         if (Handle == null) return;
         // FromRaw produces a borrowed handle with no DeviceHandle — the
         // caller owns the lifetime; calling vkDestroySampler with a null
         // device handle would crash on every loader.
-        if (DeviceHandle == null) return;
+        if (!OwnsHandle) return;
         Vk.vkDestroySampler(DeviceHandle, Handle, null);
     }
 }
