@@ -362,11 +362,18 @@ public sealed unsafe class FrameRing : IDisposable
             // a slot whose fence was reset by BeginFrame but never
             // re-submitted has an unsignaled fence with no GPU work
             // behind it, and waiting on it would hang Dispose forever.
-            // A slot whose fence BeginFrame reset but never re-submitted is
-            // unsignaled; one whose pending submit completed is signaled.
-            // Tracked explicitly so the FencePool.Release below can skip the
-            // vkGetFenceStatus query on the device-lost path.
-            bool fenceSignaled = !_pendingSubmit;
+            //
+            // The signaled state we hand to FencePool.Release is derived
+            // WITHOUT a vkGetFenceStatus query: after device loss that query
+            // returns VK_ERROR_DEVICE_LOST, which the status-querying
+            // Release(Fence) overload would rethrow and strand the remaining
+            // slots' pools (issue #107). The bucket the fence lands in is
+            // immaterial — FencePool.Dispose destroys every handle next — so a
+            // non-pending slot (no GPU work behind the fence; whether it's
+            // signaled depends on create-signaled vs. a prior Reset) routes to
+            // unsignaled rather than guess. Only the pending-submit path, where
+            // the wait result is authoritative, reports a real state.
+            bool fenceSignaled = false;
             if (_pendingSubmit)
             {
                 // Dispose mustn't throw — log a lost-device or unexpected
@@ -380,11 +387,6 @@ public sealed unsafe class FrameRing : IDisposable
             }
             _pendingSubmit = false;
 
-            // Route the fence back without re-querying its status: after a
-            // device loss vkGetFenceStatus returns VK_ERROR_DEVICE_LOST,
-            // which the parameterless Release would rethrow and strand the
-            // remaining slots' pools (issue #107). The handle is destroyed by
-            // FencePool.Dispose immediately below regardless of bucket.
             FencePool.Release(InFlightHandle, fenceSignaled);
             SemaphorePool.Release(ImageAcquired);
             DescriptorSets?.Dispose();

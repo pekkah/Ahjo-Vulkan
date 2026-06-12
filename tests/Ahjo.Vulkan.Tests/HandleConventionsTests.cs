@@ -80,6 +80,17 @@ public sealed class HandleConventionsTests
             () => { _ = layout.CreateUpdateTemplate<int>(default); });
     }
 
+    [Fact]
+    public void FromRawPipelineLayout_CreatePushDescriptorTemplate_Throws()
+    {
+        // Same null-device hazard as DescriptorSetLayout.CreateUpdateTemplate:
+        // fail loudly on a borrowed layout instead of crashing (issue #106).
+        PipelineLayout layout = PipelineLayout.FromRaw(0x1234_5678);
+        Assert.Throws<InvalidOperationException>(
+            () => { _ = layout.CreatePushDescriptorTemplate<int>(
+                0, VkPipelineBindPoint.VK_PIPELINE_BIND_POINT_GRAPHICS, default); });
+    }
+
     private static T MakeFromRaw<T>(nint raw) where T : unmanaged, IVulkanHandle<T>
         => T.FromRaw(raw);
 

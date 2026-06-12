@@ -85,7 +85,15 @@ public readonly unsafe struct PipelineLayout : IVulkanHandle<PipelineLayout>, ID
         VkPipelineBindPoint             bindPoint,
         ReadOnlySpan<DescriptorBinding> bindings)
         where T : unmanaged
-        => DescriptorTemplateBuilder.CreateForPush<T>(DeviceHandle, Handle, bindPoint, set, bindings);
+    {
+        // FromRaw'd layouts carry no DeviceHandle; the template create call
+        // would dispatch through a null device. Fail loudly instead.
+        if (DeviceHandle == null)
+            throw new InvalidOperationException(
+                "PipelineLayout.CreatePushDescriptorTemplate requires an owning device; " +
+                "a FromRaw-constructed (borrowed) layout has none.");
+        return DescriptorTemplateBuilder.CreateForPush<T>(DeviceHandle, Handle, bindPoint, set, bindings);
+    }
 
     public void Dispose()
     {
