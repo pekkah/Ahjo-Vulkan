@@ -73,6 +73,10 @@ managed-byte count BDN's `MemoryDiagnoser` reports; `-` is zero.
 | `PipelineBarrier.LargeBatch_8x8x1`              | 3.08 µs / 256 ops ≈ **12.0 ns/op** | - | One `vkCmdPipelineBarrier2` with 64 image barriers.              |
 | `FrameRing.Frame_Begin_Submit_Wait`             |  56.20 µs  |        -  | Full headless frame: BeginFrame → submit no-op cmd → wait fence.          |
 | `PushDescriptors.PushDescriptors_StorageBuffer` |  69.34 ns  |        -  | `vkCmdPushDescriptorSetWithTemplate` × 1024 in one Begin/End scope; bimodal under driver overhead. |
+| `HandleOwnership.PassAndReturn_ByValue`         |   3.69 ns  |        -  | #118 canary: `PipelineLayout` (one managed metadata ref) copied through a non-inlined call — stays stack-only, no write barrier, no box. Captured on a Linux container host (driver-free benchmark). |
+| `HandleOwnership.MetadataRead_OwningAndBorrowed` |  0.92 ns  |        -  | Field read replacing the old side-table dictionary lookup + lock.       |
+| `HandleOwnership.OwnershipPredicate`            |   0.47 ns  |        -  | `OwnsHandle` — the Dispose guard / borrow check.                        |
+| `HandleOwnership.ConstrainedGenericDispatch`    |   3.69 ns  |        -  | `ObjectName.Set`-shaped `struct, IVulkanHandle<T>` dispatch — devirtualized, box-free under the relaxed constraint. |
 
 `OperationsPerInvoke` is set on the benchmarks that use it (`Buffer.Map_AsSpan`,
 `PipelineBarrier.*`, `PushDescriptors.*`) so BDN's reported Mean / Allocated
