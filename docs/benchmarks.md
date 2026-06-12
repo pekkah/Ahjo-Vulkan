@@ -97,5 +97,13 @@ back into the per-call cost when the unrolled span is non-trivial.
   paths. There is no fast/slow split today; `LargeBatch_8x8x1` is therefore
   a regression canary against a future `ArrayPool` rental, not a comparison
   between two distinct allocation regimes.
+- **Device-loss fast path (#120)**: `Fence.Wait`/`Fence.IsSignaled`/
+  `TimelineSemaphore.WaitFor` carry a `Device.IsLost` volatile-read branch
+  in front of the host syscall, and the sync structs carry a managed
+  `Device` owner reference. Both sit under the existing `SyncPool`
+  (`Sync_HostOps_RoundTrip`) and `FrameRing` canaries; the allocation
+  column was re-verified at `-` across all four `SyncPool` benchmarks after
+  the change (Linux container, Mesa lavapipe — Mean values from that host
+  are not comparable to this baseline and were not recorded here).
 - **Not run in CI**: benchmark numbers are too noisy on hosted runners.
   This file is a manual capture; refresh it when a hot path changes.

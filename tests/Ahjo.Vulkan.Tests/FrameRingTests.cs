@@ -588,6 +588,29 @@ public sealed unsafe class FrameRingTests
         Assert.Throws<ObjectDisposedException>(() => ring.BeginFrame());
     }
 
+    /// <summary>
+    /// Issue #111 §2: tearing a slot down while its acquire signal is
+    /// still flagged pending (acquire succeeded, app exits before
+    /// submitting) now inserts a vkDeviceWaitIdle before releasing the
+    /// ImageAcquired semaphore. The teardown must complete without
+    /// throwing or hanging.
+    /// </summary>
+    [Fact]
+    public void Dispose_WithPendingAcquireSignal_Completes()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+
+        var ring = new FrameRing(device, framesInFlight: 2, queueFamily: family);
+        using (var frame = ring.BeginFrame())
+        {
+            frame.MarkImageAcquireSignaled();
+        }
+        ring.Dispose(); // must not throw
+    }
+
     private static Device CreateGraphicsDevice(Instance instance, out uint family)
     {
         uint f = uint.MaxValue;

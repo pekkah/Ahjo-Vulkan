@@ -366,6 +366,123 @@ public sealed unsafe class SwapchainTests
         Assert.Equal(VkPresentModeKHR.VK_PRESENT_MODE_IMMEDIATE_KHR, swap.PresentMode);
     }
 
+    // ---- Issue #120: SwapchainState machine ----
+
+    [Fact]
+    public void NewSwapchain_StartsReady()
+    {
+        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out _);
+
+        var desc = new SwapchainDescription { Surface = surface, Width = window.Width, Height = window.Height };
+        using var swap = new Swapchain(device, in desc);
+
+        Assert.Equal(SwapchainState.Ready, swap.State);
+    }
+
+    [Fact]
+    public void Recreate_ReturnsReady_OnSuccess()
+    {
+        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out _);
+
+        var desc = new SwapchainDescription { Surface = surface, Width = window.Width, Height = window.Height };
+        using var swap = new Swapchain(device, in desc);
+
+        Assert.Equal(SwapchainState.Ready, swap.Recreate(in desc));
+    }
+
+    /// <summary>
+    /// Acquire/present on a Minimized or Poisoned swapchain throw instead
+    /// of looping forever against a dead handle (#110/#112). The states
+    /// are driven through the internal test seam — provoking a real
+    /// window-manager minimize or a failing vkCreateSwapchainKHR from CI
+    /// is not portable.
+    /// </summary>
+    [Fact]
+    public void AcquireAndPresent_InMinimizedOrPoisoned_Throw()
+    {
+        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out uint family);
+
+        var desc = new SwapchainDescription { Surface = surface, Width = window.Width, Height = window.Height };
+        using var swap = new Swapchain(device, in desc);
+        using var semaphores = new SemaphorePool(device);
+        var acquireSem = semaphores.AcquireBinary();
+        var queue = device.GetQueue(family, 0);
+
+        foreach (var state in new[] { SwapchainState.Minimized, SwapchainState.Poisoned })
+        {
+            swap.OverrideStateForTesting(state);
+            var acquireEx = Assert.Throws<InvalidOperationException>(
+                () => swap.AcquireNextImage(in acquireSem, TimeSpan.Zero, out _));
+            Assert.Contains(state.ToString(), acquireEx.Message);
+            Assert.Throws<InvalidOperationException>(() => swap.Present(queue, 0));
+        }
+
+        // Restore so Dispose runs against coherent state.
+        swap.OverrideStateForTesting(SwapchainState.Ready);
+        semaphores.Release(acquireSem);
+    }
+
+    /// <summary>
+    /// Recreate after device loss fails fast with the cached DeviceLost
+    /// exception and poisons the swapchain — no drain or create is
+    /// attempted against the dead device (#120).
+    /// </summary>
+    [Fact]
+    public void Recreate_AfterDeviceLoss_ThrowsAndPoisons()
+    {
+        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out _);
+
+        var desc = new SwapchainDescription { Surface = surface, Width = window.Width, Height = window.Height };
+        using var swap = new Swapchain(device, in desc);
+
+        device.MarkLost();
+        // SwapchainDescription is a ref struct — no lambda capture; same
+        // wrapper-method shape as Recreate_WithWrongSurface above.
+        TryRecreate(swap, surface, window.Width, window.Height, out VulkanException? ex);
+        Assert.NotNull(ex);
+        Assert.Equal(VkResult.VK_ERROR_DEVICE_LOST, ex.Result);
+        Assert.Equal(SwapchainState.Poisoned, swap.State);
+
+        static void TryRecreate(Swapchain s, Surface surface, uint width, uint height, out VulkanException? thrown)
+        {
+            try
+            {
+                var retry = new SwapchainDescription { Surface = surface, Width = width, Height = height };
+                s.Recreate(in retry);
+                thrown = null;
+            }
+            catch (VulkanException e) { thrown = e; }
+        }
+    }
+
     /// <summary>
     /// Picks the first physical device whose graphics queue family also
     /// supports presenting to <paramref name="surface"/>, then creates a
