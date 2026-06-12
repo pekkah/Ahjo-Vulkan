@@ -193,11 +193,19 @@ public sealed unsafe class Swapchain : IDisposable
         out uint            imageIndex)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        imageIndex = 0;
+        // Write into a stack local rather than &imageIndex: the out param
+        // can target a GC-heap location (a class field, an array element)
+        // and vkAcquireNextImageKHR blocks for up to `timeout` while the
+        // driver holds the pointer. An unpinned heap pointer captured via
+        // Unsafe.AsPointer would dangle if a compacting GC moved the
+        // object mid-wait — silent corruption. The local is on the stack
+        // (never moved) and we copy out only after the call returns.
+        uint idx = 0;
         VkResult r = Vk.vkAcquireNextImageKHR(
             _device.Handle, _handle, timeout.ToVulkanTimeout(),
             signaled.Handle, fence: null,
-            (uint*)System.Runtime.CompilerServices.Unsafe.AsPointer(ref imageIndex));
+            &idx);
+        imageIndex = idx;
 
         return r switch
         {
