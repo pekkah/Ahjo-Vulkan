@@ -546,7 +546,11 @@ public sealed unsafe class Instance : IDisposable
         try
         {
             var msg = data != null ? Utf8.ToString(data->pMessage) : null;
-            Console.Error.WriteLine($"[Vulkan {severity}] {msg}");
+            DiagnosticSeverity mapped =
+                (severity & VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)   != 0 ? DiagnosticSeverity.Error :
+                (severity & VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) != 0 ? DiagnosticSeverity.Warning :
+                                                                                                                           DiagnosticSeverity.Info;
+            AhjoDiagnostics.Write(mapped, "Vulkan", $"[Vulkan {severity}] {msg}");
             if ((severity & VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0
                 && Debugger.IsAttached)
             {

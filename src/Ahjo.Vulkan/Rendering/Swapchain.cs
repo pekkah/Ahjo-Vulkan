@@ -45,11 +45,30 @@ public sealed unsafe class Swapchain : IDisposable
     // present of image i" ordering to guarantee that, where per-slot
     // keying does not.
     private BinarySemaphore[]     _renderingDone = [];
+    // Old swapchain handles + their per-image RenderingDone semaphores
+    // retired by a Recreate whose drain was the caller's fence callback
+    // (issue #111): per-frame fences prove submit completion, not present
+    // completion, so destroying these immediately would violate
+    // VUID-vkDestroySemaphore-semaphore-01137 /
+    // VUID-vkDestroySwapchainKHR-swapchain-01282. They are destroyed at
+    // the points where device-wide completion is proven: a later Recreate
+    // that used the vkDeviceWaitIdle default, or Dispose (whose contract
+    // is "call after the device is idle"). Growth is bounded by
+    // recreates-per-session — user-interactive rate, not per-frame.
+    private readonly List<(nint Swapchain, BinarySemaphore[] RenderingDone)> _retired = [];
     private VkSurfaceFormatKHR    _format;
     private VkExtent2D            _extent;
     private VkPresentModeKHR      _presentMode;
     private ImageUsage            _imageUsage;
+    private SwapchainState        _state;
     private bool                  _disposed;
+
+    /// <summary>
+    /// Current lifecycle state — see <see cref="SwapchainState"/> for the
+    /// transition table. <see cref="Recreate"/> returns the post-call
+    /// state, so frame loops rarely need to read this directly.
+    /// </summary>
+    public SwapchainState State => _state;
 
     public VkSwapchainKHR_T*     Handle      => _handle;
     public VkSurfaceFormatKHR    SurfaceFormat => _format;
@@ -107,7 +126,10 @@ public sealed unsafe class Swapchain : IDisposable
         // Owned by the Swapchain so its lifetime tracks the per-image
         // semaphore array's. Internal — not exposed to callers.
         _semaphorePool = new SemaphorePool(device);
-        CreateOrRecreate(in desc, oldSwapchain: null);
+        // Zero extent at construction (app launched minimized, #110) is a
+        // legal starting state: no VkSwapchainKHR exists yet; the first
+        // non-minimized Recreate performs the initial create.
+        _state = CreateOrRecreate(in desc, oldSwapchain: null);
     }
 
     /// <summary>
@@ -130,6 +152,11 @@ public sealed unsafe class Swapchain : IDisposable
     /// that touch the swapchain. The wrapper has no way to verify the
     /// callback is sufficient — a callback that misses a pending submit
     /// will surface as a driver-side device-lost on the next frame.
+    /// Because per-frame fences prove submit completion but not <i>present</i>
+    /// completion, the old swapchain handle and its per-image semaphores
+    /// are not destroyed immediately on this path — they are parked and
+    /// destroyed at the next proven-idle point (a later default-drain
+    /// <c>Recreate</c>, or <see cref="Dispose"/>); see issue #111.
     /// </param>
     /// <remarks>
     /// <para><b>Why an optional callback rather than a hard
@@ -158,23 +185,126 @@ public sealed unsafe class Swapchain : IDisposable
     /// binary semaphore that <i>was</i> consumed by a submit is left
     /// unsignaled by the drain and does not need rotation.</para>
     /// </remarks>
-    public void Recreate(in SwapchainDescription desc, SwapchainSyncCallback? syncBeforeDestroy = null)
+    /// <returns>
+    /// The post-call <see cref="SwapchainState"/>:
+    /// <see cref="SwapchainState.Ready"/> on success,
+    /// <see cref="SwapchainState.Minimized"/> when the surface reports a
+    /// zero extent (nothing is drained or destroyed — retry when the
+    /// window is restored). A create failure sets
+    /// <see cref="SwapchainState.Poisoned"/> and rethrows.
+    /// </returns>
+    public SwapchainState Recreate(in SwapchainDescription desc, SwapchainSyncCallback? syncBeforeDestroy = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (desc.Surface.Handle != _surface.Handle)
             throw new ArgumentException(
                 "Recreate must use the same Surface this Swapchain was constructed with.",
                 nameof(desc));
+        // Fail fast after device loss instead of attempting a drain +
+        // create against a dead device (#120). The cached exception keeps
+        // the failure path allocation-free.
+        if (_device.IsLost)
+        {
+            _state = SwapchainState.Poisoned;
+            ResultExtensions.ThrowDeviceLost();
+        }
 
-        if (syncBeforeDestroy is null)
+        // Minimize check BEFORE the drain (#110): a minimized window must
+        // not pay a vkDeviceWaitIdle per retry, and nothing may be
+        // destroyed — the existing swapchain/views/semaphores stay intact
+        // for the next attempt. CreateOrRecreate re-checks post-drain in
+        // case the window minimizes while the drain blocks.
+        VkSurfaceCapabilitiesKHR caps = default;
+        Vk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+            _device.PhysicalDevice.Handle, _surface.Handle, &caps).ThrowIfFailed();
+        if (IsZeroExtent(ComputeExtent(in caps, desc.Width, desc.Height)))
+        {
+            _state = SwapchainState.Minimized;
+            return _state;
+        }
+
+        bool fullIdle = syncBeforeDestroy is null;
+        if (fullIdle)
             Vk.vkDeviceWaitIdle(_device.Handle).ThrowIfFailed();
         else
-            syncBeforeDestroy();
+            syncBeforeDestroy!();
+        // A full wait-idle proves present completion device-wide — the
+        // point at which previously retired handles/semaphores (#111) are
+        // safe to destroy.
+        if (fullIdle) FlushRetired();
 
-        VkSwapchainKHR_T* old = _handle;
+        VkSwapchainKHR_T* old      = _handle;
+        BinarySemaphore[] oldSems  = _renderingDone;
         DestroyViews();
-        CreateOrRecreate(in desc, oldSwapchain: old);
-        if (old != null) Vk.vkDestroySwapchainKHR(_device.Handle, old, null);
+        try
+        {
+            _state = CreateOrRecreate(in desc, oldSwapchain: old);
+        }
+        catch
+        {
+            // CreateOrRecreate assigns _handle before LoadImagesAndViews;
+            // a throw from the image/view step would otherwise orphan the
+            // freshly created swapchain. Destroying it immediately is
+            // legal — none of its images were acquired or presented. (Its
+            // fresh RenderingDone semaphores stay tracked by
+            // _semaphorePool and are recovered at Dispose.)
+            VkSwapchainKHR_T* created = _handle;
+            if (created != null && created != old)
+                Vk.vkDestroySwapchainKHR(_device.Handle, created, null);
+            // Passing oldSwapchain retires it even when creation fails
+            // (#112): the object must not keep referencing the retired
+            // handle, and a retry must not pass it as oldSwapchain again.
+            _handle        = null;
+            _renderingDone = [];
+            RetireOrDestroy(old, oldSems, fullIdle);
+            _state = SwapchainState.Poisoned;
+            throw;
+        }
+
+        if (_state == SwapchainState.Minimized)
+        {
+            // Window minimized during the drain; CreateOrRecreate returned
+            // before creating or touching anything — the old handle and
+            // _renderingDone (== oldSems) remain current. Views were
+            // destroyed above; the next successful Recreate rebuilds them
+            // and the ThrowIfNotPresentable guard covers the gap.
+            return _state;
+        }
+
+        RetireOrDestroy(old, oldSems, fullIdle);
+        return _state;
+    }
+
+    /// <summary>
+    /// Destroy the retired swapchain + its per-image semaphores when
+    /// device-wide completion is proven (<paramref name="provenIdle"/>);
+    /// otherwise park them on the retire list (#111 — a fence drain does
+    /// not cover the presentation engine's semaphore waits or pending
+    /// presents from the old swapchain).
+    /// </summary>
+    private void RetireOrDestroy(VkSwapchainKHR_T* old, BinarySemaphore[] sems, bool provenIdle)
+    {
+        if (old == null && sems.Length == 0) return;
+        if (provenIdle)
+        {
+            for (int i = 0; i < sems.Length; i++) _semaphorePool.Discard(sems[i]);
+            if (old != null) Vk.vkDestroySwapchainKHR(_device.Handle, old, null);
+        }
+        else
+        {
+            _retired.Add(((nint)old, sems));
+        }
+    }
+
+    private void FlushRetired()
+    {
+        for (int i = 0; i < _retired.Count; i++)
+        {
+            (nint old, BinarySemaphore[] sems) = _retired[i];
+            for (int s = 0; s < sems.Length; s++) _semaphorePool.Discard(sems[s]);
+            if (old != 0) Vk.vkDestroySwapchainKHR(_device.Handle, (VkSwapchainKHR_T*)old, null);
+        }
+        _retired.Clear();
     }
 
     /// <summary>
@@ -193,6 +323,7 @@ public sealed unsafe class Swapchain : IDisposable
         out uint            imageIndex)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfNotPresentable();
         // Write into a stack local rather than &imageIndex: the out param
         // can target a GC-heap location (a class field, an array element)
         // and vkAcquireNextImageKHR blocks for up to `timeout` while the
@@ -206,19 +337,62 @@ public sealed unsafe class Swapchain : IDisposable
             signaled.Handle, fence: null,
             &idx);
         imageIndex = idx;
+        return MapPresentationResult(r, "vkAcquireNextImageKHR", fromAcquire: true);
+    }
 
-        return r switch
+    /// <summary>
+    /// Shared result mapping + state transitions for the acquire/present
+    /// pair (#120): <c>OutOfDate</c> → <see cref="SwapchainState.NeedsRecreate"/>,
+    /// <c>SurfaceLost</c> → <see cref="SwapchainState.Poisoned"/> (a
+    /// same-surface <see cref="Recreate"/> cannot succeed),
+    /// <c>DEVICE_LOST</c> → mark the device + poison, then throw.
+    /// <c>Suboptimal</c> deliberately leaves the state untouched — the
+    /// image is presentable per spec; recreating stays the caller's choice.
+    /// <c>TIMEOUT</c>/<c>NOT_READY</c> are in <c>vkAcquireNextImageKHR</c>'s
+    /// result set only — a present returning them is a broken ICD and
+    /// throws instead of mapping to a benign retry.
+    /// </summary>
+    private AcquireResult MapPresentationResult(VkResult r, string fn, bool fromAcquire)
+    {
+        switch (r)
         {
-            VkResult.VK_SUCCESS                  => AcquireResult.Success,
-            VkResult.VK_SUBOPTIMAL_KHR           => AcquireResult.Suboptimal,
-            VkResult.VK_ERROR_OUT_OF_DATE_KHR    => AcquireResult.OutOfDate,
-            VkResult.VK_ERROR_SURFACE_LOST_KHR   => AcquireResult.SurfaceLost,
-            VkResult.VK_TIMEOUT                  => AcquireResult.Timeout,
-            VkResult.VK_NOT_READY                => AcquireResult.NotReady,
-            VkResult.VK_ERROR_DEVICE_LOST        => throw new VulkanException(r,
-                "vkAcquireNextImageKHR: VK_ERROR_DEVICE_LOST. The VkDevice is no longer usable; tear down and recreate the device + every dependent resource."),
-            _                                    => throw new VulkanException(r, "vkAcquireNextImageKHR"),
-        };
+            case VkResult.VK_SUCCESS:
+                return AcquireResult.Success;
+            case VkResult.VK_SUBOPTIMAL_KHR:
+                return AcquireResult.Suboptimal;
+            case VkResult.VK_ERROR_OUT_OF_DATE_KHR:
+                _state = SwapchainState.NeedsRecreate;
+                return AcquireResult.OutOfDate;
+            case VkResult.VK_ERROR_SURFACE_LOST_KHR:
+                _state = SwapchainState.Poisoned;
+                return AcquireResult.SurfaceLost;
+            case VkResult.VK_TIMEOUT when fromAcquire:
+                return AcquireResult.Timeout;
+            case VkResult.VK_NOT_READY when fromAcquire:
+                return AcquireResult.NotReady;
+            case VkResult.VK_ERROR_DEVICE_LOST:
+                _device.MarkLost();
+                _state = SwapchainState.Poisoned;
+                throw new VulkanException(r,
+                    $"{fn}: VK_ERROR_DEVICE_LOST. The VkDevice is no longer usable; tear down and recreate the device + every dependent resource.");
+            default:
+                throw new VulkanException(r, fn);
+        }
+    }
+
+    // Guards the "loop forever re-acquiring a dead swapchain" failure mode
+    // at the API boundary: in Minimized there is no usable swapchain for
+    // this frame; in Poisoned no handle is held at all. NeedsRecreate stays
+    // advisory — acquire/present remain legal and keep reporting OutOfDate.
+    private void ThrowIfNotPresentable()
+    {
+        if (_state is SwapchainState.Minimized or SwapchainState.Poisoned)
+        {
+            throw new InvalidOperationException(
+                _state == SwapchainState.Minimized
+                    ? "Swapchain is in the Minimized state (zero-extent surface). Skip rendering, poll the window size, and call Recreate when it is restored."
+                    : "Swapchain is in the Poisoned state (a Recreate failed, or the surface/device was lost). Call Recreate to attempt a from-scratch create, or Dispose.");
+        }
     }
 
     /// <summary>
@@ -252,6 +426,7 @@ public sealed unsafe class Swapchain : IDisposable
     {
         ArgumentNullException.ThrowIfNull(queue);
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfNotPresentable();
 
         VkSemaphore_T*    waitRaw = waitSemaphore.Handle;
         VkSwapchainKHR_T* swap    = _handle;
@@ -267,16 +442,7 @@ public sealed unsafe class Swapchain : IDisposable
             pImageIndices      = &idx,
         };
         VkResult r = Vk.vkQueuePresentKHR(queue.Handle, &info);
-        return r switch
-        {
-            VkResult.VK_SUCCESS                => AcquireResult.Success,
-            VkResult.VK_SUBOPTIMAL_KHR         => AcquireResult.Suboptimal,
-            VkResult.VK_ERROR_OUT_OF_DATE_KHR  => AcquireResult.OutOfDate,
-            VkResult.VK_ERROR_SURFACE_LOST_KHR => AcquireResult.SurfaceLost,
-            VkResult.VK_ERROR_DEVICE_LOST      => throw new VulkanException(r,
-                "vkQueuePresentKHR: VK_ERROR_DEVICE_LOST. The VkDevice is no longer usable; tear down and recreate the device + every dependent resource."),
-            _                                  => throw new VulkanException(r, "vkQueuePresentKHR"),
-        };
+        return MapPresentationResult(r, "vkQueuePresentKHR", fromAcquire: false);
     }
 
     public void Dispose()
@@ -286,6 +452,10 @@ public sealed unsafe class Swapchain : IDisposable
 
         DestroyViews();
         DiscardRenderingDoneSemaphores();
+        // Retired handles/semaphores parked by fence-callback Recreates
+        // (#111) are destroyed here: Dispose's documented contract is
+        // "call after the device is idle", which proves present completion.
+        FlushRetired();
         if (_handle != null)
         {
             Vk.vkDestroySwapchainKHR(_device.Handle, _handle, null);
@@ -294,7 +464,11 @@ public sealed unsafe class Swapchain : IDisposable
         _semaphorePool.Dispose();
     }
 
-    private void CreateOrRecreate(in SwapchainDescription desc, VkSwapchainKHR_T* oldSwapchain)
+    // Test seam (InternalsVisibleTo): drive the Minimized/Poisoned guard
+    // paths without a real window-manager event or a failing driver call.
+    internal void OverrideStateForTesting(SwapchainState state) => _state = state;
+
+    private SwapchainState CreateOrRecreate(in SwapchainDescription desc, VkSwapchainKHR_T* oldSwapchain)
     {
         VkPhysicalDevice_T* gpu = _device.PhysicalDevice.Handle;
 
@@ -302,27 +476,24 @@ public sealed unsafe class Swapchain : IDisposable
         VkSurfaceCapabilitiesKHR caps = default;
         Vk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(gpu, _surface.Handle, &caps).ThrowIfFailed();
 
+        // ---- Extent ----
+        // Checked before anything is created: a zero extent (minimized
+        // window, #110) would violate VUID-VkSwapchainCreateInfoKHR-
+        // imageExtent-01689. Recreate already checked pre-drain; this
+        // re-check covers a minimize that lands while the drain blocks.
+        VkExtent2D extent = ComputeExtent(in caps, desc.Width, desc.Height);
+        if (IsZeroExtent(extent))
+            return SwapchainState.Minimized;
+        _extent = extent;
+
         // ---- Format ----
         _format = NegotiateFormat(gpu, in desc);
 
         // ---- Present mode ----
         _presentMode = NegotiatePresentMode(gpu, in desc);
 
-        // ---- Extent ----
-        _extent = caps.currentExtent.width != ~0u
-            ? caps.currentExtent
-            : new VkExtent2D
-            {
-                width  = Math.Clamp(desc.Width  == 0 ? 1u : desc.Width,
-                                    caps.minImageExtent.width,  caps.maxImageExtent.width),
-                height = Math.Clamp(desc.Height == 0 ? 1u : desc.Height,
-                                    caps.minImageExtent.height, caps.maxImageExtent.height),
-            };
-
         // ---- Image count ----
-        uint requested = desc.PreferredImageCount == 0 ? caps.minImageCount + 1u : desc.PreferredImageCount;
-        uint maxClamp  = caps.maxImageCount == 0 ? requested : caps.maxImageCount; // 0 means "no limit"
-        uint count     = Math.Clamp(requested, caps.minImageCount, maxClamp);
+        uint count = ComputeImageCount(in caps, desc.PreferredImageCount);
 
         // ---- Usage ----
         _imageUsage = desc.ImageUsage == 0 ? ImageUsage.ColorAttachment : desc.ImageUsage;
@@ -353,7 +524,7 @@ public sealed unsafe class Swapchain : IDisposable
                 queueFamilyIndexCount = sharingMode == VkSharingMode.VK_SHARING_MODE_CONCURRENT ? familyCount : 0u,
                 pQueueFamilyIndices   = sharingMode == VkSharingMode.VK_SHARING_MODE_CONCURRENT ? pFamilies : null,
                 preTransform          = caps.currentTransform,
-                compositeAlpha        = VkCompositeAlphaFlagBitsKHR.VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+                compositeAlpha        = PickCompositeAlpha(caps.supportedCompositeAlpha),
                 presentMode           = _presentMode,
                 clipped               = 1,
                 oldSwapchain          = oldSwapchain,
@@ -364,6 +535,64 @@ public sealed unsafe class Swapchain : IDisposable
         }
 
         LoadImagesAndViews();
+        return SwapchainState.Ready;
+    }
+
+    /// <summary>
+    /// Surface extent for the next create. When the surface pins
+    /// <c>currentExtent</c> (anything but the <c>0xFFFFFFFF</c>
+    /// "window-manager decides" sentinel) that wins verbatim — including
+    /// the <c>(0, 0)</c> a minimized Windows window reports. In the
+    /// sentinel branch the caller's size is clamped to the caps range,
+    /// which can also legitimately produce zero when
+    /// <c>maxImageExtent</c> is <c>(0, 0)</c>. Callers must treat a zero
+    /// result as <see cref="SwapchainState.Minimized"/> (#110) — it is
+    /// never a valid <c>imageExtent</c>.
+    /// </summary>
+    internal static VkExtent2D ComputeExtent(in VkSurfaceCapabilitiesKHR caps, uint descWidth, uint descHeight)
+    {
+        return caps.currentExtent.width != ~0u
+            ? caps.currentExtent
+            : new VkExtent2D
+            {
+                width  = Math.Clamp(descWidth  == 0 ? 1u : descWidth,
+                                    caps.minImageExtent.width,  caps.maxImageExtent.width),
+                height = Math.Clamp(descHeight == 0 ? 1u : descHeight,
+                                    caps.minImageExtent.height, caps.maxImageExtent.height),
+            };
+    }
+
+    internal static bool IsZeroExtent(VkExtent2D extent)
+        => extent.width == 0 || extent.height == 0;
+
+    /// <summary>
+    /// Image count clamped to the caps range. <c>maxImageCount == 0</c>
+    /// means "no limit" and maps to <see cref="uint.MaxValue"/> — the old
+    /// requested-as-max mapping made <c>Math.Clamp</c> throw whenever the
+    /// caller preferred fewer images than <c>minImageCount</c> on an
+    /// unlimited surface (#104); the documented behavior is to clamp up.
+    /// </summary>
+    internal static uint ComputeImageCount(in VkSurfaceCapabilitiesKHR caps, uint preferredImageCount)
+    {
+        uint requested = preferredImageCount == 0 ? caps.minImageCount + 1u : preferredImageCount;
+        uint maxClamp  = caps.maxImageCount == 0 ? uint.MaxValue : caps.maxImageCount;
+        return Math.Clamp(requested, caps.minImageCount, maxClamp);
+    }
+
+    /// <summary>
+    /// Prefer <c>OPAQUE</c> when the surface supports it; otherwise fall
+    /// back to the lowest set bit of <c>supportedCompositeAlpha</c> (the
+    /// spec guarantees at least one). The old hard-coded <c>OPAQUE</c>
+    /// violated VUID-VkSwapchainCreateInfoKHR-compositeAlpha-01280 on
+    /// compositors that only expose <c>PRE_MULTIPLIED</c>/<c>INHERIT</c>
+    /// (#110 — latent on Windows, real on Wayland/Android).
+    /// </summary>
+    internal static VkCompositeAlphaFlagBitsKHR PickCompositeAlpha(uint supportedCompositeAlpha)
+    {
+        const uint opaque = (uint)VkCompositeAlphaFlagBitsKHR.VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+        if ((supportedCompositeAlpha & opaque) != 0 || supportedCompositeAlpha == 0)
+            return VkCompositeAlphaFlagBitsKHR.VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+        return (VkCompositeAlphaFlagBitsKHR)(supportedCompositeAlpha & ~(supportedCompositeAlpha - 1));
     }
 
     private void LoadImagesAndViews()
@@ -373,16 +602,12 @@ public sealed unsafe class Swapchain : IDisposable
 
         _images = new VkImage_T*[imageCount];
         _views  = new ImageView[imageCount];
-        // Reallocate per-image RenderingDone semaphores. On the first
-        // call (initial create) _renderingDone is empty; on Recreate it
-        // holds the prior swapchain's per-image semaphores, which are
-        // either consumed-and-unsignaled (safe to release back to the
-        // pool but easier to discard uniformly) or stuck signaled if
-        // the matching present returned OutOfDate (must be discarded —
-        // there is no host-reset for binary semaphores). Discarding
-        // every semaphore covers both cases without per-element state
-        // tracking.
-        DiscardRenderingDoneSemaphores();
+        // Allocate fresh per-image RenderingDone semaphores for the new
+        // swapchain. The prior swapchain's array is NOT discarded here:
+        // Recreate captured it before calling in and decides between
+        // immediate destroy (full wait-idle drain) and the retire list
+        // (fence-callback drain, #111 — the presentation engine may still
+        // hold one of the old semaphores).
         AllocateRenderingDoneSemaphores((int)imageCount);
 
         fixed (VkImage_T** p = _images)

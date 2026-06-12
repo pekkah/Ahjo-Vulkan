@@ -58,7 +58,7 @@ public sealed unsafe class SemaphorePool : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_freeTimeline.Count > 0)
-            return new TimelineSemaphore((VkSemaphore_T*)_freeTimeline.Pop(), _device.Handle);
+            return new TimelineSemaphore((VkSemaphore_T*)_freeTimeline.Pop(), _device);
 
         // Pre-grow so the Add after vkCreateSemaphore can't OOM and
         // orphan the just-created VkSemaphore.
@@ -78,7 +78,7 @@ public sealed unsafe class SemaphorePool : IDisposable
         VkSemaphore_T* raw = null;
         Vk.vkCreateSemaphore(_device.Handle, &ci, null, &raw).ThrowIfFailed();
         _allHandles.Add((nint)raw);
-        return new TimelineSemaphore(raw, _device.Handle);
+        return new TimelineSemaphore(raw, _device);
     }
 
     public void Release(BinarySemaphore sem)

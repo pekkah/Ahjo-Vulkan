@@ -87,8 +87,12 @@ public sealed class FrameContext : IDisposable
     public void Submit(Queue queue, ref CommandRecorder recorder)
     {
         ArgumentNullException.ThrowIfNull(queue);
-        Slot.MarkSubmitted();
         queue.Submit2(ref recorder, in Slot.InFlightHandle);
+        // Marked only after Submit2 returns (#112): a throwing submit must
+        // not arm the in-flight fence wait for GPU work that was never
+        // queued — the next BeginFrame would block forever on a fence
+        // nothing will signal.
+        Slot.MarkSubmitted();
     }
 
     /// <summary>
@@ -163,11 +167,6 @@ public sealed class FrameContext : IDisposable
         Stage                signalSemaphoreStage  = Stage.AllGraphics)
     {
         ArgumentNullException.ThrowIfNull(queue);
-        Slot.MarkSubmitted();
-        // The queued wait will consume the host-side acquire signal as
-        // the GPU reaches it, so from FrameRing's bookkeeping POV the
-        // signal is no longer pending the moment Submit2 returns.
-        Slot.MarkAcquireWaitConsumed();
 
         var wait   = new SemaphoreSubmit(ImageAcquired,   imageAcquireWaitStage);
         var signal = new SemaphoreSubmit(signalSemaphore, signalSemaphoreStage);
@@ -175,6 +174,18 @@ public sealed class FrameContext : IDisposable
             ref recorder, in Slot.InFlightHandle,
             System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(ref wait,   1),
             System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(ref signal, 1));
+
+        // Bookkeeping only after Submit2 returns (#112): if the submit
+        // throws (vkEndCommandBuffer / vkQueueSubmit2 failure), no GPU
+        // wait was queued — the acquire signal must stay flagged pending
+        // so RecycleStaleAcquireSemaphores rotates the stuck semaphore,
+        // and the in-flight fence must stay un-armed so the next
+        // BeginFrame doesn't wait on a submit that never happened. On the
+        // success path the queued wait consumes the host-side acquire
+        // signal as the GPU reaches it, so from FrameRing's bookkeeping
+        // POV the signal is no longer pending the moment Submit2 returns.
+        Slot.MarkSubmitted();
+        Slot.MarkAcquireWaitConsumed();
     }
 
     public void Dispose()

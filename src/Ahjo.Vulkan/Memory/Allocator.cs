@@ -21,7 +21,8 @@ namespace Ahjo.Vulkan;
 /// point for tests that want to manage the allocator themselves.</para>
 /// <para><b>Leak diagnostics.</b> <see cref="Dispose"/> calls
 /// <c>vmaCalculateStatistics</c> first; if any allocation is still live,
-/// it writes a one-line warning to <see cref="Console.Error"/> before
+/// it writes a one-line warning through <see cref="AhjoDiagnostics.Sink"/>
+/// (stderr by default) before
 /// invoking <c>vmaDestroyAllocator</c>. VMA itself asserts on outstanding
 /// allocations in debug builds — the wrapper warning makes the same
 /// problem visible in release builds, where the C++ assert is compiled
@@ -251,7 +252,7 @@ public readonly unsafe struct Allocator : IDisposable
         VmaApi.vmaCalculateStatistics(Handle, &stats);
         if (stats.total.statistics.allocationCount > 0)
         {
-            Console.Error.WriteLine(
+            AhjoDiagnostics.Write(DiagnosticSeverity.Warning, "Allocator",
                 $"[VMA] Allocator disposed with {stats.total.statistics.allocationCount} live allocation(s) " +
                 $"({stats.total.statistics.allocationBytes} bytes). Call DestroyBuffer/DestroyImage on every " +
                 "resource before disposing the allocator.");

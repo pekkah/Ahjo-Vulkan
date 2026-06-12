@@ -89,6 +89,17 @@ internal static class ResultExtensions
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void Throw(VkResult result, string fn)
     {
+        // Single choke point for device loss (issue #120): every
+        // ThrowIfFailed/ThrowIfErrored failure funnels through here, so a
+        // DEVICE_LOST marks Device.IsLost before the throw — wait/status
+        // fast paths and teardown policy all key off that flag instead of
+        // each call site deciding its own post-loss behavior. The throw
+        // site carries no device identity, so the notification marks every
+        // live device (exact in the one-device-per-process target shape;
+        // see Device.IsLost remarks for the multi-device caveat).
+        if (result == VkResult.VK_ERROR_DEVICE_LOST)
+            Device.NotifyDeviceLossObserved();
+
         throw result switch
         {
             VkResult.VK_ERROR_OUT_OF_HOST_MEMORY => OutOfHostMemory,
@@ -97,4 +108,14 @@ internal static class ResultExtensions
             _ => new VulkanException(result, fn),
         };
     }
+
+    /// <summary>
+    /// The cached device-lost exception, exposed so device-context call
+    /// sites (<see cref="Fence.IsSignaled"/>, <see cref="Swapchain.Recreate"/>)
+    /// can fail deterministically after <see cref="Device.IsLost"/> without
+    /// allocating. Re-throwing gets a fresh stack trace per throw via the
+    /// runtime's dispatch info.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    internal static void ThrowDeviceLost() => throw DeviceLost;
 }

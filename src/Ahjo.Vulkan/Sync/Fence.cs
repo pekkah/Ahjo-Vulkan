@@ -20,15 +20,29 @@ public readonly unsafe struct Fence : IVulkanHandle<Fence>
 {
     public readonly VkFence_T*  Handle;
     internal readonly VkDevice_T* DeviceHandle;
+    // The managed Device wrapper, when known (pool-acquired fences) — the
+    // only way a raw-pointer struct can read Device.IsLost (#120). Null on
+    // FromRaw/default and on raw-pointer test ctors; when non-null it must
+    // be the Device that owns DeviceHandle. A managed reference field is
+    // legal since #118 relaxed IVulkanHandle to `struct`.
+    internal readonly Device?     Owner;
 
     internal Fence(VkFence_T* handle, VkDevice_T* device)
     {
         Handle       = handle;
         DeviceHandle = device;
+        Owner        = null;
+    }
+
+    internal Fence(VkFence_T* handle, Device owner)
+    {
+        Handle       = handle;
+        DeviceHandle = owner.Handle;
+        Owner        = owner;
     }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_FENCE;
-    public static Fence FromRaw(nint handle) => new((VkFence_T*)handle, null);
+    public static Fence FromRaw(nint handle) => new((VkFence_T*)handle, (VkDevice_T*)null);
     public ulong RawHandle => (ulong)Handle;
     public bool IsNull => Handle == null;
 
@@ -60,7 +74,17 @@ public readonly unsafe struct Fence : IVulkanHandle<Fence>
         {
             if (Handle == null) return true;
             ThrowIfBorrowed();
+            // After device loss the fence state is unknowable; throw the
+            // cached DeviceLost without calling the driver. Deterministic
+            // version of the existing contract (anything outside
+            // SUCCESS/NOT_READY throws) — teardown paths that must not
+            // throw consult Device.IsLost at the pool layer instead
+            // (FencePool.Release, issue #120).
+            if (Owner is { IsLost: true })
+                ResultExtensions.ThrowDeviceLost();
             VkResult r = Vk.vkGetFenceStatus(DeviceHandle, Handle);
+            if (r == VkResult.VK_ERROR_DEVICE_LOST)
+                Owner?.MarkLost();
             return r switch
             {
                 VkResult.VK_SUCCESS   => true,
@@ -83,8 +107,16 @@ public readonly unsafe struct Fence : IVulkanHandle<Fence>
     {
         if (Handle == null) return WaitState.Signaled;
         ThrowIfBorrowed();
+        // Post-loss waits return immediately (#120): the fence may never
+        // signal, and some drivers historically stall infinite waits after
+        // a TDR. One null check + one volatile read on the healthy path,
+        // in front of a host syscall.
+        if (Owner is { IsLost: true }) return WaitState.DeviceLost;
         VkFence_T* h = Handle;
-        return Vk.vkWaitForFences(DeviceHandle, 1, &h, waitAll: 1, timeout.ToVulkanTimeout()).ToWaitState();
+        WaitState state = Vk.vkWaitForFences(DeviceHandle, 1, &h, waitAll: 1, timeout.ToVulkanTimeout()).ToWaitState();
+        if (state == WaitState.DeviceLost)
+            Owner?.MarkLost();
+        return state;
     }
 
     /// <summary>
