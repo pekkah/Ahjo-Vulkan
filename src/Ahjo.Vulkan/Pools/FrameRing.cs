@@ -378,14 +378,33 @@ public sealed unsafe class FrameRing : IDisposable
             {
                 // Dispose mustn't throw — log a lost-device or unexpected
                 // wait outcome and let teardown proceed. vkDestroy* on a
-                // lost device is spec-legal.
+                // lost device is spec-legal. (After device loss the wait
+                // fast-returns DeviceLost via Device.IsLost, #120.)
                 WaitState state = InFlightHandle.Wait(Timeout.InfiniteTimeSpan);
                 fenceSignaled = state == WaitState.Signaled;
                 if (!fenceSignaled)
-                    Console.Error.WriteLine(
+                    AhjoDiagnostics.Write(DiagnosticSeverity.Warning, "FrameRing",
                         $"FrameRing.Slot.Dispose: in-flight fence wait returned {state}; teardown proceeds.");
             }
             _pendingSubmit = false;
+
+            // An unconsumed acquire signal means vkAcquireNextImageKHR's
+            // semaphore-signal operation may still be pending — the
+            // in-flight fence wait above proves nothing about it, and
+            // destroying ImageAcquired in that state violates
+            // VUID-vkDestroySemaphore-semaphore-01137 (issue #111).
+            // vkDeviceWaitIdle is the only host-visible completion proof;
+            // this is teardown, so its cost is irrelevant, and on a lost
+            // device it returns DEVICE_LOST in bounded time (result
+            // logged, teardown proceeds — destroy-after-loss is legal).
+            if (_acquireSignalPending)
+            {
+                VkResult idleResult = Vk.vkDeviceWaitIdle(_device.Handle);
+                if (idleResult != VkResult.VK_SUCCESS)
+                    AhjoDiagnostics.Write(DiagnosticSeverity.Warning, "FrameRing",
+                        $"FrameRing.Slot.Dispose: vkDeviceWaitIdle before releasing the pending acquire semaphore returned {idleResult}; teardown proceeds.");
+                _acquireSignalPending = false;
+            }
 
             FencePool.Release(InFlightHandle, fenceSignaled);
             SemaphorePool.Release(ImageAcquired);
