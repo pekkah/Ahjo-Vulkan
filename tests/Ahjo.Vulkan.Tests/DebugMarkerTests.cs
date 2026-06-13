@@ -129,6 +129,76 @@ public sealed class DebugMarkerTests
         }
     }
 
+    [Fact]
+    public void LabelScope_EmptyName_WithValidation_NoUnbalancedEndLabel()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer,
+            "Khronos validation layer not installed — needed to confirm the empty-name scope stays balanced.");
+        // Same lavapipe gate as the rest of the queue-submitting suite.
+        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+            "Software driver — vkQueueSubmit2 SIGSEGV on lavapipe; gated.");
+
+        // Capture any validation messages so we can assert no error-
+        // severity messages fire as a result of the marker calls.
+        // The callback runs on whatever thread Vulkan dispatches from;
+        // we don't read the list until after WaitIdle, by which point
+        // the layer has fully drained.
+        var errors = new List<string>();
+        var lockObj = new object();
+
+        var instanceDesc = new InstanceDescription
+        {
+            EnableValidation = true,
+            DebugCallback = msg =>
+            {
+                if ((msg.Severity & VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0)
+                {
+                    lock (lockObj) errors.Add(msg.Message ?? "<no message>");
+                }
+            },
+        };
+
+        using var instance = Instance.Create(in instanceDesc);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+        using var pool     = new CommandBufferPool(device, family);
+        using var fencePool = new FencePool(device);
+
+        var fence = fencePool.Acquire();
+        try
+        {
+            var rec = pool.Begin();
+            try
+            {
+                using (rec.LabelScope("Outer"u8, new Color(0.2f, 0.4f, 0.8f)))
+                {
+                    // Empty inner scope: BeginLabel no-ops (name empty), so its Dispose
+                    // must NOT emit vkCmdEndDebugUtilsLabelEXT. Before the fix it did,
+                    // popping "Outer" early and leaving the outer EndLabel unbalanced
+                    // (VUID-vkCmdEndDebugUtilsLabelEXT-commandBuffer-01912).
+                    using (rec.LabelScope(default))
+                    {
+                    }
+                    rec.InsertLabel("StillInsideOuter"u8);
+                }
+
+                var queue = device.GetQueue(family, 0);
+                queue.Submit2(ref rec, in fence);
+            }
+            finally { rec.Dispose(); }
+
+            Assert.Equal(WaitState.Signaled, fence.Wait(TimeSpan.FromSeconds(10)));
+        }
+        finally { fencePool.Release(fence); }
+
+        device.WaitIdle();
+
+        lock (lockObj)
+        {
+            Assert.Empty(errors);
+        }
+    }
+
     private static Device CreateGraphicsDevice(Instance instance, out uint family)
     {
         uint chosen = uint.MaxValue;
