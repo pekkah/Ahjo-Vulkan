@@ -110,7 +110,7 @@ public sealed class DeviceLossTests
         using var device   = CreateGraphicsDevice(instance, out _);
         using var pool     = new SemaphorePool(device);
 
-        var timeline = pool.AcquireTimeline(initialValue: 0);
+        var timeline = pool.AcquireTimeline();
         device.MarkLost();
 
         // Value 100 will never be signaled; only the fast path returns.
