@@ -182,33 +182,33 @@ internal readonly unsafe struct DeviceFunctionTable
         // through (issue #121).
         BeginCommandBuffer =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkCommandBufferBeginInfo*, VkResult>)
-            Resolve(Utf8Name.FromLiteral("vkBeginCommandBuffer"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkBeginCommandBuffer"u8));
         EndCommandBuffer =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkResult>)
-            Resolve(Utf8Name.FromLiteral("vkEndCommandBuffer"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkEndCommandBuffer"u8));
 
         CmdSetViewport =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, uint, uint, VkViewport*, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdSetViewport"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdSetViewport"u8));
         CmdSetScissor =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, uint, uint, VkRect2D*, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdSetScissor"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdSetScissor"u8));
 
         CmdBindPipeline =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkPipelineBindPoint, VkPipeline_T*, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdBindPipeline"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdBindPipeline"u8));
         CmdBindDescriptorSets =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkPipelineBindPoint, VkPipelineLayout_T*, uint, uint, VkDescriptorSet_T**, uint, uint*, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdBindDescriptorSets"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdBindDescriptorSets"u8));
         CmdPushConstants =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkPipelineLayout_T*, uint, uint, uint, void*, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdPushConstants"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdPushConstants"u8));
         CmdBindVertexBuffers =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, uint, uint, VkBuffer_T**, ulong*, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdBindVertexBuffers"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdBindVertexBuffers"u8));
         CmdBindIndexBuffer =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkBuffer_T*, ulong, VkIndexType, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdBindIndexBuffer"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdBindIndexBuffer"u8));
         // Push-descriptor was promoted from VK_KHR_push_descriptor to core
         // only in Vulkan 1.4. On the wrapper's minimum 1.3 device the
         // un-suffixed core name returns null from vkGetDeviceProcAddr, so
@@ -229,62 +229,62 @@ internal readonly unsafe struct DeviceFunctionTable
 
         CmdDraw =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, uint, uint, uint, uint, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdDraw"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdDraw"u8));
         CmdDrawIndexed =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, uint, uint, uint, int, uint, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdDrawIndexed"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdDrawIndexed"u8));
         CmdDrawIndirect =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkBuffer_T*, ulong, uint, uint, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdDrawIndirect"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdDrawIndirect"u8));
         CmdDrawIndexedIndirect =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkBuffer_T*, ulong, uint, uint, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdDrawIndexedIndirect"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdDrawIndexedIndirect"u8));
         CmdDispatch =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, uint, uint, uint, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdDispatch"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdDispatch"u8));
         CmdDispatchIndirect =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkBuffer_T*, ulong, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdDispatchIndirect"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdDispatchIndirect"u8));
 
         CmdPipelineBarrier2 =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkDependencyInfo*, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdPipelineBarrier2"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdPipelineBarrier2"u8));
 
         CmdCopyBuffer2 =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkCopyBufferInfo2*, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdCopyBuffer2"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdCopyBuffer2"u8));
         CmdCopyBufferToImage2 =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkCopyBufferToImageInfo2*, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdCopyBufferToImage2"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdCopyBufferToImage2"u8));
         CmdCopyImageToBuffer2 =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkCopyImageToBufferInfo2*, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdCopyImageToBuffer2"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdCopyImageToBuffer2"u8));
         CmdCopyImage2 =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkCopyImageInfo2*, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdCopyImage2"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdCopyImage2"u8));
         CmdBlitImage2 =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkBlitImageInfo2*, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdBlitImage2"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdBlitImage2"u8));
         CmdFillBuffer =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkBuffer_T*, ulong, ulong, uint, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdFillBuffer"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdFillBuffer"u8));
         CmdClearColorImage =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkImage_T*, VkImageLayout, VkClearColorValue*, uint, VkImageSubresourceRange*, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdClearColorImage"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdClearColorImage"u8));
         CmdClearDepthStencilImage =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkImage_T*, VkImageLayout, VkClearDepthStencilValue*, uint, VkImageSubresourceRange*, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdClearDepthStencilImage"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdClearDepthStencilImage"u8));
 
         CmdBeginRendering =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkRenderingInfo*, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdBeginRendering"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdBeginRendering"u8));
         CmdEndRendering =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, void>)
-            Resolve(Utf8Name.FromLiteral("vkCmdEndRendering"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdEndRendering"u8));
 
         QueueSubmit2 =
             (delegate* unmanaged[Stdcall]<VkQueue_T*, uint, VkSubmitInfo2*, VkFence_T*, VkResult>)
-            Resolve(Utf8Name.FromLiteral("vkQueueSubmit2"u8));
+            ResolveRequired(Utf8Name.FromLiteral("vkQueueSubmit2"u8));
 
         // Extension entry points — null when VK_EXT_debug_utils is absent.
         SetDebugUtilsObjectName =
@@ -303,6 +303,30 @@ internal readonly unsafe struct DeviceFunctionTable
 
     public delegate* unmanaged[Stdcall]<void> Resolve(Utf8Name name) =>
         Vk.vkGetDeviceProcAddr(_device, name.Ptr);
+
+    /// <summary>
+    /// Resolves a command that is guaranteed core on the wrapper's minimum
+    /// Vulkan 1.3 device and throws if <c>vkGetDeviceProcAddr</c> returns
+    /// null. Without this, a null pointer (a loader/driver quirk, or a
+    /// hypothetical typo in the resolve name) would surface as an access
+    /// violation deep inside an unrelated hot-path call rather than a clear
+    /// error naming the missing entry point at <see cref="Device"/>
+    /// construction.
+    /// </summary>
+    private delegate* unmanaged[Stdcall]<void> ResolveRequired(Utf8Name name)
+    {
+        var p = Resolve(name);
+        if (p == null) ThrowEntryPointMissing(name);
+        return p;
+    }
+
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    private static void ThrowEntryPointMissing(Utf8Name name) =>
+        throw new InvalidOperationException(
+            "vkGetDeviceProcAddr returned null for required core entry point " +
+            $"'{System.Runtime.InteropServices.Marshal.PtrToStringUTF8((nint)name.Ptr)}'. The wrapper " +
+            "requires a Vulkan 1.3+ device that exposes all core commands; this indicates a loader or " +
+            "driver configuration it does not support.");
 
     /// <summary>
     /// Resolves <paramref name="core"/>, falling back to
