@@ -99,6 +99,7 @@ public sealed unsafe class DescriptorSetPool : IDisposable
         bool                                updateAfterBind  = false)
     {
         ArgumentNullException.ThrowIfNull(device);
+        ArgumentOutOfRangeException.ThrowIfZero(maxSets, nameof(maxSets));
         if (poolSizes.IsEmpty)
             throw new ArgumentException("poolSizes must contain at least one entry.", nameof(poolSizes));
         _device           = device;

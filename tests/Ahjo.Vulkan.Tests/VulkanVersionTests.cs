@@ -14,6 +14,30 @@ public sealed class VulkanVersionTests
     }
 
     [Fact]
+    public void Make_RejectsOutOfRangeFields()
+    {
+        // Each field has a fixed bit-width; an over-range value would bleed
+        // into the next field, so Make throws unconditionally (setup-time).
+        Assert.Throws<ArgumentOutOfRangeException>(() => VulkanVersion.Make(major: 200, 0, 0));   // major > 0x7F
+        Assert.Throws<ArgumentOutOfRangeException>(() => VulkanVersion.Make(0, minor: 1024, 0));  // minor > 0x3FF
+        Assert.Throws<ArgumentOutOfRangeException>(() => VulkanVersion.Make(0, 0, patch: 4096));  // patch > 0xFFF
+    }
+
+    [Fact]
+    public void Make_AtFieldMaxima_RoundTrips()
+    {
+        // Exactly-at-max values (the inclusive upper bound the guards allow)
+        // must pack and round-trip — the rejection test only covers
+        // one-past-max. Also confirms major's top bit doesn't bleed into the
+        // variant field.
+        var v = VulkanVersion.Make(0x7F, 0x3FF, 0xFFF);
+        Assert.Equal(0x7Fu,  v.Major);
+        Assert.Equal(0x3FFu, v.Minor);
+        Assert.Equal(0xFFFu, v.Patch);
+        Assert.Equal(0u,     v.Variant);
+    }
+
+    [Fact]
     public void V1_4_HasExpectedPackedValue()
     {
         // VK_MAKE_API_VERSION(0,1,4,0) = (1<<22) | (4<<12) = 0x00404000.
