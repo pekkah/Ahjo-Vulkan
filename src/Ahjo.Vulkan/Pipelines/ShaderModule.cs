@@ -22,6 +22,7 @@ public readonly unsafe struct ShaderModule : IVulkanHandle<ShaderModule>, IDispo
     {
         Handle       = handle;
         DeviceHandle = device;
+        HandleRegistry.TrackCreate(this);
     }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_SHADER_MODULE;
@@ -39,6 +40,7 @@ public readonly unsafe struct ShaderModule : IVulkanHandle<ShaderModule>, IDispo
         // caller owns the lifetime; calling vkDestroyShaderModule with a
         // null device handle would crash on every loader.
         if (!OwnsHandle) return;
+        HandleRegistry.TrackDispose(this);
         Vk.vkDestroyShaderModule(DeviceHandle, Handle, null);
     }
 }

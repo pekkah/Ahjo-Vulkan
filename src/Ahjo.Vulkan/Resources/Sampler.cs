@@ -23,6 +23,7 @@ public readonly unsafe struct Sampler : IVulkanHandle<Sampler>, IDisposable
     {
         Handle       = handle;
         DeviceHandle = device;
+        HandleRegistry.TrackCreate(this);
     }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_SAMPLER;
@@ -43,6 +44,7 @@ public readonly unsafe struct Sampler : IVulkanHandle<Sampler>, IDisposable
         // caller owns the lifetime; calling vkDestroySampler with a null
         // device handle would crash on every loader.
         if (!OwnsHandle) return;
+        HandleRegistry.TrackDispose(this);
         Vk.vkDestroySampler(DeviceHandle, Handle, null);
     }
 }
