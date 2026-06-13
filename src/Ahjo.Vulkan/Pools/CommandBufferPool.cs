@@ -18,8 +18,11 @@ namespace Ahjo.Vulkan;
 /// whole pool back to "initial."</para>
 /// <para>The pool maintains two lists: <c>_idle</c> (buffers in the
 /// initial state, eligible to hand out) and <c>_spent</c> (buffers that
-/// were used this frame and are now in the executable / pending state).
-/// <see cref="Begin"/> pops from <c>_idle</c> (or grows the pool by one);
+/// are no longer in the initial state — used this frame, or left in an
+/// indeterminate state by a failed <c>vkBeginCommandBuffer</c> — and so
+/// must wait for the next whole-pool reset before reuse).
+/// <see cref="Begin"/> pops from <c>_idle</c> (or grows the pool by one)
+/// and routes a begin-failed buffer to <c>_spent</c>;
 /// <see cref="Retire"/> pushes to <c>_spent</c>;
 /// <see cref="ResetForFrame"/> calls <c>vkResetCommandPool</c> and bulk-
 /// moves <c>_spent</c> into <c>_idle</c>.</para>
@@ -87,6 +90,13 @@ public sealed unsafe class CommandBufferPool : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        // Pre-grow _spent BEFORE acquiring a buffer so the catch handler
+        // below can return a begin-failed buffer without an OOM on capacity
+        // growth while already handling a failure — and so that if this
+        // growth itself OOMs, no command buffer has been acquired yet to
+        // orphan. By the time the begin runs, _spent has room for the push.
+        _spent.EnsureCapacity(_spent.Count + 1);
+
         VkCommandBuffer_T* cb;
         if (_idle.Count > 0)
         {
@@ -94,10 +104,6 @@ public sealed unsafe class CommandBufferPool : IDisposable
         }
         else
         {
-            // Pre-grow _idle so the catch handler below can push the
-            // cb back onto the free list without risking OOM on a
-            // capacity expansion.
-            _idle.EnsureCapacity(_idle.Count + 1);
             var ai = new VkCommandBufferAllocateInfo
             {
                 sType              = VkStructureType.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -122,13 +128,18 @@ public sealed unsafe class CommandBufferPool : IDisposable
         }
         catch
         {
-            // vkBeginCommandBuffer can fail (OOM, validation-layer
-            // reject). Return the cb to the free list so a subsequent
-            // Begin can retry it; without this the pool's _allocated
-            // count grows by one orphan on every failure
-            // (vkResetCommandPool still resets the cb, but the wrapper
-            // has lost the handle and would never hand it back out).
-            _idle.Push((nint)cb);
+            // A failed vkBeginCommandBuffer (OOM, validation-layer reject)
+            // does NOT guarantee the buffer returns to the initial state,
+            // and this pool deliberately omits RESET_COMMAND_BUFFER_BIT.
+            // Routing the cb back to _idle would let a later Begin pop it
+            // and call vkBeginCommandBuffer on a non-initial buffer —
+            // VUID-vkBeginCommandBuffer-commandBuffer-00049/00050. Route it
+            // to _spent instead: the cb only re-enters circulation after
+            // ResetForFrame's vkResetCommandPool returns the whole pool to
+            // the initial state. Still no orphaned handle, and _allocated
+            // stays accurate. (The pre-grow at the top of Begin guarantees
+            // this push can't OOM.)
+            _spent.Push((nint)cb);
             throw;
         }
 
