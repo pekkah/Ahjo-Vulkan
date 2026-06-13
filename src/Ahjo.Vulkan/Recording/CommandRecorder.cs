@@ -781,6 +781,14 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// Subresource aspect — color (default), depth, or stencil.
     /// </param>
     /// <remarks>
+    /// <para>The precondition is purely about layout: mip 0 may be
+    /// produced by <em>any</em> transfer command — a copy
+    /// (<c>vkCmdCopyBufferToImage</c>), a clear
+    /// (<c>vkCmdClearColorImage</c>), or a blit — as long as it ends in
+    /// <c>VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL</c>. Because that producing
+    /// command is unknown here, the helper synchronizes mip 0's first
+    /// layout transition against all transfer stages
+    /// (<see cref="Stage.AllTransfer"/>), not just the Copy stage.</para>
     /// <para>For an image with <c>MipLevels = 1</c> the helper just
     /// transitions mip 0 into <paramref name="finalLayout"/>.</para>
     /// <para>Per-axis mip dimensions use <c>max(1, dim &gt;&gt; i)</c>,
@@ -803,10 +811,22 @@ public unsafe ref struct CommandRecorder : IDisposable
         // requested final layout.
         if (mipLevels <= 1)
         {
+            // Mip 0's producer is caller-controlled: the documented
+            // precondition only requires the TRANSFER_DST_OPTIMAL layout,
+            // not a specific producing command. The caller may have filled
+            // mip 0 with a copy (Copy stage), a clear (Clear stage), or a
+            // blit (Blit stage). Source scope must therefore cover all
+            // transfer stages — Stage.AllTransfer is
+            // VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, which the spec defines to
+            // cover every transfer stage (copy/blit/resolve/clear); it is a
+            // single distinct bit, NOT the bitwise-OR of the individual
+            // Stage.Copy/Blit/Resolve/Clear values. Widening a source scope is
+            // always safe (waits for more, never less); Access.TransferWrite
+            // already covers copy/blit/clear/resolve writes.
             ImageBarrier soleBarrier = new()
             {
                 Image               = (nint)image.Handle,
-                SrcStage            = Stage.Copy,
+                SrcStage            = Stage.AllTransfer,
                 SrcAccess           = Access.TransferWrite,
                 DstStage            = Stage.AllCommands,
                 DstAccess           = Access.MemoryRead | Access.MemoryWrite,
@@ -862,15 +882,22 @@ public unsafe ref struct CommandRecorder : IDisposable
 
             // Move mip (i-1) from TRANSFER_DST → TRANSFER_SRC so the
             // upcoming blit can sample it. SrcStage tracks the producer of
-            // the previous write to mip (i-1): the caller's
-            // vkCmdCopyBufferToImage on i=1 (Copy stage), and the previous
-            // iteration's vkCmdBlitImage2 on i>=2 (Blit stage). Sync2 treats
-            // Copy and Blit as distinct stages; getting this wrong leaves
-            // the prior write unordered against the layout transition.
+            // the previous write to mip (i-1):
+            //   • i == 1: the caller's mip-0 write. Its producing command is
+            //     unknown — copy, clear, and blit are all valid ways to
+            //     satisfy the documented TRANSFER_DST precondition — so the
+            //     source scope must be Stage.AllTransfer
+            //     (VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, spec-defined to cover
+            //     every transfer stage; a single bit, not Copy|Blit|Resolve|Clear).
+            //   • i >= 2: the previous iteration's vkCmdBlitImage2 (Blit
+            //     stage), which stays Stage.Blit.
+            // Sync2 treats Copy/Blit/Clear/Resolve as distinct stages;
+            // narrowing i == 1 to a single producer would leave the caller's
+            // write unordered against this layout transition (issue #101).
             ImageBarrier srcSwap = new()
             {
                 Image               = (nint)image.Handle,
-                SrcStage            = i == 1 ? Stage.Copy : Stage.Blit,
+                SrcStage            = i == 1 ? Stage.AllTransfer : Stage.Blit,
                 SrcAccess           = Access.TransferWrite,
                 DstStage            = Stage.Blit,
                 DstAccess           = Access.TransferRead,
