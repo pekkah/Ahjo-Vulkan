@@ -101,6 +101,35 @@ public class PushDescriptorsBenchmarks
             rec.PushDescriptors(in _template, in _pipelineLayout, in writes);
     }
 
+    /// <summary>
+    /// Covers the non-templated
+    /// <see cref="CommandRecorder.PushDescriptorSet(VkPipelineBindPoint, in PipelineLayout, uint, System.ReadOnlySpan{DescriptorWrite})"/>
+    /// span overload — the path that routes the cached
+    /// <c>vkCmdPushDescriptorSet</c> pointer through <c>FlushPush</c> (issue
+    /// #121). A single-element write stays on the <c>≤ 8</c> stackalloc fast
+    /// path, so steady-state <b>Allocated</b> must read <c>-</c>.
+    /// </summary>
+    [Benchmark(OperationsPerInvoke = CallsPerInvoke)]
+    public void PushDescriptorSet_SpanWrites()
+    {
+        var info = BufferDescriptorWrite.Of(in _buffer);
+        ReadOnlySpan<DescriptorWrite> writes =
+        [
+            DescriptorWrite.Buffer(
+                binding: 0, arrayElement: 0,
+                VkDescriptorType.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, in info),
+        ];
+
+        // `scoped` narrows the recorder's safe-to-escape to this method so
+        // the method-local span above can flow into PushDescriptorSet
+        // without tripping CS8350 (mirrors CommandRecorderBenchmarks).
+        using scoped var rec = _cmdPool.Begin();
+        for (int i = 0; i < CallsPerInvoke; i++)
+            rec.PushDescriptorSet(
+                VkPipelineBindPoint.VK_PIPELINE_BIND_POINT_COMPUTE,
+                in _pipelineLayout, set: 0, writes);
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct FillWrites
     {

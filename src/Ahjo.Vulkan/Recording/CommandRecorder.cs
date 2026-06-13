@@ -44,6 +44,14 @@ public unsafe ref struct CommandRecorder : IDisposable
     public bool IsNull => Handle == null;
 
     /// <summary>
+    /// Per-device cached <c>vkCmd*</c> entry points. Dispatching through
+    /// these skips the loader's per-call trampoline (issue #121). Returned
+    /// by <c>ref readonly</c> so a recording call reads the function field
+    /// directly off the owning <see cref="Device"/> with no struct copy.
+    /// </summary>
+    private ref readonly DeviceFunctionTable Fns => ref _pool.Device.Functions;
+
+    /// <summary>
     /// Raw <c>VkCommandBuffer</c> as a platform-sized integer. Lets callers
     /// hand the recorded buffer to a different thread for submission, since
     /// the recorder itself is a <c>ref struct</c> and can't cross threads.
@@ -63,7 +71,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     public void End()
     {
         if (Handle == null || _ended) return;
-        Vk.vkEndCommandBuffer(Handle).ThrowIfFailed();
+        Fns.EndCommandBuffer(Handle).ThrowIfFailed();
         _ended = true;
     }
 
@@ -89,7 +97,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         {
             if (!_ended)
             {
-                Vk.vkEndCommandBuffer(Handle).ThrowIfFailed();
+                Fns.EndCommandBuffer(Handle).ThrowIfFailed();
                 _ended = true;
             }
         }
@@ -113,7 +121,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// </summary>
     public void BeginLabel(ReadOnlySpan<byte> name, in Color color = default)
     {
-        var fn = _pool.Device.Functions.CmdBeginDebugUtilsLabel;
+        var fn = Fns.CmdBeginDebugUtilsLabel;
         if (fn == null || name.IsEmpty) return;
 
         fixed (byte* pName = name)
@@ -138,7 +146,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// </summary>
     public void EndLabel()
     {
-        var fn = _pool.Device.Functions.CmdEndDebugUtilsLabel;
+        var fn = Fns.CmdEndDebugUtilsLabel;
         if (fn == null) return;
         fn(Handle);
     }
@@ -152,7 +160,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// </summary>
     public void InsertLabel(ReadOnlySpan<byte> name, in Color color = default)
     {
-        var fn = _pool.Device.Functions.CmdInsertDebugUtilsLabel;
+        var fn = Fns.CmdInsertDebugUtilsLabel;
         if (fn == null || name.IsEmpty) return;
 
         fixed (byte* pName = name)
@@ -183,7 +191,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         // wasn't loaded, _end stays null and Dispose is a no-op — the
         // matching BeginLabel call was also a no-op so the marker stack
         // stays balanced.
-        return new DisposableLabel(Handle, _pool.Device.Functions.CmdEndDebugUtilsLabel);
+        return new DisposableLabel(Handle, Fns.CmdEndDebugUtilsLabel);
     }
 
     // ---- Dynamic state ----
@@ -191,22 +199,22 @@ public unsafe ref struct CommandRecorder : IDisposable
     public void SetViewport(in VkViewport viewport)
     {
         fixed (VkViewport* p = &viewport)
-            Vk.vkCmdSetViewport(Handle, 0, 1, p);
+            Fns.CmdSetViewport(Handle, 0, 1, p);
     }
 
     public void SetScissor(in VkRect2D scissor)
     {
         fixed (VkRect2D* p = &scissor)
-            Vk.vkCmdSetScissor(Handle, 0, 1, p);
+            Fns.CmdSetScissor(Handle, 0, 1, p);
     }
 
     // ---- Bind family ----
 
     public void BindPipeline(in ComputePipeline pipeline)
-        => Vk.vkCmdBindPipeline(Handle, VkPipelineBindPoint.VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Handle);
+        => Fns.CmdBindPipeline(Handle, VkPipelineBindPoint.VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Handle);
 
     public void BindPipeline(in GraphicsPipeline pipeline)
-        => Vk.vkCmdBindPipeline(Handle, VkPipelineBindPoint.VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Handle);
+        => Fns.CmdBindPipeline(Handle, VkPipelineBindPoint.VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Handle);
 
     public void BindDescriptorSets(
         VkPipelineBindPoint    bindPoint,
@@ -230,7 +238,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         fixed (nint* pSets    = raw)
         fixed (uint* pOffsets = dynamicOffsets)
         {
-            Vk.vkCmdBindDescriptorSets(
+            Fns.CmdBindDescriptorSets(
                 Handle, bindPoint, layout.Handle,
                 firstSet, (uint)sets.Length, (VkDescriptorSet_T**)pSets,
                 (uint)dynamicOffsets.Length, dynamicOffsets.IsEmpty ? null : pOffsets);
@@ -285,7 +293,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         AssertPushRangeFits(in layout, stages, offset, (uint)Unsafe.SizeOf<T>());
 
         fixed (T* p = &data)
-            Vk.vkCmdPushConstants(Handle, layout.Handle, (uint)stages, offset, (uint)Unsafe.SizeOf<T>(), p);
+            Fns.CmdPushConstants(Handle, layout.Handle, (uint)stages, offset, (uint)Unsafe.SizeOf<T>(), p);
     }
 
     [Conditional("DEBUG")]
@@ -364,13 +372,13 @@ public unsafe ref struct CommandRecorder : IDisposable
 
         fixed (nint*  pBuffers = rawBuffers)
         fixed (ulong* pOffsets = useOffsets)
-            Vk.vkCmdBindVertexBuffers(
+            Fns.CmdBindVertexBuffers(
                 Handle, firstBinding, (uint)buffers.Length,
                 (VkBuffer_T**)pBuffers, pOffsets);
     }
 
     public void BindIndexBuffer(in Buffer buffer, ulong offset, VkIndexType indexType)
-        => Vk.vkCmdBindIndexBuffer(Handle, buffer.Handle, offset, indexType);
+        => Fns.CmdBindIndexBuffer(Handle, buffer.Handle, offset, indexType);
 
     /// <summary>
     /// Issues <c>vkCmdPushDescriptorSetWithTemplate</c> — records
@@ -386,8 +394,10 @@ public unsafe ref struct CommandRecorder : IDisposable
         in T                     data)
         where T : unmanaged
     {
+        var fn = Fns.CmdPushDescriptorSetWithTemplate;
+        if (fn == null) ThrowPushDescriptorUnsupported();
         fixed (T* p = &data)
-            Vk.vkCmdPushDescriptorSetWithTemplate(Handle, template.Handle, layout.Handle, template.Set, p);
+            fn(Handle, template.Handle, layout.Handle, template.Set, p);
     }
 
     /// <summary>
@@ -414,12 +424,15 @@ public unsafe ref struct CommandRecorder : IDisposable
     {
         if (writes.IsEmpty) return;
 
+        var cmdPushDescriptorSet = Fns.CmdPushDescriptorSet;
+        if (cmdPushDescriptorSet == null) ThrowPushDescriptorUnsupported();
+
         const int StackThreshold = 8;
         int count = writes.Length;
         if (count <= StackThreshold)
         {
             Span<VkWriteDescriptorSet> raws = stackalloc VkWriteDescriptorSet[count];
-            FlushPush(Handle, bindPoint, layout.Handle, set, writes, raws);
+            FlushPush(cmdPushDescriptorSet, Handle, bindPoint, layout.Handle, set, writes, raws);
             return;
         }
 
@@ -427,7 +440,7 @@ public unsafe ref struct CommandRecorder : IDisposable
             System.Buffers.ArrayPool<VkWriteDescriptorSet>.Shared.Rent(count);
         try
         {
-            FlushPush(Handle, bindPoint, layout.Handle, set, writes, rented.AsSpan(0, count));
+            FlushPush(cmdPushDescriptorSet, Handle, bindPoint, layout.Handle, set, writes, rented.AsSpan(0, count));
         }
         finally
         {
@@ -435,7 +448,15 @@ public unsafe ref struct CommandRecorder : IDisposable
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    private static void ThrowPushDescriptorUnsupported() =>
+        throw new InvalidOperationException(
+            "Push descriptors are not available on this device. The command was promoted to core in " +
+            "Vulkan 1.4; on a 1.3 device enable VK_KHR_push_descriptor via DeviceDescription.Extensions, " +
+            "and build the target set layout with DescriptorSetLayoutDescription.PushDescriptor.");
+
     private static void FlushPush(
+        delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkPipelineBindPoint, VkPipelineLayout_T*, uint, uint, VkWriteDescriptorSet*, void> cmdPushDescriptorSet,
         VkCommandBuffer_T*            cb,
         VkPipelineBindPoint           bindPoint,
         VkPipelineLayout_T*           layout,
@@ -448,14 +469,14 @@ public unsafe ref struct CommandRecorder : IDisposable
             // dstSet is ignored by vkCmdPushDescriptorSet; pass null.
             DescriptorWriteBuilder.BuildWrites(writes, setHandle: null, raws);
             fixed (VkWriteDescriptorSet* pRaws = raws)
-                Vk.vkCmdPushDescriptorSet(cb, bindPoint, layout, set, (uint)writes.Length, pRaws);
+                cmdPushDescriptorSet(cb, bindPoint, layout, set, (uint)writes.Length, pRaws);
         }
     }
 
     // ---- Draw / Dispatch ----
 
     public void Draw(uint vertexCount, uint instanceCount = 1, uint firstVertex = 0, uint firstInstance = 0)
-        => Vk.vkCmdDraw(Handle, vertexCount, instanceCount, firstVertex, firstInstance);
+        => Fns.CmdDraw(Handle, vertexCount, instanceCount, firstVertex, firstInstance);
 
     public void DrawIndexed(
         uint indexCount,
@@ -463,7 +484,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         uint firstIndex    = 0,
         int  vertexOffset  = 0,
         uint firstInstance = 0)
-        => Vk.vkCmdDrawIndexed(Handle, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
+        => Fns.CmdDrawIndexed(Handle, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 
     /// <summary>
     /// <c>vkCmdDrawIndirect</c> — reads <paramref name="drawCount"/>
@@ -473,7 +494,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// created with <see cref="BufferUsage.IndirectBuffer"/>.
     /// </summary>
     public void DrawIndirect(in Buffer buffer, ulong offset, uint drawCount, uint stride)
-        => Vk.vkCmdDrawIndirect(Handle, buffer.Handle, offset, drawCount, stride);
+        => Fns.CmdDrawIndirect(Handle, buffer.Handle, offset, drawCount, stride);
 
     /// <summary>
     /// <c>vkCmdDrawIndexedIndirect</c> — reads
@@ -483,10 +504,10 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <see cref="BindIndexBuffer"/> beforehand.
     /// </summary>
     public void DrawIndexedIndirect(in Buffer buffer, ulong offset, uint drawCount, uint stride)
-        => Vk.vkCmdDrawIndexedIndirect(Handle, buffer.Handle, offset, drawCount, stride);
+        => Fns.CmdDrawIndexedIndirect(Handle, buffer.Handle, offset, drawCount, stride);
 
     public void Dispatch(uint groupCountX, uint groupCountY = 1, uint groupCountZ = 1)
-        => Vk.vkCmdDispatch(Handle, groupCountX, groupCountY, groupCountZ);
+        => Fns.CmdDispatch(Handle, groupCountX, groupCountY, groupCountZ);
 
     /// <summary>
     /// <c>vkCmdDispatchIndirect</c> — reads one
@@ -494,7 +515,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <paramref name="offset"/>.
     /// </summary>
     public void DispatchIndirect(in Buffer buffer, ulong offset)
-        => Vk.vkCmdDispatchIndirect(Handle, buffer.Handle, offset);
+        => Fns.CmdDispatchIndirect(Handle, buffer.Handle, offset);
 
     // ---- Pipeline barriers (sync2) ----
 
@@ -540,7 +561,7 @@ public unsafe ref struct CommandRecorder : IDisposable
                     imageMemoryBarrierCount  = (uint)image.Length,
                     pImageMemoryBarriers     = image.Length  > 0 ? pi : null,
                 };
-                Vk.vkCmdPipelineBarrier2(Handle, &dep);
+                Fns.CmdPipelineBarrier2(Handle, &dep);
             }
         }
         finally
@@ -587,7 +608,7 @@ public unsafe ref struct CommandRecorder : IDisposable
                     regionCount = (uint)regions.Length,
                     pRegions    = p,
                 };
-                Vk.vkCmdCopyBuffer2(Handle, &info);
+                Fns.CmdCopyBuffer2(Handle, &info);
             }
         }
         finally
@@ -638,7 +659,7 @@ public unsafe ref struct CommandRecorder : IDisposable
                     regionCount    = (uint)regions.Length,
                     pRegions       = p,
                 };
-                Vk.vkCmdCopyBufferToImage2(Handle, &info);
+                Fns.CmdCopyBufferToImage2(Handle, &info);
             }
         }
         finally
@@ -672,7 +693,7 @@ public unsafe ref struct CommandRecorder : IDisposable
                     regionCount    = (uint)regions.Length,
                     pRegions       = p,
                 };
-                Vk.vkCmdCopyImageToBuffer2(Handle, &info);
+                Fns.CmdCopyImageToBuffer2(Handle, &info);
             }
         }
         finally
@@ -706,7 +727,7 @@ public unsafe ref struct CommandRecorder : IDisposable
                     regionCount    = (uint)regions.Length,
                     pRegions       = p,
                 };
-                Vk.vkCmdCopyImage2(Handle, &info);
+                Fns.CmdCopyImage2(Handle, &info);
             }
         }
         finally
@@ -955,7 +976,7 @@ public unsafe ref struct CommandRecorder : IDisposable
                     pRegions       = p,
                     filter         = filter,
                 };
-                Vk.vkCmdBlitImage2(Handle, &info);
+                Fns.CmdBlitImage2(Handle, &info);
             }
         }
         finally
@@ -971,7 +992,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// boundary internally.
     /// </summary>
     public void FillBuffer(in Buffer dst, uint data, ulong offset = 0, ulong size = ~0ul)
-        => Vk.vkCmdFillBuffer(Handle, dst.Handle, offset, size, data);
+        => Fns.CmdFillBuffer(Handle, dst.Handle, offset, size, data);
 
     /// <summary>
     /// <c>vkCmdClearColorImage</c> across one or more subresource ranges.
@@ -988,7 +1009,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         if (ranges.IsEmpty) return;
         fixed (VkClearColorValue*       pColor = &color)
         fixed (VkImageSubresourceRange* pRange = ranges)
-            Vk.vkCmdClearColorImage(Handle, image.Handle, layout, pColor, (uint)ranges.Length, pRange);
+            Fns.CmdClearColorImage(Handle, image.Handle, layout, pColor, (uint)ranges.Length, pRange);
     }
 
     /// <summary>Whole-image color clear (mip 0+, layer 0+, color aspect).</summary>
@@ -1012,7 +1033,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         if (ranges.IsEmpty) return;
         fixed (VkClearDepthStencilValue* pDs    = &depthStencil)
         fixed (VkImageSubresourceRange*  pRange = ranges)
-            Vk.vkCmdClearDepthStencilImage(Handle, image.Handle, layout, pDs, (uint)ranges.Length, pRange);
+            Fns.CmdClearDepthStencilImage(Handle, image.Handle, layout, pDs, (uint)ranges.Length, pRange);
     }
 
     /// <summary>
@@ -1095,7 +1116,7 @@ public unsafe ref struct CommandRecorder : IDisposable
                     pDepthAttachment     = pDepth,
                     pStencilAttachment   = pStencil,
                 };
-                Vk.vkCmdBeginRendering(Handle, &native);
+                Fns.CmdBeginRendering(Handle, &native);
             }
         }
         finally
@@ -1104,7 +1125,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         }
     }
 
-    public void EndRendering() => Vk.vkCmdEndRendering(Handle);
+    public void EndRendering() => Fns.CmdEndRendering(Handle);
 
     // ---- Internal: bounded-stackalloc / ArrayPool fallback ----
 
