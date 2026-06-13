@@ -95,6 +95,16 @@ public sealed unsafe class StagingUploader : IDisposable
     /// the next <see cref="Reset"/>, so the caller must record + submit
     /// the consuming copy before the frame ends.
     /// </summary>
+    /// <remarks>
+    /// Each upload flushes its written sub-range via
+    /// <see cref="Buffer.Flush(ulong, ulong)"/> so the bytes are visible to
+    /// the GPU on host-visible <b>non-coherent</b> memory (mobile/UMA/some
+    /// BAR setups). The flush is a no-op — a single predicted branch — on
+    /// coherent allocations (typical desktop), so it stays on the
+    /// zero-allocation hot path. <c>vmaFlushAllocation</c> rounds the range
+    /// out to <c>nonCoherentAtomSize</c> internally, so passing the exact
+    /// written range is correct.
+    /// </remarks>
     public StagedUpload Upload<T>(ReadOnlySpan<T> data) where T : unmanaged
     {
         ulong sizeBytes = (ulong)data.Length * (ulong)sizeof(T);
@@ -110,6 +120,9 @@ public sealed unsafe class StagingUploader : IDisposable
                 Span<byte> dst = c.Buf.AsSpan<byte>().Slice(checked((int)aligned), checked((int)sizeBytes));
                 MemoryMarshal.AsBytes(data).CopyTo(dst);
                 c.Head = aligned + sizeBytes;
+                // Make the written bytes GPU-visible on non-coherent memory;
+                // no-op on coherent (single predicted branch, no allocation).
+                c.Buf.Flush(aligned, sizeBytes);
                 return new StagedUpload(c.Buf, aligned, sizeBytes);
             }
             _activeChunkIndex++;
@@ -132,6 +145,9 @@ public sealed unsafe class StagingUploader : IDisposable
         }
         Span<byte> dst2 = newBuf.AsSpan<byte>().Slice(0, checked((int)sizeBytes));
         MemoryMarshal.AsBytes(data).CopyTo(dst2);
+        // Make the written bytes GPU-visible on non-coherent memory;
+        // no-op on coherent (single predicted branch, no allocation).
+        newBuf.Flush(0, sizeBytes);
         _activeChunkIndex = _chunks.Count - 1;
         return new StagedUpload(newBuf, 0, sizeBytes);
     }

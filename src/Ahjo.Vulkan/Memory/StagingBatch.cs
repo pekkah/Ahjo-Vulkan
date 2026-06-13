@@ -123,6 +123,15 @@ public sealed unsafe class StagingBatch : IDisposable
     /// batch's pending list is cleared; staging chunks are recycled
     /// (heads reset to zero) for the next round of uploads.
     /// </summary>
+    /// <remarks>
+    /// Before recording any copy, each staging chunk's written range
+    /// <c>[0, head)</c> is flushed via <see cref="Buffer.Flush(ulong, ulong)"/>
+    /// so the staged bytes are GPU-visible on host-visible <b>non-coherent</b>
+    /// memory (mobile/UMA/some BAR setups). The flush is a no-op on coherent
+    /// allocations (typical desktop). Flushing before recording is correct:
+    /// the submit + wait-idle happen afterwards, so visibility is guaranteed
+    /// by the time the copies execute.
+    /// </remarks>
     public void Flush(Queue queue, CommandBufferPool pool)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -133,6 +142,16 @@ public sealed unsafe class StagingBatch : IDisposable
         CommandRecorder rec = pool.Begin();
         try
         {
+            // Flush each chunk's written range once so non-coherent staging
+            // memory is GPU-visible. No-op on coherent memory. Done before
+            // recording — submit/wait-idle below order it ahead of execution.
+            var chunkSpan = CollectionsMarshal.AsSpan(_chunks);
+            var headSpan  = CollectionsMarshal.AsSpan(_heads);
+            for (int i = 0; i < chunkSpan.Length; i++)
+            {
+                if (headSpan[i] != 0) chunkSpan[i].Flush(0, headSpan[i]);
+            }
+
             foreach (var copy in CollectionsMarshal.AsSpan(_pending))
             {
                 var region = new VkBufferCopy2
