@@ -118,7 +118,7 @@ public sealed unsafe class CommandBufferPool : IDisposable
         };
         try
         {
-            Vk.vkBeginCommandBuffer(cb, &bi).ThrowIfFailed();
+            _device.Functions.BeginCommandBuffer(cb, &bi).ThrowIfFailed();
         }
         catch
         {

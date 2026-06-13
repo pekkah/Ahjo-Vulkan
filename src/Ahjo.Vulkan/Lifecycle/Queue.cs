@@ -136,7 +136,7 @@ public sealed unsafe class Queue
             commandBufferInfoCount = 1,
             pCommandBufferInfos    = &cbInfo,
         };
-        Vk.vkQueueSubmit2(Handle, 1, &submit, fence.Handle).ThrowIfFailed();
+        Device.Functions.QueueSubmit2(Handle, 1, &submit, fence.Handle).ThrowIfFailed();
     }
 
     /// <summary>
@@ -188,7 +188,7 @@ public sealed unsafe class Queue
                 signalSemaphoreInfoCount = (uint)signals.Length,
                 pSignalSemaphoreInfos    = signals.Length > 0 ? pSignal : null,
             };
-            Vk.vkQueueSubmit2(Handle, 1, &submit, fence.Handle).ThrowIfFailed();
+            Device.Functions.QueueSubmit2(Handle, 1, &submit, fence.Handle).ThrowIfFailed();
         }
     }
 }

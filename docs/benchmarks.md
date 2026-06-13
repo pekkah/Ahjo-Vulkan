@@ -105,5 +105,18 @@ back into the per-call cost when the unrolled span is non-trivial.
   column was re-verified at `-` across all four `SyncPool` benchmarks after
   the change (Linux container, Mesa lavapipe — Mean values from that host
   are not comparable to this baseline and were not recorded here).
+- **Per-device dispatch table (#121)**: `CommandRecorder` now dispatches
+  every `vkCmd*` (plus `vkBeginCommandBuffer` / `vkEndCommandBuffer` /
+  `vkQueueSubmit2`) through `delegate* unmanaged` pointers resolved once per
+  device via `vkGetDeviceProcAddr`, instead of the static `[DllImport]`s that
+  route each call through the loader's dispatch trampoline. The pointers live
+  in `DeviceFunctionTable` (a value field on `Device`) and are read by
+  `ref readonly` at the call site, so no managed allocation is introduced —
+  the `CommandRecorder.RenderingPass100Cmds` /
+  `CommandBufferPool.Frame_Begin_100Cmds_End_Reset` /
+  `PipelineBarrier.*` / `PushDescriptors.*` allocation columns stay `-`. The
+  expected win is in the **Mean** column on Windows + a real ICD (the loader
+  trampoline is thickest there); refresh those rows from a Windows capture
+  before and after to confirm the change earns its keep on real drivers.
 - **Not run in CI**: benchmark numbers are too noisy on hosted runners.
   This file is a manual capture; refresh it when a hot path changes.
