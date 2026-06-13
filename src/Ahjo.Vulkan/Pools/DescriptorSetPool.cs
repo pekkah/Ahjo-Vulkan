@@ -179,12 +179,16 @@ public sealed unsafe class DescriptorSetPool : IDisposable
         if (layout == null) throw new ArgumentNullException(nameof(layout));
         if (AhjoValidation.IsEnabled)
         {
-            if (set.Layout != layout)
-                AhjoValidation.Fail("DescriptorSetPool",
-                    "Release: layout argument doesn't match the layout the set was acquired with.");
+            // Null-layout check first: a FromRaw set has set.Layout == null,
+            // which would also fail the != layout check below (layout is
+            // non-null here) — but with the more specific message. Fail is
+            // [DoesNotReturn], so order decides which diagnostic the caller sees.
             if (set.Layout == null)
                 AhjoValidation.Fail("DescriptorSetPool",
                     "Release: set has no layout — was it constructed via FromRaw rather than Acquire?");
+            if (set.Layout != layout)
+                AhjoValidation.Fail("DescriptorSetPool",
+                    "Release: layout argument doesn't match the layout the set was acquired with.");
         }
 
         // Route by the carried layout, not the caller-supplied one. In
