@@ -14,6 +14,36 @@ public sealed class SpecializationInfoTests
         public uint Tag;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MixedAlignSpecConstants
+    {
+        public ushort A;
+        public uint   B;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MixedPrimitiveSpecConstants
+    {
+        public int   A;
+        public float B;
+        public uint  C;
+    }
+
+    private struct BadSpecConstants
+    {
+        public bool Flag;
+        public int  Value;
+    }
+
+    // Explicit layout that reorders two same-size fields while preserving the
+    // total size — the case a size-only sanity check would miss.
+    [StructLayout(LayoutKind.Explicit)]
+    private struct ExplicitSpecConstants
+    {
+        [FieldOffset(4)] public uint A;
+        [FieldOffset(0)] public uint B;
+    }
+
     [Fact]
     public void For_DerivesMapEntriesFromFieldLayout()
     {
@@ -46,6 +76,87 @@ public sealed class SpecializationInfoTests
         var a = SpecializationInfo.For<SpecConstants>(in values);
         var b = SpecializationInfo.For<SpecConstants>(in values);
         Assert.Same(a.Entries, b.Entries);
+    }
+
+    [Fact]
+    public void For_FieldWithSmallerAlignment_SizesAreExactNotPaddedGap()
+    {
+        // { ushort A; uint B; } — A sits at offset 0 (size 2), then 2 bytes
+        // of padding, then B at offset 4 (size 4). The entry size for A must
+        // be the exact 2-byte field size, NOT the 4-byte gap to B (which the
+        // old gap-based code produced and which violates
+        // VUID-VkSpecializationMapEntry-constantID-00776).
+        var values = new MixedAlignSpecConstants { A = 7, B = 0xDEADBEEF };
+        var spec   = SpecializationInfo.For<MixedAlignSpecConstants>(in values);
+
+        VkSpecializationMapEntry[] entries = spec.Entries;
+        Assert.Equal(2, entries.Length);
+
+        Assert.Equal(0u,        entries[0].constantID);
+        Assert.Equal(0u,        entries[0].offset);
+        Assert.Equal((nuint)2,  entries[0].size);
+
+        Assert.Equal(1u,        entries[1].constantID);
+        Assert.Equal(4u,        entries[1].offset);
+        Assert.Equal((nuint)4,  entries[1].size);
+
+        Assert.Equal(8, spec.DataSize);
+    }
+
+    [Fact]
+    public void For_MixedValidPrimitives_ComputesCorrectLayout()
+    {
+        // { int A; float B; uint C; } — all 4-byte, naturally packed.
+        var values = new MixedPrimitiveSpecConstants { A = 1, B = 2.0f, C = 3 };
+        var spec   = SpecializationInfo.For<MixedPrimitiveSpecConstants>(in values);
+
+        VkSpecializationMapEntry[] entries = spec.Entries;
+        Assert.Equal(3, entries.Length);
+
+        Assert.Equal(0u,        entries[0].constantID);
+        Assert.Equal(0u,        entries[0].offset);
+        Assert.Equal((nuint)4,  entries[0].size);
+
+        Assert.Equal(1u,        entries[1].constantID);
+        Assert.Equal(4u,        entries[1].offset);
+        Assert.Equal((nuint)4,  entries[1].size);
+
+        Assert.Equal(2u,        entries[2].constantID);
+        Assert.Equal(8u,        entries[2].offset);
+        Assert.Equal((nuint)4,  entries[2].size);
+
+        Assert.Equal(12, spec.DataSize);
+    }
+
+    [Fact]
+    public void For_BoolField_IsRejected()
+    {
+        // The layout is built in SpecializationLayout<T>'s static initializer,
+        // so the NotSupportedException surfaces wrapped in a
+        // TypeInitializationException on first access to the type.
+        var ex = Assert.Throws<TypeInitializationException>(() =>
+        {
+            var v = new BadSpecConstants { Flag = true, Value = 1 };
+            _ = SpecializationInfo.For<BadSpecConstants>(in v);
+        });
+        var inner = Assert.IsType<NotSupportedException>(ex.InnerException);
+        Assert.Contains("VkBool32", inner.Message); // bool guidance
+    }
+
+    [Fact]
+    public void For_ExplicitLayout_IsRejected()
+    {
+        // A LayoutKind.Explicit struct can reorder fields while keeping the
+        // same total size, so the natural-alignment model would emit offsets
+        // pointing at the wrong bytes of pData. The up-front IsLayoutSequential
+        // guard rejects it rather than silently corrupting the spec constants.
+        var ex = Assert.Throws<TypeInitializationException>(() =>
+        {
+            var v = new ExplicitSpecConstants { A = 1, B = 2 };
+            _ = SpecializationInfo.For<ExplicitSpecConstants>(in v);
+        });
+        var inner = Assert.IsType<NotSupportedException>(ex.InnerException);
+        Assert.Contains("Sequential", inner.Message);
     }
 
     [Fact]
