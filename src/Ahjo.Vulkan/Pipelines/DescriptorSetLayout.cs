@@ -23,6 +23,7 @@ public readonly unsafe struct DescriptorSetLayout : IVulkanHandle<DescriptorSetL
     {
         Handle       = handle;
         DeviceHandle = device;
+        HandleRegistry.TrackCreate(this);
     }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT;
@@ -60,6 +61,7 @@ public readonly unsafe struct DescriptorSetLayout : IVulkanHandle<DescriptorSetL
         // caller owns the lifetime; calling vkDestroyDescriptorSetLayout
         // with a null device handle would crash on every loader.
         if (!OwnsHandle) return;
+        HandleRegistry.TrackDispose(this);
         Vk.vkDestroyDescriptorSetLayout(DeviceHandle, Handle, null);
     }
 }

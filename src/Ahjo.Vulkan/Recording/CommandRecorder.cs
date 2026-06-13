@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Ahjo.Vulkan.Native;
@@ -237,9 +236,10 @@ public unsafe ref struct CommandRecorder : IDisposable
         }
     }
 
-    [Conditional("DEBUG")]
     private static void AssertSetsMatchLayout(in PipelineLayout layout, uint firstSet, ReadOnlySpan<DescriptorSet> sets)
     {
+        if (!AhjoValidation.IsEnabled) return;
+
         nint[]? declared = layout.Metadata?.SetLayouts;
         // PipelineLayout.FromRaw carries no metadata, and a layout built
         // without set layouts declares none — there's nothing to validate
@@ -256,21 +256,23 @@ public unsafe ref struct CommandRecorder : IDisposable
             if (sets[i].Layout == null) continue;
 
             uint slot = firstSet + (uint)i;
-            Debug.Assert(slot < declared.Length,
-                $"BindDescriptorSets: slot {slot} (firstSet={firstSet} + i={i}) is out of range; PipelineLayout declares {declared.Length} set(s).");
+            if (slot >= declared.Length)
+                AhjoValidation.Fail("CommandRecorder",
+                    $"BindDescriptorSets: slot {slot} (firstSet={firstSet} + i={i}) is out of range; PipelineLayout declares {declared.Length} set(s).");
 
-            Debug.Assert(declared[slot] == (nint)sets[i].Layout,
-                $"BindDescriptorSets: set[{i}] was allocated against a different VkDescriptorSetLayout than slot {slot} declares on PipelineLayout. " +
-                "The pipeline layout's set layout and the bound set's source layout must match.");
+            if (declared[slot] != (nint)sets[i].Layout)
+                AhjoValidation.Fail("CommandRecorder",
+                    $"BindDescriptorSets: set[{i}] was allocated against a different VkDescriptorSetLayout than slot {slot} declares on PipelineLayout. " +
+                    "The pipeline layout's set layout and the bound set's source layout must match.");
         }
     }
 
     /// <summary>
     /// Pushes <paramref name="data"/> into the layout's push-constant
-    /// range. In debug builds the call asserts that the
-    /// <c>[offset, offset + sizeof(T))</c> window fits a range declared
-    /// on <paramref name="layout"/> whose stage mask covers
-    /// <paramref name="stages"/>; release builds rely on the driver /
+    /// range. When <see cref="AhjoValidation.Enabled"/> the call validates
+    /// that the <c>[offset, offset + sizeof(T))</c> window fits a range
+    /// declared on <paramref name="layout"/> whose stage mask covers
+    /// <paramref name="stages"/>; otherwise it relies on the driver /
     /// validation layer.
     /// </summary>
     public void PushConstants<T>(in PipelineLayout layout, ShaderStages stages, in T data, uint offset = 0)
@@ -288,9 +290,10 @@ public unsafe ref struct CommandRecorder : IDisposable
             Vk.vkCmdPushConstants(Handle, layout.Handle, (uint)stages, offset, (uint)Unsafe.SizeOf<T>(), p);
     }
 
-    [Conditional("DEBUG")]
     private static void AssertPushRangeFits(in PipelineLayout layout, ShaderStages stages, uint offset, uint size)
     {
+        if (!AhjoValidation.IsEnabled) return;
+
         PushConstantRange[]? ranges = layout.Metadata?.PushRanges;
         // PipelineLayout.FromRaw carries no metadata, and a layout built
         // without push ranges declares none — there's nothing to validate
@@ -317,7 +320,7 @@ public unsafe ref struct CommandRecorder : IDisposable
             }
         }
 
-        Debug.Fail(
+        AhjoValidation.Fail("CommandRecorder",
             $"PushConstants: no declared range on PipelineLayout fits stages={stages}, offset={offset}, size={size}. " +
             "Declared ranges must include the requested window AND cover the requested stages — " +
             "see PipelineLayoutDescription.PushConstantRanges.");

@@ -36,6 +36,7 @@ public readonly unsafe struct PipelineCache : IVulkanHandle<PipelineCache>, IDis
     {
         Handle       = handle;
         DeviceHandle = device;
+        HandleRegistry.TrackCreate(this);
     }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_PIPELINE_CACHE;
@@ -139,6 +140,7 @@ public readonly unsafe struct PipelineCache : IVulkanHandle<PipelineCache>, IDis
     {
         if (Handle == null) return;
         if (!OwnsHandle) return; // FromRaw — borrowed handle.
+        HandleRegistry.TrackDispose(this);
         Vk.vkDestroyPipelineCache(DeviceHandle, Handle, null);
     }
 

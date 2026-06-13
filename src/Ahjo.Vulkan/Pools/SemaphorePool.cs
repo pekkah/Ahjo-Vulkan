@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Ahjo.Vulkan.Native;
 
 namespace Ahjo.Vulkan;
@@ -89,8 +88,9 @@ public sealed unsafe class SemaphorePool : IDisposable
         // a release of a foreign-pool handle would corrupt _freeBinary
         // and Dispose's destruction loop. Linear scan is fine — the
         // pool size is bounded by frames-in-flight (small).
-        Debug.Assert(_allHandles.Contains((nint)sem.Handle),
-            "SemaphorePool.Release(BinarySemaphore): handle was not produced by this pool.");
+        if (AhjoValidation.IsEnabled && !_allHandles.Contains((nint)sem.Handle))
+            AhjoValidation.Fail("SemaphorePool",
+                "Release(BinarySemaphore): handle was not produced by this pool.");
         _freeBinary.Push((nint)sem.Handle);
     }
 
@@ -98,8 +98,9 @@ public sealed unsafe class SemaphorePool : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (sem.IsNull) return;
-        Debug.Assert(_allHandles.Contains((nint)sem.Handle),
-            "SemaphorePool.Release(TimelineSemaphore): handle was not produced by this pool.");
+        if (AhjoValidation.IsEnabled && !_allHandles.Contains((nint)sem.Handle))
+            AhjoValidation.Fail("SemaphorePool",
+                "Release(TimelineSemaphore): handle was not produced by this pool.");
         _freeTimeline.Push((nint)sem.Handle);
     }
 

@@ -29,6 +29,7 @@ public readonly unsafe struct Surface : IVulkanHandle<Surface>, IDisposable
     {
         Handle         = handle;
         InstanceHandle = instance;
+        HandleRegistry.TrackCreate(this);
     }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_SURFACE_KHR;
@@ -182,6 +183,7 @@ public readonly unsafe struct Surface : IVulkanHandle<Surface>, IDisposable
     public void Dispose()
     {
         if (Handle == null || !OwnsHandle) return;
+        HandleRegistry.TrackDispose(this);
         Vk.vkDestroySurfaceKHR(InstanceHandle, Handle, null);
     }
 }

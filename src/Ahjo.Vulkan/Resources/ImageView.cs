@@ -24,6 +24,7 @@ public readonly unsafe struct ImageView : IVulkanHandle<ImageView>, IDisposable
     {
         Handle       = handle;
         DeviceHandle = device;
+        HandleRegistry.TrackCreate(this);
     }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_IMAGE_VIEW;
@@ -44,6 +45,7 @@ public readonly unsafe struct ImageView : IVulkanHandle<ImageView>, IDisposable
         // caller owns the lifetime; calling vkDestroyImageView with a null
         // device handle would crash on every loader.
         if (!OwnsHandle) return;
+        HandleRegistry.TrackDispose(this);
         Vk.vkDestroyImageView(DeviceHandle, Handle, null);
     }
 }

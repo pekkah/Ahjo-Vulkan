@@ -69,6 +69,7 @@ public readonly unsafe struct Image : IVulkanHandle<Image>, IDisposable
         ArrayLayers      = arrayLayers;
         Usage            = usage;
         PersistentMapped = persistentMapped;
+        HandleRegistry.TrackCreate(this);
     }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_IMAGE;
@@ -133,6 +134,7 @@ public readonly unsafe struct Image : IVulkanHandle<Image>, IDisposable
         // not a VMA allocation and must never reach vmaDestroyImage; the
         // guard makes the borrow contract real. Skip the destroy.
         if (!OwnsHandle) return;
+        HandleRegistry.TrackDispose(this);
         VmaApi.vmaDestroyImage(Owner.Handle, Handle, AllocationHandle);
     }
 }

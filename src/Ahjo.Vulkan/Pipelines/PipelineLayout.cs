@@ -41,6 +41,7 @@ public readonly unsafe struct PipelineLayout : IVulkanHandle<PipelineLayout>, ID
         Handle       = handle;
         DeviceHandle = device;
         Metadata     = metadata;
+        HandleRegistry.TrackCreate(this);
     }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_PIPELINE_LAYOUT;
@@ -83,6 +84,7 @@ public readonly unsafe struct PipelineLayout : IVulkanHandle<PipelineLayout>, ID
         // caller owns the lifetime; calling vkDestroyPipelineLayout with a
         // null device handle would crash on every loader.
         if (!OwnsHandle) return;
+        HandleRegistry.TrackDispose(this);
         Vk.vkDestroyPipelineLayout(DeviceHandle, Handle, null);
     }
 }

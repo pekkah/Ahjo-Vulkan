@@ -70,6 +70,7 @@ public readonly unsafe struct Buffer : IVulkanHandle<Buffer>, IDisposable
         IsHostVisible    = isHostVisible;
         IsHostCoherent   = isHostCoherent;
         PersistentMapped = persistentMapped;
+        HandleRegistry.TrackCreate(this);
     }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_BUFFER;
@@ -176,6 +177,7 @@ public readonly unsafe struct Buffer : IVulkanHandle<Buffer>, IDisposable
         // caller owns the lifetime; calling vmaDestroyBuffer through a null
         // allocator would crash. Skip the destroy.
         if (!OwnsHandle) return;
+        HandleRegistry.TrackDispose(this);
         VmaApi.vmaDestroyBuffer(Owner.Handle, Handle, AllocationHandle);
     }
 }
