@@ -181,16 +181,22 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// Opens a debug-label scope and returns a <see cref="DisposableLabel"/>
     /// that calls <see cref="EndLabel"/> when disposed — typically via
     /// <c>using var scope = rec.LabelScope("PassName"u8);</c>. Nests
-    /// cleanly. No-op when <c>VK_EXT_debug_utils</c> is not loaded.
+    /// cleanly. No-op when <c>VK_EXT_debug_utils</c> is not loaded, and
+    /// also a no-op when <paramref name="name"/> is empty — in that case
+    /// neither begin nor dispose touches the marker stack, so begin/end
+    /// stay balanced for any enclosing scope.
     /// </summary>
     public DisposableLabel LabelScope(ReadOnlySpan<byte> name, in Color color = default)
     {
         BeginLabel(name, in color);
-        // Capture the End fn pointer at scope-open time. If the extension
-        // wasn't loaded, _end stays null and Dispose is a no-op — the
-        // matching BeginLabel call was also a no-op so the marker stack
-        // stays balanced.
-        return new DisposableLabel(Handle, Fns.CmdEndDebugUtilsLabel);
+        // Hand Dispose a non-null End pointer ONLY when BeginLabel actually
+        // pushed a label. BeginLabel no-ops both when VK_EXT_debug_utils isn't
+        // loaded (CmdBeginDebugUtilsLabel == null) AND when name is empty — in
+        // either case Dispose must not pop, or it emits an unbalanced
+        // vkCmdEndDebugUtilsLabelEXT (VUID-vkCmdEndDebugUtilsLabelEXT-commandBuffer-01912),
+        // corrupting the marker stack of any enclosing scope.
+        bool pushed = Fns.CmdBeginDebugUtilsLabel != null && !name.IsEmpty;
+        return new DisposableLabel(Handle, pushed ? Fns.CmdEndDebugUtilsLabel : null);
     }
 
     // ---- Dynamic state ----

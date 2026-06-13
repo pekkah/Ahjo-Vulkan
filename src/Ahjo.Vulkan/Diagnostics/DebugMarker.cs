@@ -89,8 +89,9 @@ public static unsafe class ObjectName
 /// <c>ref struct</c> so the scope cannot escape the recording frame.
 /// Holds the raw <c>VkCommandBuffer</c> pointer plus the
 /// <c>vkCmdEndDebugUtilsLabelEXT</c> pointer captured at scope-open
-/// time — null fn pointer means VK_EXT_debug_utils wasn't loaded and
-/// <c>Dispose</c> is a no-op (matching the no-op enter call).
+/// time — a null fn pointer means there is nothing to pop (either
+/// VK_EXT_debug_utils wasn't loaded, or the label name was empty), so
+/// <c>Dispose</c> is a no-op, matching the no-op enter call.
 /// </remarks>
 public readonly unsafe ref struct DisposableLabel
 {
