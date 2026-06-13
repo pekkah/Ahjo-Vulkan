@@ -208,14 +208,26 @@ public sealed unsafe class DescriptorSetPool : IDisposable
     /// acquired become invalid; this is the cheap "rebuild the per-frame
     /// descriptor table" path. Sub-pool count is preserved — Reset does
     /// not free the chained sub-pools, since the next frame will fill
-    /// them again to the same shape.
+    /// them again to the same shape. The per-layout idle free-lists are
+    /// emptied but their <see cref="Stack{T}"/> instances (and backing
+    /// arrays) are retained, so a Release-then-Reset frame loop stays
+    /// allocation-free (issue 114).
     /// </summary>
     public void Reset()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         for (int i = 0; i < _pools.Count; i++)
             Vk.vkResetDescriptorPool(_device.Handle, (VkDescriptorPool_T*)_pools[i], flags: 0).ThrowIfFailed();
-        _idle.Clear();
+        // Empty each layout's idle stack but KEEP the Stack instances (and their
+        // backing arrays) and the dictionary entries so a Release-then-Reset frame
+        // loop stays allocation-free. vkResetDescriptorPool above invalidates the
+        // contained VkDescriptorSet handles, so the stacks must be emptied — but
+        // the layout-pointer keys stay valid across resets, so the Stack objects
+        // are reusable (issue 114). Enumerating _idle here only mutates the value
+        // objects (Stack.Clear), never the dictionary structure, so the struct
+        // Dictionary.Enumerator stays valid and the loop allocates nothing.
+        foreach (KeyValuePair<nint, Stack<nint>> entry in _idle)
+            entry.Value.Clear();
         _allHandles.Clear();
     }
 

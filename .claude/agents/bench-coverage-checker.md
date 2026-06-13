@@ -42,7 +42,7 @@ Use this table to look up the expected benchmark for each changed file. If a fil
 | `Pools/FrameRing.cs`                   | `FrameRingBenchmarks.cs`                               |
 | `Pools/FencePool.cs`                   | `SyncPoolBenchmarks.cs`                                |
 | `Pools/SemaphorePool.cs`               | `SyncPoolBenchmarks.cs`                                |
-| `Pools/DescriptorSetPool.cs`           | `PushDescriptorsBenchmarks.cs`                         |
+| `Pools/DescriptorSetPool.cs`           | `DescriptorSetPoolBenchmarks.cs`                      |
 | `Pools/DescriptorTemplate.cs`          | `PushDescriptorsBenchmarks.cs`                         |
 | `Pools/DescriptorWrite*.cs`            | `PushDescriptorsBenchmarks.cs`                         |
 | `Sync/Fence.cs`                        | `SyncPoolBenchmarks.cs`                                |
