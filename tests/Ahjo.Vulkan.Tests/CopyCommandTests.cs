@@ -12,12 +12,10 @@ namespace Ahjo.Vulkan.Tests;
 public sealed unsafe class CopyCommandTests
 {
     [Fact]
-    public void BufferCopyRegion_Default_Size_Maps_To_WholeSize()
+    public void BufferCopyRegion_ZeroSize_Throws()
     {
         var r = new BufferCopyRegion { SrcOffset = 0, DstOffset = 0, Size = 0 };
-        var n = r.ToNative();
-        Assert.Equal(VkStructureType.VK_STRUCTURE_TYPE_BUFFER_COPY_2, n.sType);
-        Assert.Equal(~0ul, n.size);
+        Assert.Throws<ArgumentException>(() => r.ToNative());
     }
 
     [Fact]
@@ -101,6 +99,40 @@ public sealed unsafe class CopyCommandTests
         ReadOnlySpan<byte> dstBytes = dst.AsReadOnlySpan<byte>();
         for (int i = 0; i < dstBytes.Length; i++)
             Assert.Equal((byte)(i * 31 + 7), dstBytes[i]);
+    }
+
+    [Fact]
+    public void CopyBuffer_WholeBuffer_ZeroSizeSource_Throws()
+    {
+        // The guard rejects a zero-size (Buffer.FromRaw) source BEFORE any GPU
+        // work is recorded or submitted, so this only needs a device to obtain
+        // a CommandRecorder — gate on driver availability, not on whether the
+        // driver can actually execute a submission.
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+
+        using var cmdPool = new CommandBufferPool(device, family);
+        var rec = cmdPool.Begin();
+        try
+        {
+            var src = Buffer.FromRaw(0x1000); // Size == 0 for a raw handle.
+            var dst = Buffer.FromRaw(0x1000);
+            // CommandRecorder is a ref struct, so it cannot be captured in the
+            // Assert.Throws lambda — assert via an explicit try/catch instead.
+            // Catch broadly, then pin the exact type AND ParamName: the
+            // recorder-level guard sets ParamName "src", whereas the deeper
+            // BufferCopyRegion.ToNative backstop throws with ParamName null.
+            // Asserting "src" makes this test fail if the recorder guard
+            // regresses, instead of silently passing on the backstop.
+            Exception? caught = null;
+            try { rec.CopyBuffer(in src, in dst); }
+            catch (Exception ex) { caught = ex; }
+            var thrown = Assert.IsType<ArgumentException>(caught);
+            Assert.Equal("src", thrown.ParamName);
+        }
+        finally { rec.Dispose(); }
     }
 
     [Fact]

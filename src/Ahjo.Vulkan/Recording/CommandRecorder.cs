@@ -623,6 +623,15 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <summary>Whole-buffer copy from <paramref name="src"/> offset 0 → <paramref name="dst"/> offset 0.</summary>
     public void CopyBuffer(in Buffer src, in Buffer dst)
     {
+        // VkBufferCopy2::size must be > 0 — a zero-size source is typically a
+        // Buffer.FromRaw handle whose size the wrapper never recorded. Reject
+        // it here: it would pass the dst.Size < src.Size guard below (0 < 0 is
+        // false) and then ask the driver to copy ~0ul bytes.
+        if (src.Size == 0)
+            throw new ArgumentException(
+                "CopyBuffer whole-buffer overload requires src.Size > 0. A zero-size source is "
+                + "typically a Buffer.FromRaw handle whose size is unknown to the wrapper — use the "
+                + "multi-region overload with an explicit BufferCopyRegion size.", nameof(src));
         // Whole-buffer overload writes src.Size bytes into dst at offset 0.
         // Without this guard a smaller dst would either trip Vulkan
         // validation (best case) or silently overrun another allocation
