@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Ahjo.Vulkan.Native;
 
 namespace Ahjo.Vulkan;
@@ -178,10 +177,15 @@ public sealed unsafe class DescriptorSetPool : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (set.IsNull) return;
         if (layout == null) throw new ArgumentNullException(nameof(layout));
-        Debug.Assert(set.Layout == layout,
-            "DescriptorSetPool.Release: layout argument doesn't match the layout the set was acquired with.");
-        Debug.Assert(set.Layout != null,
-            "DescriptorSetPool.Release: set has no layout — was it constructed via FromRaw rather than Acquire?");
+        if (AhjoValidation.IsEnabled)
+        {
+            if (set.Layout != layout)
+                AhjoValidation.Fail("DescriptorSetPool",
+                    "Release: layout argument doesn't match the layout the set was acquired with.");
+            if (set.Layout == null)
+                AhjoValidation.Fail("DescriptorSetPool",
+                    "Release: set has no layout — was it constructed via FromRaw rather than Acquire?");
+        }
 
         // Route by the carried layout, not the caller-supplied one. In
         // release builds where the assert is compiled out a buggy caller

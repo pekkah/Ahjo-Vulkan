@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Ahjo.Vulkan.Native;
 
 namespace Ahjo.Vulkan;
@@ -158,8 +157,9 @@ public sealed unsafe class CommandBufferPool : IDisposable
     public void ResetForFrame()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        Debug.Assert(_outstanding == 0,
-            $"ResetForFrame called with {_outstanding} outstanding recorder(s) — dispose them first.");
+        if (AhjoValidation.IsEnabled && _outstanding != 0)
+            AhjoValidation.Fail("CommandBufferPool",
+                $"ResetForFrame called with {_outstanding} outstanding recorder(s) — dispose them first.");
 
         Vk.vkResetCommandPool(_device.Handle, _pool, flags: 0).ThrowIfFailed();
         while (_spent.Count > 0)
