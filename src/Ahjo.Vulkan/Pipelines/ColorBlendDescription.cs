@@ -3,10 +3,13 @@ using Ahjo.Vulkan.Native;
 namespace Ahjo.Vulkan;
 
 /// <summary>
-/// Inputs to <see cref="GraphicsPipelineBuilder.WithColorBlend"/>. One
-/// <see cref="ColorBlendAttachment"/> per color attachment in the
-/// pipeline; if shorter than the color-attachment count the remaining
-/// attachments fall back to opaque defaults.
+/// Inputs to <see cref="GraphicsPipelineBuilder.WithColorBlend"/>. Provide
+/// exactly one <see cref="ColorBlendAttachment"/> per color attachment
+/// declared by <c>WithDynamicRendering</c>. A non-empty
+/// <see cref="Attachments"/> span whose length does not match the declared
+/// color-attachment count is rejected at <c>Build()</c> with an
+/// <see cref="InvalidOperationException"/>. Omit <c>WithColorBlend</c>
+/// entirely to default every attachment to opaque.
 /// </summary>
 /// <remarks>
 /// <c>ref struct</c> because <see cref="Attachments"/> is a span — the

@@ -200,6 +200,31 @@ public sealed unsafe class DescriptorSetPoolTests
         finally { Vk.vkDestroyDescriptorSetLayout(device.Handle, layout, null); }
     }
 
+    /// <summary>
+    /// A <c>maxSets</c> of 0 would otherwise flow into
+    /// <c>vkCreateDescriptorPool</c> and surface as an opaque
+    /// driver/validation error. The ctor rejects it fail-early — the guard
+    /// runs before <c>CreatePool()</c>, so no GPU work happens. The device
+    /// is real only because the device-null check precedes the new guard.
+    /// </summary>
+    [Fact]
+    public void Pool_Ctor_ZeroMaxSets_Throws()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+
+        // Array (not a span local) so it can be captured by the lambda below;
+        // it converts to the ctor's ReadOnlySpan<VkDescriptorPoolSize> param.
+        VkDescriptorPoolSize[] sizes =
+        [
+            new VkDescriptorPoolSize { type = VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, descriptorCount = 1 },
+        ];
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DescriptorSetPool(device, maxSets: 0, sizes));
+    }
+
     [Fact]
     public void Pool_Acquire_AfterDispose_Throws()
     {

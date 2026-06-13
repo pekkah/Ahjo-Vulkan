@@ -1,5 +1,3 @@
-using System.Diagnostics;
-
 namespace Ahjo.Vulkan;
 
 /// <summary>
@@ -26,9 +24,9 @@ public readonly record struct VulkanVersion(uint Packed)
     /// </summary>
     public static VulkanVersion Make(uint major, uint minor, uint patch)
     {
-        Debug.Assert(major <= 0x7Fu,  "VulkanVersion.Make: major must fit in 7 bits (<= 127).");
-        Debug.Assert(minor <= 0x3FFu, "VulkanVersion.Make: minor must fit in 10 bits (<= 1023).");
-        Debug.Assert(patch <= 0xFFFu, "VulkanVersion.Make: patch must fit in 12 bits (<= 4095).");
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(major, 0x7Fu, nameof(major));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(minor, 0x3FFu, nameof(minor));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(patch, 0xFFFu, nameof(patch));
         return new((major << 22) | (minor << 12) | patch);
     }
 

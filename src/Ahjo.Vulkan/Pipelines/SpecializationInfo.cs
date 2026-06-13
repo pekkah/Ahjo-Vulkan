@@ -77,11 +77,23 @@ public static class SpecializationInfo
     /// layout and cached per type — see the type-level remarks.
     /// </summary>
     /// <remarks>
-    /// The wrapper stores a raw pointer to <paramref name="values"/>.
+    /// <para>The wrapper stores a raw pointer to <paramref name="values"/>.
     /// <paramref name="values"/> must outlive the pipeline build that
     /// consumes the wrapper; the chained
     /// <c>device.BuildComputePipeline().WithSpecialization(SpecializationInfo.For(in v)).Build()</c>
-    /// idiom satisfies this on a single stack frame.
+    /// idiom satisfies this on a single stack frame.</para>
+    /// <para><b>Inline-<c>new</c> rvalue trap.</b> The <c>in</c> parameter
+    /// binds a <i>hidden temporary</i> when you pass an inline
+    /// <c>new T { … }</c> — and that temporary's lifetime ends at the
+    /// enclosing full-expression (the statement's <c>;</c>). If you split
+    /// the builder call across statements, the captured pointer dangles by
+    /// the time <c>Build()</c> / <c>vkCreate*Pipelines</c> reads it. For
+    /// example, <c>var s = SpecializationInfo.For(new MyConsts { … });</c>
+    /// followed by <c>builder.WithSpecialization(s)…</c> reads a temporary
+    /// that is <i>already dead</i> on the second statement. Pass a
+    /// <b>named local</b> that outlives the whole pipeline build (or keep
+    /// the entire <c>For(in …)</c>→<c>Build()</c> chain in one expression)
+    /// rather than an inline <c>new</c>.</para>
     /// </remarks>
     public static unsafe SpecializationInfo<T> For<
         [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields)] T>(in T values)
