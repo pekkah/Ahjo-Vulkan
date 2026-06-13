@@ -25,8 +25,10 @@ namespace Ahjo.Vulkan;
 /// pinned — the builder doesn't pin on your behalf.</para>
 /// <para>Layout: every chainable Vulkan struct begins with
 /// <c>VkStructureType sType; void* pNext;</c> (the layout of
-/// <see cref="VkBaseOutStructure"/>). Each node aligns to <see cref="nint"/>;
-/// no Vulkan struct has stricter alignment.</para>
+/// <see cref="VkBaseOutStructure"/>). Each node aligns to 8 bytes — the
+/// strictest alignment any Vulkan struct field demands (<c>VkDeviceSize</c>
+/// / <c>uint64_t</c>). This is free on 64-bit and keeps a 32-bit target
+/// (where <c>sizeof(nint)</c> is only 4) correctly aligned.</para>
 /// <para>Usage:</para>
 /// <code>
 /// [SkipLocalsInit]
@@ -130,7 +132,11 @@ public unsafe ref struct ChainBuilder<TRoot>
     private ref T Reserve<T>(out int offset) where T : unmanaged
     {
         var size = Unsafe.SizeOf<T>();
-        var aligned = AlignTo(_cursor, sizeof(nint));
+        // Align to 8 unconditionally: the strictest alignment any Vulkan
+        // struct field requires (ulong / VkDeviceSize). sizeof(nint) would
+        // under-align those fields to 4 on a 32-bit target; on 64-bit the
+        // two are identical, so this costs nothing there.
+        var aligned = AlignTo(_cursor, 8);
         var end = aligned + size;
         if (end > _buffer.Length)
         {

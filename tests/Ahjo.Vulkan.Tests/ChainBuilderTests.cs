@@ -102,8 +102,14 @@ public sealed unsafe class ChainBuilderTests
     }
 
     [Fact]
-    public void EachNode_AlignedToPointerSize()
+    public void EachNode_AlignedTo8Bytes()
     {
+        // ChainBuilder aligns every node to 8 — the strictest alignment any
+        // Vulkan struct field demands (ulong / VkDeviceSize) — unconditionally,
+        // so a 32-bit target (where sizeof(nint) == 4) still lands those
+        // fields on a natural boundary. On 64-bit this is the same as pointer
+        // alignment; the test pins the stronger 8-byte guarantee regardless
+        // (issue #122).
         Span<byte> scratch = stackalloc byte[1024];
         var chain = ChainBuilder.For<VkPhysicalDeviceFeatures2>(scratch);
 
@@ -115,8 +121,8 @@ public sealed unsafe class ChainBuilderTests
         var node2Ptr = (nint)Unsafe.AsPointer(ref node2);
         var node3Ptr = (nint)Unsafe.AsPointer(ref node3);
 
-        Assert.Equal(0, (node2Ptr - basePtr) % sizeof(nint));
-        Assert.Equal(0, (node3Ptr - basePtr) % sizeof(nint));
+        Assert.Equal(0, (node2Ptr - basePtr) % 8);
+        Assert.Equal(0, (node3Ptr - basePtr) % 8);
     }
 
     [Fact]
