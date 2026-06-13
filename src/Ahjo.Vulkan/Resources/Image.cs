@@ -103,6 +103,16 @@ public readonly unsafe struct Image : IVulkanHandle<Image>, IDisposable
     /// </summary>
     public ImageView CreateView(Device device, in ImageViewDescription view)
     {
+        // levelCount / layerCount forward straight through: a valid range
+        // (>= 1, or the VK_REMAINING_* sentinels) comes from
+        // ImageViewDescription's field initializers (issue #119, which
+        // subsumes #113), which default both to VK_REMAINING_* = "whole image
+        // from base onward". No `== 0 ? REMAINING` guard here on purpose — the
+        // only way this single `in` description carries a zero count is an
+        // explicit `default(ImageViewDescription)`, documented as not
+        // contractually valid (see the "default(T) caveat (decided)" section
+        // of the issue-119 design spec). Build the view from
+        // `new ImageViewDescription { … }`.
         var range = new VkImageSubresourceRange
         {
             aspectMask     = (uint)view.Aspect,
