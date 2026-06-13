@@ -102,27 +102,28 @@ public sealed unsafe class ChainBuilderTests
     }
 
     [Fact]
-    public void EachNode_AlignedTo8Bytes()
+    public void EachNode_AbsoluteAddressAlignedTo8Bytes()
     {
-        // ChainBuilder aligns every node to 8 — the strictest alignment any
-        // Vulkan struct field demands (ulong / VkDeviceSize) — unconditionally,
-        // so a 32-bit target (where sizeof(nint) == 4) still lands those
-        // fields on a natural boundary. On 64-bit this is the same as pointer
-        // alignment; the test pins the stronger 8-byte guarantee regardless
-        // (issue #122).
+        // ChainBuilder aligns every node's *absolute* address to 8 — the
+        // strictest alignment any Vulkan struct field demands (ulong /
+        // VkDeviceSize). Checking the absolute address (not just relative
+        // offsets) pins the guarantee independent of where the backing buffer
+        // happens to sit, including a base that isn't itself 8-aligned and a
+        // 32-bit target where sizeof(nint) == 4 (issue #122).
         Span<byte> scratch = stackalloc byte[1024];
-        var chain = ChainBuilder.For<VkPhysicalDeviceFeatures2>(scratch);
+
+        // Slice off one byte so the builder's buffer is very likely to start on
+        // an odd/4-aligned boundary — exercising the absolute-address pad
+        // rather than relying on the stackalloc block already being 8-aligned.
+        var chain = ChainBuilder.For<VkPhysicalDeviceFeatures2>(scratch[1..]);
 
         ref var head = ref chain.Root();
         ref var node2 = ref chain.Push<VkPhysicalDeviceVulkan13Features>();
         ref var node3 = ref chain.Push<VkPhysicalDeviceVulkan12Features>();
 
-        var basePtr = (nint)Unsafe.AsPointer(ref head);
-        var node2Ptr = (nint)Unsafe.AsPointer(ref node2);
-        var node3Ptr = (nint)Unsafe.AsPointer(ref node3);
-
-        Assert.Equal(0, (node2Ptr - basePtr) % 8);
-        Assert.Equal(0, (node3Ptr - basePtr) % 8);
+        Assert.Equal(0, (nint)Unsafe.AsPointer(ref head) % 8);
+        Assert.Equal(0, (nint)Unsafe.AsPointer(ref node2) % 8);
+        Assert.Equal(0, (nint)Unsafe.AsPointer(ref node3) % 8);
     }
 
     [Fact]

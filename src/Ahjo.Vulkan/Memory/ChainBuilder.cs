@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Ahjo.Vulkan.Native;
 
 namespace Ahjo.Vulkan;
@@ -25,10 +26,12 @@ namespace Ahjo.Vulkan;
 /// pinned — the builder doesn't pin on your behalf.</para>
 /// <para>Layout: every chainable Vulkan struct begins with
 /// <c>VkStructureType sType; void* pNext;</c> (the layout of
-/// <see cref="VkBaseOutStructure"/>). Each node aligns to 8 bytes — the
-/// strictest alignment any Vulkan struct field demands (<c>VkDeviceSize</c>
-/// / <c>uint64_t</c>). This is free on 64-bit and keeps a 32-bit target
-/// (where <c>sizeof(nint)</c> is only 4) correctly aligned.</para>
+/// <see cref="VkBaseOutStructure"/>). Each node's absolute address is aligned
+/// to 8 bytes — the strictest alignment any Vulkan struct field demands
+/// (<c>VkDeviceSize</c> / <c>uint64_t</c>). The pad is derived from the backing
+/// buffer's base address, so the guarantee holds even when the caller's span
+/// does not start on an 8-byte boundary (and on a 32-bit target, where
+/// <c>sizeof(nint)</c> is only 4).</para>
 /// <para>Usage:</para>
 /// <code>
 /// [SkipLocalsInit]
@@ -132,11 +135,15 @@ public unsafe ref struct ChainBuilder<TRoot>
     private ref T Reserve<T>(out int offset) where T : unmanaged
     {
         var size = Unsafe.SizeOf<T>();
-        // Align to 8 unconditionally: the strictest alignment any Vulkan
-        // struct field requires (ulong / VkDeviceSize). sizeof(nint) would
-        // under-align those fields to 4 on a 32-bit target; on 64-bit the
-        // two are identical, so this costs nothing there.
-        var aligned = AlignTo(_cursor, 8);
+        // Align the node's *absolute* address to 8 — the strictest alignment
+        // any Vulkan struct field requires (ulong / VkDeviceSize). Aligning the
+        // relative cursor alone is not enough: the caller's backing span
+        // (stackalloc, or a sliced/pinned buffer) is not guaranteed to start on
+        // an 8-byte boundary, so the pad is derived from the base address.
+        // (sizeof(nint) would also under-align to 4 on a 32-bit target.)
+        nint addr = (nint)Unsafe.AsPointer(ref MemoryMarshal.GetReference(_buffer)) + _cursor;
+        int pad = (int)(-addr & 7);
+        var aligned = _cursor + pad;
         var end = aligned + size;
         if (end > _buffer.Length)
         {
@@ -160,10 +167,6 @@ public unsafe ref struct ChainBuilder<TRoot>
         view.sType = sType;
         view.pNext = null;
     }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int AlignTo(int value, int alignment)
-        => (value + alignment - 1) & ~(alignment - 1);
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowBufferTooSmall()
