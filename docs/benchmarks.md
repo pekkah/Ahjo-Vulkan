@@ -69,6 +69,8 @@ managed-byte count BDN's `MemoryDiagnoser` reports; `-` is zero.
 | `Buffer.Map_AsSpan`                             | 166.8 ns / 1024 ops ≈ **0.16 ns/op** | - | Persistent-mapped buffer, alloc-free `AsSpan<T>` round-trip. |
 | `CommandBufferPool.Frame_Begin_100Cmds_End_Reset` | 6.44 µs |        -  | Begin → 100 dynamic-state + fill commands → End → ResetForFrame.          |
 | `CommandRecorder.RenderingPass100Cmds`          |   3.23 µs  |        -  | BeginRendering → 100 SetViewport → EndRendering, dynamic rendering path.  |
+| `CommandRecorder.CopyBuffer_8Regions`           | 810.0 ns   |        -  | #141 canary: multi-region CopyBuffer; stackalloc ≤16 path stays 0 B/op.   |
+| `CommandRecorder.CopyBuffer_24Regions`          |   1.57 µs  |        -  | #141 canary: multi-region CopyBuffer; ArrayPool >16 path stays 0 B/op.    |
 | `PipelineBarrier.SingleImageTransition`         | 131.6 ns / 256 ops ≈ **0.51 ns/op** | - | One `vkCmdPipelineBarrier2` with a single image barrier.       |
 | `PipelineBarrier.LargeBatch_8x8x1`              | 3.08 µs / 256 ops ≈ **12.0 ns/op** | - | One `vkCmdPipelineBarrier2` with 64 image barriers.              |
 | `FrameRing.Frame_Begin_Submit_Wait`             |  56.20 µs  |        -  | Full headless frame: BeginFrame → submit no-op cmd → wait fence.          |

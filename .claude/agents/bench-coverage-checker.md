@@ -34,6 +34,7 @@ Use this table to look up the expected benchmark for each changed file. If a fil
 | `Memory/Allocator.cs`                  | `BufferBenchmarks.cs` (covers allocation path)         |
 | `Memory/MappedRegion.cs`               | `BufferBenchmarks.cs`                                  |
 | `Recording/CommandRecorder.cs`         | `CommandRecorderBenchmarks.cs`                         |
+| `Recording/BufferCopyRegion.cs`        | `CommandRecorderBenchmarks.cs`                         |
 | `Recording/ImmediateRecord.cs`         | `CommandRecorderBenchmarks.cs`                         |
 | `Recording/*Barrier.cs`                | `PipelineBarrierBenchmarks.cs`                         |
 | `Recording/Stage.cs`, `Access.cs`      | `PipelineBarrierBenchmarks.cs`                         |
