@@ -282,7 +282,7 @@ public sealed class SyncPoolTests
         using var device   = CreateGraphicsDevice(instance);
         using var pool     = new SemaphorePool(device);
 
-        var sem = pool.AcquireTimeline(initialValue: 0);
+        var sem = pool.AcquireTimeline();
         try
         {
             Assert.Equal(0UL, sem.Value);
@@ -291,6 +291,38 @@ public sealed class SyncPoolTests
             Assert.Equal(WaitState.Signaled, sem.WaitFor(7, TimeSpan.Zero));
         }
         finally { pool.Release(sem); }
+    }
+
+    /// <summary>
+    /// Regression (issue #108): a timeline recycled from the free-list resumes
+    /// from its prior counter value — Vulkan cannot lower a timeline counter, so
+    /// the pool does NOT reset it to 0. <c>AcquireTimeline</c> has no
+    /// <c>initialValue</c> parameter precisely because silently ignoring one on
+    /// the recycle path was the bug; callers read <c>Value</c> and track deltas.
+    /// </summary>
+    [Fact]
+    public void AcquireTimeline_RecycledHandle_ResumesFromPriorCounterValue()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+        using var pool     = new SemaphorePool(device);
+
+        var first = pool.AcquireTimeline();
+        Assert.Equal(0UL, first.Value);          // fresh create starts at 0
+        first.Signal(42);
+        Assert.Equal(42UL, first.Value);
+        pool.Release(first);
+
+        var second = pool.AcquireTimeline();
+        // Recycled handle resumes from its prior counter — Vulkan cannot lower
+        // a timeline counter, so it is NOT reset to 0. This is the documented
+        // pooled-timeline contract (issue #108).
+        unsafe { Assert.True(first.Handle == second.Handle); }
+        Assert.Equal(42UL, second.Value);
+
+        pool.Release(second);
     }
 
     [Fact]
@@ -302,7 +334,7 @@ public sealed class SyncPoolTests
         using var device   = CreateGraphicsDevice(instance);
         using var pool     = new SemaphorePool(device);
 
-        var sem = pool.AcquireTimeline(initialValue: 0);
+        var sem = pool.AcquireTimeline();
         try
         {
             Assert.Equal(WaitState.Timeout, sem.WaitFor(value: 999, TimeSpan.FromMilliseconds(1)));

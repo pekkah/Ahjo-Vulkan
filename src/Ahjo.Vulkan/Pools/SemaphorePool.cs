@@ -53,7 +53,29 @@ public sealed unsafe class SemaphorePool : IDisposable
         return new BinarySemaphore(raw);
     }
 
-    public TimelineSemaphore AcquireTimeline(ulong initialValue = 0)
+    /// <summary>
+    /// Acquires a timeline semaphore from the free-list, or creates one if the
+    /// free-list is empty.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <b>freshly created</b> timeline starts at counter 0. A timeline
+    /// <b>recycled from the free-list resumes from its prior counter value</b>:
+    /// Vulkan cannot lower a timeline counter, so a recycled handle that a
+    /// previous user signaled to N comes back already at N. Callers must
+    /// therefore read <see cref="TimelineSemaphore.Value"/> rather than assume
+    /// a starting value, and track deltas against it
+    /// (e.g. <c>sem.Signal(sem.Value + 1)</c>).
+    /// </para>
+    /// <para>
+    /// This is why there is no <c>initialValue</c> parameter: silently ignoring
+    /// one on the recycle path — handing back a semaphore already past the
+    /// requested value — was the bug behind issue #108. A caller that genuinely
+    /// needs a specific non-zero start can <see cref="TimelineSemaphore.Signal"/>
+    /// the acquired timeline up to it.
+    /// </para>
+    /// </remarks>
+    public TimelineSemaphore AcquireTimeline()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_freeTimeline.Count > 0)
@@ -67,7 +89,7 @@ public sealed unsafe class SemaphorePool : IDisposable
         {
             sType         = VkStructureType.VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
             semaphoreType = VkSemaphoreType.VK_SEMAPHORE_TYPE_TIMELINE,
-            initialValue  = initialValue,
+            // New timelines start at counter 0 (struct default for initialValue).
         };
         var ci = new VkSemaphoreCreateInfo
         {
