@@ -205,6 +205,18 @@ public readonly unsafe struct Allocator : IDisposable
         ici.imageType             = image.ImageType;
         ici.format                = image.Format;
         ici.extent                = new VkExtent3D { width = image.Width, height = image.Height, depth = image.Depth };
+        // mipLevels / arrayLayers / samples / depth forward straight through:
+        // the >= 1 baseline that VUID-VkImageCreateInfo-mipLevels-00947 /
+        // -arrayLayers-00948 / -samples-parameter require is supplied by
+        // ImageDescription's field initializers (issue #119, which subsumes
+        // #113). No call-site `== 0 ? 1` guard here on purpose — unlike the
+        // span-consuming ToNative / descriptor-layout boundaries (which guard
+        // because a zeroed array element is a legitimate input), CreateImage
+        // takes a single `in` description whose only zero-bypass is an
+        // explicit `default(ImageDescription)`, which the design documents as
+        // not contractually valid. See the "default(T) caveat (decided)"
+        // section of docs/superpowers/specs/…-issue-119-…-design.md before
+        // adding one.
         ici.mipLevels             = image.MipLevels;
         ici.arrayLayers           = image.ArrayLayers;
         ici.samples               = image.Samples;
