@@ -12,6 +12,14 @@ namespace Ahjo.Vulkan.Benchmarks;
 /// fixed-size struct, no span sizing, no descriptor lookups — so any
 /// allocation noise is attributable to the recorder itself rather than to
 /// the bound resource shape.
+/// <para>ALSO covers the <c>CommandRecorder.CopyBuffer</c> multi-region
+/// span-sizing path (issue 141): <c>CopyBuffer_8Regions</c> stays under the
+/// recorder's 16-element threshold and exercises the <c>stackalloc</c>
+/// branch, while <c>CopyBuffer_24Regions</c> spills past it and exercises
+/// the <c>ArrayPool</c> rent/return branch in <c>RentForOverflow</c> plus
+/// the <c>BufferCopyRegion.ToNative</c> loop. Both must report 0 B/op after
+/// warmup — <c>ArrayPool.Shared.Rent</c> reuses a faulted-in bucket and does
+/// not allocate managed memory in steady state.</para>
 /// </summary>
 [MemoryDiagnoser]
 public class CommandRecorderBenchmarks
@@ -23,6 +31,8 @@ public class CommandRecorderBenchmarks
     private CommandBufferPool _cmdPool  = null!;
     private Image             _image;
     private ImageView         _view;
+    private Buffer            _copySrc;
+    private Buffer            _copyDst;
 
     [GlobalSetup]
     public void Setup()
@@ -70,16 +80,36 @@ public class CommandRecorderBenchmarks
             LevelCount = 1, LayerCount = 1,
         });
 
+        // Device-local source/destination for the CopyBuffer canary. 64 KiB
+        // comfortably holds 24 disjoint 256-byte regions (24×256 = 6 KiB). We
+        // only RECORD into these — never map or submit — so AutoPreferDevice
+        // is fine and no host-access flag is needed.
+        _copySrc = _device.Allocator.CreateBuffer(
+            new BufferDescription { Size = 64 * 1024, Usage = BufferUsage.TransferSrc },
+            new AllocationDescription { Usage = MemoryUsage.AutoPreferDevice });
+        _copyDst = _device.Allocator.CreateBuffer(
+            new BufferDescription { Size = 64 * 1024, Usage = BufferUsage.TransferDst },
+            new AllocationDescription { Usage = MemoryUsage.AutoPreferDevice });
+
         // Warm — fault in the pool's first command buffer + JIT the recording
         // path so the steady-state Begin/End pairs hit reuse and the
         // BeginRendering/EndRendering surfaces are tier-1+.
         RenderingPass100Cmds();
+
+        // Warm the CopyBuffer paths too: JIT the recording call and, for the
+        // 24-region case, fault in the ArrayPool<VkBufferCopy2> bucket so the
+        // measured run hits a cached rental (0 B/op) rather than a first-time
+        // allocation.
+        CopyBuffer_8Regions();
+        CopyBuffer_24Regions();
     }
 
     [GlobalCleanup]
     public void Cleanup()
     {
         _cmdPool?.Dispose();
+        _copySrc.Dispose();
+        _copyDst.Dispose();
         _view.Dispose();
         _image.Dispose();
         _device?.Dispose();
@@ -115,6 +145,51 @@ public class CommandRecorderBenchmarks
         for (int i = 0; i < CommandsPerPass; i++)
             rec.SetViewport(in vp);
         rec.EndRendering();
+        rec.End();
+
+        _cmdPool.ResetForFrame();
+    }
+
+    /// <summary>
+    /// 8 disjoint 256-byte regions → under <c>CopyBuffer</c>'s 16-element
+    /// threshold, so this stays on the <c>stackalloc VkBufferCopy2[16]</c>
+    /// branch of <c>RentForOverflow</c>. The whole region span is built into
+    /// a method-local <c>stackalloc</c>; <c>scoped</c> on the recorder lets
+    /// it flow into the ref-struct <c>CopyBuffer</c> call without tripping
+    /// CS8350. No submit — record + reset only.
+    /// </summary>
+    [Benchmark]
+    public void CopyBuffer_8Regions()
+    {
+        Span<BufferCopyRegion> regions = stackalloc BufferCopyRegion[8];
+        for (int i = 0; i < regions.Length; i++)
+            regions[i] = BufferCopyRegion.Of(size: 256, srcOffset: (ulong)i * 256, dstOffset: (ulong)i * 256);
+
+        using scoped var rec = _cmdPool.Begin();
+        rec.CopyBuffer(in _copySrc, in _copyDst, regions);
+        rec.End();
+
+        _cmdPool.ResetForFrame();
+    }
+
+    /// <summary>
+    /// 24 disjoint 256-byte regions → past <c>CopyBuffer</c>'s 16-element
+    /// threshold, so this exercises the <c>ArrayPool&lt;VkBufferCopy2&gt;</c>
+    /// rent/return overflow branch (and the longer
+    /// <c>BufferCopyRegion.ToNative</c> loop). The bucket is faulted in by the
+    /// <c>[GlobalSetup]</c> warm call, so steady state must stay 0 B/op — a
+    /// regression in the rental/return discipline would surface as a non-zero
+    /// Allocated column here.
+    /// </summary>
+    [Benchmark]
+    public void CopyBuffer_24Regions()
+    {
+        Span<BufferCopyRegion> regions = stackalloc BufferCopyRegion[24];
+        for (int i = 0; i < regions.Length; i++)
+            regions[i] = BufferCopyRegion.Of(size: 256, srcOffset: (ulong)i * 256, dstOffset: (ulong)i * 256);
+
+        using scoped var rec = _cmdPool.Begin();
+        rec.CopyBuffer(in _copySrc, in _copyDst, regions);
         rec.End();
 
         _cmdPool.ResetForFrame();
