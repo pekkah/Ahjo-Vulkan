@@ -144,11 +144,16 @@ jobs:
           & $exe
           if ($LASTEXITCODE -ne 0) { throw "AOT smoke exited with code $LASTEXITCODE" }
 
-  # Issue #144 — Ahjo.Vulkan.Vma.Native ships a linux-x64 libvma.so that no
+  # Issue #144 — Ahjo.Vulkan.Vma.Native ships Linux libvma.so binaries that no
   # lane ever executed, so a Release build silently producing a library that
   # SIGSEGVs on the first vmaCreateAllocator reached NuGet as 0.2.0 and broke
   # a downstream consumer. This lane compiles the .so from source on Linux and
   # runs a real allocator + buffer allocation against Mesa's lavapipe.
+  #
+  # Both Linux RIDs run: the #144 branch (VMA's aligned_alloc stub) is selected
+  # by glibc's _GLIBCXX_HAVE_ALIGNED_ALLOC, which is defined on x64 and arm64
+  # alike, so arm64 shipped the same fatal binary and deserves the same proof
+  # rather than an inference from the x64 result.
   #
   # Deliberately narrow, and NOT a revival of the Linux test matrix: issue 32
   # parked that because software rasterizers SIGSEGV mid-suite on the
@@ -158,8 +163,18 @@ jobs:
   # check, not driver-gated wrapper coverage — the honesty argument that
   # closed issue 32 still stands for everything else.
   vma-linux:
-    name: VMA native smoke (ubuntu-latest, lavapipe)
-    runs-on: ubuntu-latest
+    name: VMA native smoke (${{ matrix.rid }}, lavapipe)
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      # Don't let one arch's failure hide the other's result — the whole point
+      # is knowing which RIDs are actually proven.
+      fail-fast: false
+      matrix:
+        include:
+          - rid: linux-x64
+            runs-on: ubuntu-latest
+          - rid: linux-arm64
+            runs-on: ubuntu-24.04-arm
 
     steps:
       - name: Checkout
@@ -181,7 +196,7 @@ jobs:
           path: |
             native/downloaded
             native/vma/downloaded
-          key: vk-vma-headers-ubuntu-latest-${{ hashFiles('Directory.Build.props') }}
+          key: vk-vma-headers-${{ matrix.rid }}-${{ hashFiles('Directory.Build.props') }}
 
       # mesa-vulkan-drivers carries lavapipe (llvmpipe), the CPU ICD; libvulkan1
       # is the Khronos loader. Both come from the distro, so unlike the Windows
