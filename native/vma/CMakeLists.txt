@@ -1,9 +1,23 @@
 cmake_minimum_required(VERSION 3.21)
 project(ahjo_vma LANGUAGES CXX)
 
-# VMA requires C++14 (uses constexpr-if conditionals); engine code can move
-# higher independently. Pin here so consumer toolchain defaults don't matter.
-set(CMAKE_CXX_STANDARD 14)
+# C++17 is a hard requirement on POSIX, not a preference — do not lower it.
+#
+# VMA picks its aligned-allocation backend by preprocessor branch
+# (vk_mem_alloc.h, vma_aligned_alloc): _aligned_malloc on _WIN32,
+# posix_memalign on Apple/Android/older-glibc, plain C11 aligned_alloc when
+# __cplusplus >= 201703L — and, failing all of those, a stub that trips
+# VMA_ASSERT and returns null. Release builds define NDEBUG, which compiles
+# VMA_ASSERT to nothing, so the stub degrades to "silently return null" and
+# VMA segfaults dereferencing it on the first allocation.
+#
+# On glibc >= 2.16 (Ubuntu 24.04 et al) _GLIBCXX_HAVE_ALIGNED_ALLOC is
+# defined, which disqualifies the posix_memalign branch — so at C++14 a
+# Linux Release build lands on the stub and every vmaCreateAllocator call
+# SIGSEGVs. Windows never sees this: the _WIN32 branch wins before the
+# standard-version check, which is why issue #144 was linux-x64-only.
+# native/vma/src/vma.cpp carries a matching #error as the backstop.
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
