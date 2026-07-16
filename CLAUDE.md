@@ -107,9 +107,11 @@ dotnet publish samples/AotSmoke/AotSmoke.csproj -c Release -r win-x64 -p:IlcUseE
 
 ## CI
 
-Single workflow: `windows-latest` only. Linux CI is parked — issue #32 established that SwiftShader on Linux SIGSEGVs mid-suite across every loader+build combination tested. When a self-hosted Linux runner with real Vulkan drivers becomes available, the Linux job can come back.
+The **wrapper test suite** runs on `windows-latest` only. Linux is parked for it — issue #32 established that SwiftShader on Linux SIGSEGVs mid-suite across every loader+build combination tested, and gating driver-dependent tests behind a software rasterizer isn't honest coverage. When a self-hosted Linux runner with real Vulkan drivers becomes available, the Linux job can come back.
 
 Windows CI provisions the Khronos Vulkan loader + Silk.NET-packaged SwiftShader ICD and routes the loader at it via `VK_DRIVER_FILES`.
+
+The one exception is the `vma-linux` lane (both Linux RIDs, Mesa lavapipe), which runs `Ahjo.Vulkan.Vma.Native.Tests` and nothing else. It is a **build-artifact check, not wrapper coverage**, and does not reopen the issue-32 decision: `Ahjo.Vulkan.Vma.Native` publishes Linux binaries, so something has to execute one before it reaches NuGet. Issue #144 shipped a `libvma.so` that SIGSEGVed on the first `vmaCreateAllocator` precisely because nothing ever did. Allocation-only work is both what lavapipe handles reliably and what actually broke, which is why the lane stops there — don't grow it into a general Linux test lane. It sets `AHJO_REQUIRE_VULKAN_DEVICE=1`, which turns the suite's driverless skip into a hard failure so a broken ICD install can't report green while executing nothing.
 
 `publish.yml` ships preview packages on `push:main` (MinVer-derived pre-release version) and stable packages on `release:published` events. Tag with `v0.x.y` → create a GitHub release → all three packages publish under that single tag.
 

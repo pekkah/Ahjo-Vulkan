@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using Ahjo.Vulkan.Native;
 using Ahjo.Vulkan.Vma.Native;
@@ -47,9 +48,8 @@ public unsafe class VmaSmokeTests
             if (instanceResult == VkResult.VK_ERROR_INCOMPATIBLE_DRIVER || instance == null)
             {
                 // No driver in this environment — the test can't proceed.
-                // The Vulkan smoke suite already proves loader resolution
-                // works, so we don't fail this test in driverless CI.
-                return;
+                // The Vulkan smoke suite already proves loader resolution works.
+                NoDriver($"vkCreateInstance returned {instanceResult}");
             }
             Assert.Equal(VkResult.VK_SUCCESS, instanceResult);
 
@@ -58,7 +58,7 @@ public unsafe class VmaSmokeTests
             Assert.Equal(VkResult.VK_SUCCESS, Vk.vkEnumeratePhysicalDevices(instance, &deviceCount, null));
             if (deviceCount == 0)
             {
-                return;
+                NoDriver("vkEnumeratePhysicalDevices reported zero devices");
             }
 
             VkPhysicalDevice_T** physicalDevices = (VkPhysicalDevice_T**)NativeMemory.Alloc(
@@ -164,6 +164,31 @@ public unsafe class VmaSmokeTests
                 Vk.vkDestroyInstance(instance, null);
             }
         }
+    }
+
+    /// <summary>
+    /// Bail out of a run that has no usable driver: a reported skip normally,
+    /// a hard failure when <c>AHJO_REQUIRE_VULKAN_DEVICE=1</c>.
+    /// </summary>
+    /// <remarks>
+    /// A driverless host genuinely can't run this test, but a lane that
+    /// provisions an ICD on purpose has no business passing without one —
+    /// there, a missing device means the provisioning broke and the test
+    /// silently stopped covering the native library it exists to cover.
+    /// That gap is why issue #144 (linux-x64 VMA SIGSEGV, C++14 landing on
+    /// VMA's null-returning aligned_alloc stub) reached NuGet: nothing on any
+    /// lane ever executed the Linux binary. CI sets the variable wherever it
+    /// installs a driver.
+    /// </remarks>
+    [DoesNotReturn]
+    private static void NoDriver(string reason)
+    {
+        Assert.False(
+            Environment.GetEnvironmentVariable("AHJO_REQUIRE_VULKAN_DEVICE") == "1",
+            $"AHJO_REQUIRE_VULKAN_DEVICE=1 demands a working driver, but {reason}. " +
+            "The ICD provisioning for this lane is broken — fix it rather than relaxing this assert.");
+        Assert.Skip($"No Vulkan driver on host ({reason}).");
+        throw new InvalidOperationException("unreachable"); // Assert.Skip always throws.
     }
 
     private static uint MakeApiVersion(uint variant, uint major, uint minor, uint patch)

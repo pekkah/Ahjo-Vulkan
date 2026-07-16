@@ -143,3 +143,85 @@ jobs:
           if (-not (Test-Path $exe)) { throw "AOT smoke binary missing: $exe" }
           & $exe
           if ($LASTEXITCODE -ne 0) { throw "AOT smoke exited with code $LASTEXITCODE" }
+
+  # Issue #144 — Ahjo.Vulkan.Vma.Native ships Linux libvma.so binaries that no
+  # lane ever executed, so a Release build silently producing a library that
+  # SIGSEGVs on the first vmaCreateAllocator reached NuGet as 0.2.0 and broke
+  # a downstream consumer. This lane compiles the .so from source on Linux and
+  # runs a real allocator + buffer allocation against Mesa's lavapipe.
+  #
+  # Both Linux RIDs run: the #144 branch (VMA's aligned_alloc stub) is selected
+  # by glibc's _GLIBCXX_HAVE_ALIGNED_ALLOC, which is defined on x64 and arm64
+  # alike, so arm64 shipped the same fatal binary and deserves the same proof
+  # rather than an inference from the x64 result.
+  #
+  # Deliberately narrow, and NOT a revival of the Linux test matrix: issue 32
+  # parked that because software rasterizers SIGSEGV mid-suite on the
+  # rendering paths (vkQueueSubmit2, image views). Allocation-only work is
+  # both what lavapipe handles reliably and what actually broke here, so this
+  # runs Ahjo.Vulkan.Vma.Native.Tests and nothing else. It is a build-artifact
+  # check, not driver-gated wrapper coverage — the honesty argument that
+  # closed issue 32 still stands for everything else.
+  vma-linux:
+    name: VMA native smoke (${{ matrix.rid }}, lavapipe)
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      # Don't let one arch's failure hide the other's result — the whole point
+      # is knowing which RIDs are actually proven.
+      fail-fast: false
+      matrix:
+        include:
+          - rid: linux-x64
+            runs-on: ubuntu-latest
+          - rid: linux-arm64
+            runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: Directory.Packages.props
+
+      # Mirrors the Windows job's header cache. Covers both the Vulkan-Headers
+      # archive and the VMA tarball the cmake build compiles against; both
+      # versions are pinned in Directory.Build.props, so that's the key.
+      - name: Cache Vulkan + VMA headers
+        uses: actions/cache@v4
+        with:
+          path: |
+            native/downloaded
+            native/vma/downloaded
+          key: vk-vma-headers-${{ matrix.rid }}-${{ hashFiles('Directory.Build.props') }}
+
+      # mesa-vulkan-drivers carries lavapipe (llvmpipe), the CPU ICD; libvulkan1
+      # is the Khronos loader. Both come from the distro, so unlike the Windows
+      # job there's no nupkg to unpack. Resolve the manifest by glob rather than
+      # hardcoding — Debian arch-qualifies the filename (lvp_icd.x86_64.json).
+      - name: Provision Mesa lavapipe ICD
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
+          icd=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -n1)
+          if [ -z "$icd" ]; then
+            echo "::error::lavapipe ICD manifest not found after installing mesa-vulkan-drivers"
+            ls -la /usr/share/vulkan/icd.d/ || true
+            exit 1
+          fi
+          echo "Using ICD: $icd"
+          # VK_DRIVER_FILES (loader 1.3.207+) pins driver discovery to lavapipe
+          # so the lane can't quietly pick up some other ICD on the image.
+          echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+
+      # AHJO_REQUIRE_VULKAN_DEVICE turns VmaSmokeTests' driverless skip into a
+      # hard failure. Without it a broken ICD install would report green while
+      # executing none of the native code this lane exists to exercise — the
+      # exact silent-coverage failure that let #144 ship.
+      - name: Test — Ahjo.Vulkan.Vma.Native.Tests
+        env:
+          AHJO_REQUIRE_VULKAN_DEVICE: "1"
+        run: dotnet test tests/Ahjo.Vulkan.Vma.Native.Tests/Ahjo.Vulkan.Vma.Native.Tests.csproj -c Release --nologo -l "console;verbosity=detailed"
