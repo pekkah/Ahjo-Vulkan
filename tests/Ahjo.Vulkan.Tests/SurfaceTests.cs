@@ -208,6 +208,39 @@ public sealed unsafe class SurfaceTests
         Assert.NotEqual(0ul, surface.RawHandle);
     }
 
+    [Fact]
+    public void CreateHeadless_NullInstance_Throws()
+    {
+        // Instance null-guard fires before any Vulkan call, so this needs
+        // neither a driver nor a specific platform.
+        Assert.Throws<ArgumentNullException>(() => Surface.CreateHeadless(null!));
+    }
+
+    /// <summary>
+    /// End-to-end headless path: create an instance with
+    /// <see cref="VulkanExtensions.ExtHeadlessSurface"/>, wrap a
+    /// window-system-independent surface via
+    /// <see cref="Surface.CreateHeadless"/>, dispose. Unlike the other
+    /// factories this is platform-agnostic — it gates only on the ICD
+    /// exposing <c>VK_EXT_headless_surface</c> (Mesa/lavapipe does;
+    /// SwiftShader does not), which is what lets the WSI lifecycle run on
+    /// hosted CI runners with no display server.
+    /// </summary>
+    [Fact]
+    public void CreateHeadless_RoundTrip()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        Assert.SkipUnless(VulkanDriverProbe.HasInstanceExtension("VK_EXT_headless_surface"u8),
+            "VK_EXT_headless_surface not exposed by the ICD.");
+
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.ExtHeadlessSurface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+
+        using Surface surface = Surface.CreateHeadless(instance);
+        Assert.False(surface.IsNull);
+        Assert.NotEqual(0ul, surface.RawHandle);
+    }
+
     /// <summary>
     /// End-to-end ownership test: create a Win32 surface through the raw
     /// extension API (mirroring what SDL3/GLFW do), wrap it via

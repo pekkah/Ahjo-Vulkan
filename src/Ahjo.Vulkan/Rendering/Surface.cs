@@ -8,7 +8,8 @@ namespace Ahjo.Vulkan;
 /// permission). Construction goes through one of the platform-specific
 /// factories: <see cref="CreateWin32"/> on Windows,
 /// <see cref="CreateXlib"/> / <see cref="CreateWayland"/> on Linux,
-/// <see cref="CreateMetal"/> on macOS via MoltenVK.
+/// <see cref="CreateMetal"/> on macOS via MoltenVK, or
+/// <see cref="CreateHeadless"/> for a window-system-independent surface.
 /// </summary>
 /// <remarks>
 /// <para><c>default(Surface)</c> is a legal null handle; <see cref="IsNull"/>
@@ -174,6 +175,35 @@ public readonly unsafe struct Surface : IVulkanHandle<Surface>, IDisposable
         };
         VkSurfaceKHR_T* raw = null;
         Vk.vkCreateMetalSurfaceEXT(instance.Handle, &ci, null, &raw).ThrowIfFailed();
+        return new Surface(raw, instance.Handle);
+    }
+
+    /// <summary>
+    /// Creates a window-system-independent surface via
+    /// <c>vkCreateHeadlessSurfaceEXT</c>. There is no window or display
+    /// to bind — the resulting <c>VkSurfaceKHR</c> flows through the rest
+    /// of the WSI stack (caps queries, formats, swapchain create,
+    /// acquire/present) like any other surface. Caller must have enabled
+    /// <see cref="VulkanExtensions.KhrSurface"/> and
+    /// <see cref="VulkanExtensions.ExtHeadlessSurface"/> on the
+    /// <paramref name="instance"/>.
+    /// </summary>
+    /// <remarks>
+    /// Implemented by Mesa (lavapipe), which makes it the way to exercise
+    /// the windowed swapchain lifecycle on hosted CI runners that have no
+    /// display server. Same ownership/dispose contract as the other
+    /// factories: <see cref="Dispose"/> calls <c>vkDestroySurfaceKHR</c>.
+    /// </remarks>
+    public static Surface CreateHeadless(Instance instance)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+
+        var ci = new VkHeadlessSurfaceCreateInfoEXT
+        {
+            sType = VkStructureType.VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT,
+        };
+        VkSurfaceKHR_T* raw = null;
+        Vk.vkCreateHeadlessSurfaceEXT(instance.Handle, &ci, null, &raw).ThrowIfFailed();
         return new Surface(raw, instance.Handle);
     }
 
