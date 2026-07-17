@@ -49,4 +49,27 @@ public static class VulkanExtensions
     /// <summary>VK_KHR_swapchain — device-level. Required for
     /// <see cref="Swapchain"/> creation and present.</summary>
     public static Utf8Name KhrSwapchain => Utf8Name.FromLiteral("VK_KHR_swapchain"u8);
+
+    /// <summary>VK_KHR_external_memory_win32 — device-level. Enable to
+    /// export a <c>VkDeviceMemory</c> as a Win32 <c>HANDLE</c> for cross-API
+    /// GPU interop (e.g. an <see cref="ExportableImage"/> imported by a
+    /// compositor). Pairs with <see cref="ExternalHandleType.OpaqueWin32"/>.
+    /// Windows only.</summary>
+    public static Utf8Name KhrExternalMemoryWin32 => Utf8Name.FromLiteral("VK_KHR_external_memory_win32"u8);
+
+    /// <summary>VK_KHR_external_memory_fd — device-level. Enable to export a
+    /// <c>VkDeviceMemory</c> as a POSIX file descriptor. Pairs with
+    /// <see cref="ExternalHandleType.OpaqueFd"/>. Linux only.</summary>
+    public static Utf8Name KhrExternalMemoryFd => Utf8Name.FromLiteral("VK_KHR_external_memory_fd"u8);
+
+    /// <summary>VK_KHR_external_semaphore_win32 — device-level. Enable to
+    /// export a <c>VkSemaphore</c> as a Win32 <c>HANDLE</c> for the
+    /// cross-API sync handshake. Pairs with an exportable
+    /// <see cref="ExportableSemaphore"/>. Windows only.</summary>
+    public static Utf8Name KhrExternalSemaphoreWin32 => Utf8Name.FromLiteral("VK_KHR_external_semaphore_win32"u8);
+
+    /// <summary>VK_KHR_external_semaphore_fd — device-level. Enable to
+    /// export a <c>VkSemaphore</c> as a POSIX file descriptor. Pairs with an
+    /// exportable <see cref="ExportableSemaphore"/>. Linux only.</summary>
+    public static Utf8Name KhrExternalSemaphoreFd => Utf8Name.FromLiteral("VK_KHR_external_semaphore_fd"u8);
 }
