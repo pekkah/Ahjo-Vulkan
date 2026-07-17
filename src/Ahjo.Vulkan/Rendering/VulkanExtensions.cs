@@ -38,6 +38,14 @@ public static class VulkanExtensions
     /// <see cref="Surface.CreateMetal"/>.</summary>
     public static Utf8Name ExtMetalSurface => Utf8Name.FromLiteral("VK_EXT_metal_surface"u8);
 
+    /// <summary>VK_EXT_headless_surface — instance-level. Pair with
+    /// <see cref="KhrSurface"/> to create a window-system-independent
+    /// surface via <see cref="Surface.CreateHeadless"/>. Implemented by
+    /// Mesa (lavapipe), so it lets the WSI stack — caps queries, formats,
+    /// swapchain create, acquire/present — run on hosted CI runners with
+    /// no display server attached.</summary>
+    public static Utf8Name ExtHeadlessSurface => Utf8Name.FromLiteral("VK_EXT_headless_surface"u8);
+
     /// <summary>VK_KHR_swapchain — device-level. Required for
     /// <see cref="Swapchain"/> creation and present.</summary>
     public static Utf8Name KhrSwapchain => Utf8Name.FromLiteral("VK_KHR_swapchain"u8);
