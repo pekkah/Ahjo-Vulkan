@@ -508,6 +508,60 @@ public sealed unsafe class Instance : IDisposable
             $"EnableValidation = true but instance layer '{System.Text.Encoding.UTF8.GetString(layerName)}' is not installed on this host. Install the Vulkan SDK validation layers, or set EnableValidation = false.");
     }
 
+    /// <summary>
+    /// True when the loader/ICDs advertise the given instance extension —
+    /// callable before any instance exists
+    /// (<c>vkEnumerateInstanceExtensionProperties</c> is instance-less).
+    /// Use it to decide OPTIONAL extensions (e.g.
+    /// <see cref="VulkanExtensions.ExtHeadlessSurface"/>) up front: probing
+    /// by attempting <see cref="Create"/> with the extension in the list
+    /// makes the loader report an error through any active debug messenger
+    /// before the <see cref="VulkanException"/> surfaces, which pollutes
+    /// validation-as-oracle captures. Returns <see langword="false"/> for a
+    /// null name and on hosts with no <c>vulkan-1</c> loader at all (no
+    /// loader ⇒ no extensions — the capability answer, not an error).
+    /// </summary>
+    public static bool IsExtensionSupported(Utf8Name extension)
+        => !extension.IsNull
+           && IsExtensionSupported(
+               MemoryMarshal.CreateReadOnlySpanFromNullTerminated((byte*)extension.Ptr));
+
+    /// <inheritdoc cref="IsExtensionSupported(Utf8Name)"/>
+    public static bool IsExtensionSupported(ReadOnlySpan<byte> utf8ExtensionName)
+    {
+        if (utf8ExtensionName.IsEmpty) return false;
+
+        uint count = 0;
+        try
+        {
+            Vk.vkEnumerateInstanceExtensionProperties(null, &count, null).ThrowIfErrored();
+        }
+        catch (DllNotFoundException)
+        {
+            return false;
+        }
+
+        if (count == 0) return false;
+
+        var pool = ArrayPool<VkExtensionProperties>.Shared;
+        var buf  = pool.Rent((int)count);
+        try
+        {
+            fixed (VkExtensionProperties* p = buf)
+                Vk.vkEnumerateInstanceExtensionProperties(null, &count, p).ThrowIfErrored();
+            for (int i = 0; i < (int)count; i++)
+            {
+                ref readonly var first = ref buf[i].extensionName.e0;
+                if (PointerStringEquals(
+                        (sbyte*)Unsafe.AsPointer(ref Unsafe.AsRef(in first)), utf8ExtensionName))
+                    return true;
+            }
+        }
+        finally { pool.Return(buf); }
+
+        return false;
+    }
+
     private static void EnsureInstanceExtensionPresent(ReadOnlySpan<byte> extensionName)
     {
         uint count = 0;
