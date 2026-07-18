@@ -68,6 +68,33 @@ public sealed unsafe class InstanceCreateTests
     }
 
     [Fact]
+    public void IsExtensionSupported_KnownInstanceExtension_True()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        // VK_KHR_surface is advertised by every desktop loader with at least
+        // one WSI-capable ICD — the probe already established a driver exists.
+        Assert.True(Instance.IsExtensionSupported(VulkanExtensions.KhrSurface));
+    }
+
+    [Fact]
+    public void IsExtensionSupported_UnknownExtension_False()
+    {
+        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+
+        Assert.False(Instance.IsExtensionSupported(
+            Utf8Name.FromLiteral("VK_FAKE_extension_does_not_exist"u8)));
+    }
+
+    [Fact]
+    public void IsExtensionSupported_NullOrEmptyName_False()
+    {
+        // Short-circuits before any loader call — valid on loaderless hosts too.
+        Assert.False(Instance.IsExtensionSupported(default(Utf8Name)));
+        Assert.False(Instance.IsExtensionSupported(ReadOnlySpan<byte>.Empty));
+    }
+
+    [Fact]
     public void Create_WithValidation_ManagedCallback_RoundTripsMessage()
     {
         Assert.SkipUnless(VulkanDriverProbe.HasDriver,           "No Vulkan driver on host.");
