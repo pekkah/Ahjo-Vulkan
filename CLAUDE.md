@@ -1,6 +1,6 @@
 # Ahjo.Vulkan — Claude Project Memory
 
-.NET 10 / C# 14 Vulkan bindings + low-allocation wrapper, aimed at the [Logos game engine](https://github.com/pekkah/logos). Three publishable NuGet packages live in this repo; see `README.md` for the consumer-facing overview.
+.NET 10 / C# 14 Vulkan bindings + low-allocation wrapper, aimed at the [Logos game engine](https://github.com/pekkah/logos). Four publishable NuGet packages live in this repo; see `README.md` for the consumer-facing overview.
 
 ## Load-bearing invariants
 
@@ -50,6 +50,8 @@ These directories are output of the codegen tools and get overwritten on the nex
 
 - `src/Ahjo.Vulkan.Native/Generated/` — ClangSharp P/Invokes from `vulkan.h`
 - `src/Ahjo.Vulkan.Vma.Native/Generated/` — ClangSharp P/Invokes from `vk_mem_alloc.h`
+- `src/Ahjo.Vulkan.Ktx.Native/Generated/` — ClangSharp P/Invokes from Khronos `ktx.h`
+- `native/ktx/downloaded/` — shallow sparse KTX-Software checkout at the pinned tag
 - `native/downloaded/` — pinned Vulkan-Headers + VMA tarball cache
 
 To change the bindings, edit the `*.rsp` files under `tools/`, bump the version in `Directory.Build.props` if needed, then regenerate:
@@ -57,6 +59,7 @@ To change the bindings, edit the `*.rsp` files under `tools/`, bump the version 
 ```bash
 dotnet build src/Ahjo.Vulkan.Native -t:Regenerate       # Vulkan
 dotnet build src/Ahjo.Vulkan.Vma.Native -t:Regenerate   # VMA (also needs cmake on PATH)
+dotnet build src/Ahjo.Vulkan.Ktx.Native -t:Regenerate   # libktx (needs git; cmake to build the binary)
 ```
 
 Both packages ship under a single `v*` tag, so bump deliberately — see `Directory.Build.props` for the pinned `VulkanHeadersVersion` and `VmaVersion`.
@@ -72,6 +75,7 @@ src/
   Ahjo.Vulkan/                 idiomatic wrapper (Memory/, Recording/, Sync/, Pools/, Pipelines/, Resources/, …)
   Ahjo.Vulkan.Native/          ClangSharp P/Invokes against vulkan.h
   Ahjo.Vulkan.Vma.Native/      ClangSharp P/Invokes against vk_mem_alloc.h + prebuilt vma.{dll,so}
+  Ahjo.Vulkan.Ktx.Native/      ClangSharp P/Invokes against Khronos ktx.h + prebuilt ktx.dll/libktx.so
   Ahjo.Vulkan.Utilities/       dep-free helpers for samples/tests (not published)
 
 native/vma/                    VMA impl translation unit + CMakeLists.txt
@@ -94,6 +98,7 @@ dotnet test
 # Regenerate bindings (after a Directory.Build.props version bump)
 dotnet build src/Ahjo.Vulkan.Native -t:Regenerate
 dotnet build src/Ahjo.Vulkan.Vma.Native -t:Regenerate
+dotnet build src/Ahjo.Vulkan.Ktx.Native -t:Regenerate
 
 # Skip VMA native build (e.g. when consuming a pre-staged binary)
 dotnet build Ahjo.Vulkan.slnx -p:SkipVmaNativeBuild=true
@@ -113,7 +118,9 @@ Windows CI provisions the Khronos Vulkan loader + Silk.NET-packaged SwiftShader 
 
 The one exception is the `vma-linux` lane (both Linux RIDs, Mesa lavapipe), which runs `Ahjo.Vulkan.Vma.Native.Tests` and nothing else. It is a **build-artifact check, not wrapper coverage**, and does not reopen the issue-32 decision: `Ahjo.Vulkan.Vma.Native` publishes Linux binaries, so something has to execute one before it reaches NuGet. Issue #144 shipped a `libvma.so` that SIGSEGVed on the first `vmaCreateAllocator` precisely because nothing ever did. Allocation-only work is both what lavapipe handles reliably and what actually broke, which is why the lane stops there — don't grow it into a general Linux test lane. It sets `AHJO_REQUIRE_VULKAN_DEVICE=1`, which turns the suite's driverless skip into a hard failure so a broken ICD install can't report green while executing nothing.
 
-`publish.yml` ships preview packages on `push:main` (MinVer-derived pre-release version) and stable packages on `release:published` events. Tag with `v0.x.y` → create a GitHub release → all three packages publish under that single tag.
+The `ktx-native` lane (win-x64 + linux-x64) is the same idea with less nuance, and is defined ONCE in `build-ktx-native.yml`, called by both `ci.yml` and `publish.yml` — so the binary a release attaches comes from the definition CI proves. Each job builds libktx for its RID **and runs `Ahjo.Vulkan.Ktx.Native.Tests` against it before uploading the artifact**, which is #144's lesson applied up front instead of after the fact. It provisions no ICD and no loader on purpose: libktx ships with both uploaders off, so needing one would mean something got linked in that the package's contract says isn't there. The staged binary under `native/ktx/staged/<rid>/` is both the cache key and the artifact; a cache hit skips the clone and cmake but still runs the tests.
+
+`publish.yml` ships preview packages on `push:main` (MinVer-derived pre-release version) and stable packages on `release:published` events. Tag with `v0.x.y` → create a GitHub release → all four packages publish under that single tag.
 
 ## Spec-driven workflow
 

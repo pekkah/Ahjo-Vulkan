@@ -3,9 +3,11 @@
   <Project Path="src/Ahjo.Vulkan.Utilities/Ahjo.Vulkan.Utilities.csproj" />
   <Project Path="src/Ahjo.Vulkan/Ahjo.Vulkan.csproj" />
   <Project Path="src/Ahjo.Vulkan.Vma.Native/Ahjo.Vulkan.Vma.Native.csproj" />
+  <Project Path="src/Ahjo.Vulkan.Ktx.Native/Ahjo.Vulkan.Ktx.Native.csproj" />
   <Project Path="tests/Ahjo.Vulkan.Benchmarks/Ahjo.Vulkan.Benchmarks.csproj" />
   <Project Path="tests/Ahjo.Vulkan.Native.Tests/Ahjo.Vulkan.Native.Tests.csproj" />
   <Project Path="tests/Ahjo.Vulkan.Vma.Native.Tests/Ahjo.Vulkan.Vma.Native.Tests.csproj" />
+  <Project Path="tests/Ahjo.Vulkan.Ktx.Native.Tests/Ahjo.Vulkan.Ktx.Native.Tests.csproj" />
   <Project Path="tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj" />
   <Project Path="samples/AotSmoke/AotSmoke.csproj" />
   <Project Path="samples/HeadlessExport/HeadlessExport.csproj" />

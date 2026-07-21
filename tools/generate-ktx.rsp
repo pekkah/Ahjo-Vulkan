@@ -1,0 +1,77 @@
+--file
+native/ktx/include/ktx.h
+# ktx.h's public signatures use the Khronos Data Format enums by name
+# (khr_df_transfer_e, khr_df_model_e, khr_df_primaries_e), so khr_df.h has
+# to be traversed too — without it the generator emits references to types
+# it never declares and the project does not compile. --traverse is the
+# COMPLETE set, not an addition to --file: leave ktx.h off this list and
+# the output is khr_df.h and nothing else.
+--traverse
+native/ktx/include/ktx.h
+native/ktx/include/KHR/khr_df.h
+--include-directory
+native/ktx/stubs
+--include-directory
+native/stubs
+--include-directory
+native/ktx/include
+--namespace
+Ahjo.Vulkan.Ktx.Native
+--methodClassName
+Ktx
+--libraryPath
+ktx
+--output
+src/Ahjo.Vulkan.Ktx.Native/Generated
+--output-mode
+CSharp
+--language
+c
+# Parse against a fixed non-MSVC target so the generated code is a
+# function of the pinned KtxVersion alone, not of who regenerated it.
+# ktx.h branches on _MSC_VER for its integer typedefs and on _WIN32 for
+# KTX_API/KTX_APIENTRY (__declspec(dllimport) + __stdcall), so a Windows
+# host and a Linux host would otherwise emit different files. Pinning to
+# linux-gnu takes the <stdint.h> branch our stubs already cover and drops
+# the attributes, which changes nothing at runtime: the RIDs this package
+# ships (win-x64, win-arm64, linux-x64, linux-arm64) all have exactly one
+# native calling convention, so __stdcall and Cdecl are the same ABI.
+--additional
+--target=x86_64-unknown-linux-gnu
+--config
+latest-codegen
+generate-helper-types
+generate-file-scoped-namespaces
+generate-unmanaged-constants
+generate-disable-runtime-marshalling
+generate-aggressive-inlining
+exclude-enum-operators
+strip-enum-member-type-name
+multi-file
+--remap
+size_t=nuint
+ktx_size_t=nuint
+FILE=void
+# Opaque handles: ktx.h forward-declares these and never defines them, so
+# there is nothing for the generator to emit and the field references
+# dangle. They are private implementation state — void* is exactly as much
+# as a caller may know about them.
+ktxTexture_protected=void
+ktxTexture_vvtbl=void
+# The OpenGL upload path is built out (KTX_FEATURE_GL_UPLOAD=OFF — see
+# native/ktx/CMakeLists-notes in the csproj), so these two symbols are not
+# in the shipped binary. A binding whose only possible outcome is
+# EntryPointNotFoundException is a trap, not a feature: exclude them so the
+# generated surface is exactly what the packaged native library exports.
+--exclude
+ktxLoadOpenGL
+ktxTexture_GLUpload
+# khr_df.h's sample-mask enum mixes 0xFF-style members with 0xFFFFFFFF
+# ones. The generator emits `unchecked((int)…)` for the wide members
+# whatever underlying type it is given, so the enum cannot be made to
+# compile from here. It is a helper for hand-parsing a DFD block, appears
+# in no signature, and is unreachable from the transcode path — dropping
+# it costs nothing that this package is for.
+_khr_df_samplemask_e
+--with-access-specifier
+*=public
