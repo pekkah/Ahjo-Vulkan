@@ -21,6 +21,28 @@
          committed and a regen run is required after a bump.
          See https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/releases. -->
     <VmaVersion>v3.3.0</VmaVersion>
+    <!-- Pinned KTX-Software (libktx) tag. Independent cadence from the two
+         above. Bump deliberately; the generated bindings are committed and
+         a regen run is required after a bump.
+         See https://github.com/KhronosGroup/KTX-Software/releases. -->
+    <KtxVersion>v4.4.2</KtxVersion>
+    <!-- The libktx feature set, defined ONCE. The local host build
+         (BuildKtxForHost) and every CI matrix job invoke that same target,
+         so these flags cannot drift between a developer's binary and the
+         one that ships.
+
+         Everything that is not "read a KTX2 container and transcode Basis
+         Universal" is off: TOOLS/TESTS drag in external/fmt,
+         external/cxxopts and a gtest tree, JNI/PY produce bindings for
+         other languages, and GL_UPLOAD/VK_UPLOAD would each add a graphics
+         API dependency to a library whose contract here ends at bytes.
+
+         Not overridden, deliberately: astc-encoder's ISA backend, which
+         KTX defaults to AVX2 on x86_64. That is what Khronos' own release
+         binaries are built with, so matching it keeps us on the
+         configuration upstream tests. -DASTCENC_ISA_SSE41=ON is the escape
+         hatch if a pre-2013 CPU ever has to run this. -->
+    <KtxCMakeFeatureFlags>-DBUILD_SHARED_LIBS=ON -DKTX_FEATURE_TESTS=OFF -DKTX_FEATURE_TOOLS=OFF -DKTX_FEATURE_DOC=OFF -DKTX_FEATURE_JNI=OFF -DKTX_FEATURE_PY=OFF -DKTX_FEATURE_GL_UPLOAD=OFF -DKTX_FEATURE_VK_UPLOAD=OFF -DKTX_FEATURE_LOADTEST_APPS=OFF</KtxCMakeFeatureFlags>
     <RepositoryRoot>$(MSBuildThisFileDirectory)</RepositoryRoot>
     <NativeDir>$(RepositoryRoot)native\</NativeDir>
     <ToolsDir>$(RepositoryRoot)tools\</ToolsDir>

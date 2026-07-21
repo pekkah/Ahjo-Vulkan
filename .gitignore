@@ -255,6 +255,20 @@ native/vma/downloaded/
 # here; CI matrix artifacts are also staged here before pack.
 native/vma/build/
 
+# Shallow KTX-Software checkout — refetched by the Regenerate target.
+# Headers staged at native/ktx/include/ are the generator input of record
+# and native/ktx/stubs/ holds the parse-time shims; both are committed.
+native/ktx/downloaded/
+
+# CMake scratch tree for libktx.
+native/ktx/build/
+
+# Per-RID libktx binaries: built locally by BuildKtxForHost, downloaded from
+# the CI matrix before pack. Never committed — the "!native/**/lib/**"
+# un-ignore rules above exist for VENDORED binaries, and these are built,
+# which is also why this directory is not called lib.
+native/ktx/staged/
+
 # Verify snapshot workflow produces .received.* files on mismatch; they're
 # intentionally transient. .verified.* files are committed and ARE tracked.
 *.received.*

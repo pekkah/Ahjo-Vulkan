@@ -1,0 +1,221 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ahjo.Vulkan.Ktx.Native</RootNamespace>
+    <AssemblyName>Ahjo.Vulkan.Ktx.Native</AssemblyName>
+    <GeneratedDir>$(MSBuildProjectDirectory)\Generated\</GeneratedDir>
+    <GeneratorResponseFile>$(ToolsDir)generate-ktx.rsp</GeneratorResponseFile>
+  </PropertyGroup>
+
+  <!--
+    Published as "Ahjo.Vulkan.Ktx.Native" on NuGet.
+
+    Raw P/Invokes over the Khronos libktx C API (KTX2 container read +
+    Basis Universal transcode). Unlike Ahjo.Vulkan.Vma.Native this project
+    does NOT reference Ahjo.Vulkan.Native: the native library is built with
+    KTX_FEATURE_VK_UPLOAD=OFF, so it has no Vulkan dependency at all. That
+    is deliberate — libktx's own uploader creates its own VkImage and
+    records its own barriers, which is the opposite of how a consumer that
+    owns its resource pool and sync wants to work. The binding's job stops
+    at "here are transcoded bytes and a VkFormat".
+  -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Ahjo.Vulkan.Ktx.Native</PackageId>
+    <Title>Ahjo.Vulkan.Ktx.Native</Title>
+    <Description>Raw P/Invoke bindings for Khronos libktx ($(KtxVersion)) — KTX2 container read and Basis Universal transcode. Ships native runtime binaries for Windows and Linux (x64).</Description>
+    <PackageTags>ktx;ktx2;basis;basisu;texture;transcode;compression;gpu;interop;native;pinvoke;bindings</PackageTags>
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+  </PropertyGroup>
+
+  <!--
+    Host-RID detection. Only the RIDs this package actually ships are
+    listed. arm64 is deliberately absent: KTX pulls in astc-encoder, whose
+    ISA backend is selected at compile time, and neither arm64 lane has
+    been built or executed yet. Adding a RID here without a lane that runs
+    the smoke test is how you ship a binary nobody has ever loaded.
+  -->
+  <PropertyGroup>
+    <_KtxRid Condition="$([MSBuild]::IsOSPlatform('Windows')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">win-x64</_KtxRid>
+    <_KtxRid Condition="$([MSBuild]::IsOSPlatform('Linux')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">linux-x64</_KtxRid>
+
+    <_KtxLibFile Condition="$([MSBuild]::IsOSPlatform('Windows'))">ktx.dll</_KtxLibFile>
+    <_KtxLibFile Condition="$([MSBuild]::IsOSPlatform('Linux'))">libktx.so</_KtxLibFile>
+
+    <_KtxSrcDir>$(NativeDir)ktx\</_KtxSrcDir>
+    <_KtxDownloadedRoot>$(_KtxSrcDir)downloaded\</_KtxDownloadedRoot>
+    <_KtxSourceDir>$(_KtxDownloadedRoot)KTX-Software\</_KtxSourceDir>
+
+    <!-- Stable header staging path (version-independent) so
+         tools/generate-ktx.rsp doesn't have to embed the KTX tag.
+         Mirrors how VMA stages vk_mem_alloc.h to native/vma/include/. -->
+    <_KtxStagedHeaderDir>$(_KtxSrcDir)include\</_KtxStagedHeaderDir>
+
+    <!-- cmake scratch (throwaway) vs. staged output (the artifact).
+         Splitting them is what lets one path be the cache marker, the
+         consumer's copy source, the CI upload and the pack input at once —
+         and it sidesteps the two ways cmake's output location differs by
+         platform: MSVC's Release/ subdirectory, and the SOVERSION symlink
+         chain (libktx.so -> libktx.so.4 -> libktx.so.4.4.2) that a nupkg
+         cannot carry. -->
+    <_KtxBuildRootDir>$(_KtxSrcDir)build\</_KtxBuildRootDir>
+    <_KtxBuildDir>$(_KtxBuildRootDir)$(_KtxRid)\</_KtxBuildDir>
+    <_KtxStagedRootDir>$(_KtxSrcDir)staged\</_KtxStagedRootDir>
+    <_KtxStagedBinary>$(_KtxStagedRootDir)$(_KtxRid)\$(_KtxLibFile)</_KtxStagedBinary>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <!--
+    Stage the host's ktx binary into every downstream project's output.
+    Same Content+Link trick Ahjo.Vulkan.Native uses for vulkan-1: the file
+    propagates through ProjectReference automatically.
+  -->
+  <ItemGroup Condition="'$(_KtxLibFile)' != '' and '$(SkipKtxNativeBuild)' != 'true'">
+    <None Include="$(_KtxStagedBinary)"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false"
+          Pack="false"
+          Link="$(_KtxLibFile)" />
+  </ItemGroup>
+
+  <!--
+    Regenerate target: fetches the pinned KTX tag, stages the headers, then
+    runs ClangSharpPInvokeGenerator. Not wired into Build — regeneration is
+    deliberate; generated C# is committed.
+
+    Usage: dotnet build src/Ahjo.Vulkan.Ktx.Native /t:Regenerate
+  -->
+  <Target Name="Regenerate" DependsOnTargets="FetchKtx;RunClangSharpKtxGenerator" />
+
+  <!--
+    KTX-Software is fetched with git, not as a source archive, because its
+    cmake/version.cmake derives KTX_VERSION from `git describe` /
+    `git rev-list` and raises message(SEND_ERROR) when they fail — a
+    .git-less tarball does not configure at all.
+
+    Shallow + blobless + sparse: tests/ alone is ~190 MB of reference
+    images. tests/CMakeLists.txt itself has to stay, because the top-level
+    CMakeLists calls add_subdirectory(tests) UNCONDITIONALLY and only the
+    inner file gates on KTX_FEATURE_TESTS.
+  -->
+  <Target Name="FetchKtx" DependsOnTargets="CloneKtx;StageKtxHeaders" />
+
+  <Target Name="CloneKtx" Condition="!Exists('$(_KtxSourceDir)CMakeLists.txt')">
+    <MakeDir Directories="$(_KtxDownloadedRoot)" />
+
+    <Exec Command="git clone --depth 1 --branch $(KtxVersion) --filter=blob:none --no-checkout https://github.com/KhronosGroup/KTX-Software.git &quot;$(_KtxSourceDir.TrimEnd('\'))&quot;"
+          WorkingDirectory="$(RepositoryRoot)" />
+
+    <Exec Command="git sparse-checkout set --no-cone &quot;/*&quot; &quot;!/tests/*&quot; &quot;/tests/CMakeLists.txt&quot;"
+          WorkingDirectory="$(_KtxSourceDir)" />
+
+    <Exec Command="git checkout $(KtxVersion)"
+          WorkingDirectory="$(_KtxSourceDir)" />
+  </Target>
+
+  <Target Name="StageKtxHeaders" DependsOnTargets="CloneKtx" Condition="!Exists('$(_KtxStagedHeaderDir)ktx.h')">
+    <ItemGroup>
+      <_KtxHeader Include="$(_KtxSourceDir)include\ktx.h" />
+      <_KtxKhrHeader Include="$(_KtxSourceDir)include\KHR\khr_df.h" />
+    </ItemGroup>
+
+    <Error Condition="'@(_KtxHeader)' == '' or '@(_KtxKhrHeader)' == ''"
+           Text="Could not locate ktx.h / KHR/khr_df.h under $(_KtxSourceDir)include after checking out $(KtxVersion)." />
+
+    <Copy SourceFiles="@(_KtxHeader)" DestinationFolder="$(_KtxStagedHeaderDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_KtxKhrHeader)" DestinationFolder="$(_KtxStagedHeaderDir)KHR\" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="RunClangSharpKtxGenerator" DependsOnTargets="FetchKtx">
+    <MakeDir Directories="$(GeneratedDir)" />
+    <Exec Command="dotnet tool run ClangSharpPInvokeGenerator @&quot;$(GeneratorResponseFile)&quot;"
+          WorkingDirectory="$(RepositoryRoot)" />
+    <Message Importance="high" Text="Generated KTX bindings written to $(GeneratedDir)" />
+  </Target>
+
+  <!--
+    Build the host-RID ktx binary before the project's build step copies
+    Content items. Exists($(_KtxStagedBinary)) IS the cache: a staged
+    binary is never rebuilt, so the cost is paid once per KtxVersion bump.
+    CI cross-builds the other RIDs and drops their artifacts into
+    $(_KtxStagedRootDir)<rid>\ before the pack job runs.
+
+    Feature flags: everything that is not "read a KTX2 and transcode it"
+    is off. TOOLS/TESTS additionally pull in external/fmt + external/cxxopts,
+    and GL_UPLOAD/VK_UPLOAD would each add a graphics API dependency to a
+    library whose entire job here is producing bytes.
+  -->
+  <Target Name="BuildKtxForHost"
+          BeforeTargets="AssignTargetPaths"
+          Condition="'$(_KtxLibFile)' != '' and !Exists('$(_KtxStagedBinary)') and '$(SkipKtxNativeBuild)' != 'true'"
+          DependsOnTargets="FetchKtx">
+    <Error Condition="'$(_KtxRid)' == ''"
+           Text="Unsupported host for the KTX native build: OS='$([System.Runtime.InteropServices.RuntimeInformation]::OSDescription)' Arch='$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)'. Only win-x64 and linux-x64 are built; pass -p:SkipKtxNativeBuild=true to skip." />
+
+    <MakeDir Directories="$(_KtxBuildDir)" />
+
+    <Exec Command="cmake -S &quot;$(_KtxSourceDir.TrimEnd('\'))&quot; -B &quot;$(_KtxBuildDir.TrimEnd('\'))&quot; -DCMAKE_BUILD_TYPE=Release $(KtxCMakeFeatureFlags)"
+          WorkingDirectory="$(RepositoryRoot)" />
+
+    <Exec Command="cmake --build &quot;$(_KtxBuildDir.TrimEnd('\'))&quot; --config Release --parallel"
+          WorkingDirectory="$(RepositoryRoot)" />
+
+    <CallTarget Targets="StageKtxBinary" />
+  </Target>
+
+  <!--
+    Normalize cmake's output into $(_KtxStagedRootDir)<rid>\<libfile>.
+    Windows multi-config drops the dll under Release\; Linux produces the
+    SOVERSION chain, whose libktx.so is a symlink — Copy dereferences it,
+    which is what turns it into a file a nupkg can carry.
+  -->
+  <Target Name="StageKtxBinary">
+    <ItemGroup>
+      <_KtxProducedBinary Include="$(_KtxBuildDir)Release\$(_KtxLibFile);$(_KtxBuildDir)$(_KtxLibFile)" />
+      <_KtxProducedBinaryFound Include="@(_KtxProducedBinary)" Condition="Exists('%(_KtxProducedBinary.Identity)')" />
+    </ItemGroup>
+
+    <Error Condition="'@(_KtxProducedBinaryFound)' == ''"
+           Text="cmake reported success but no $(_KtxLibFile) was found under $(_KtxBuildDir)." />
+
+    <Copy SourceFiles="@(_KtxProducedBinaryFound)"
+          DestinationFolder="$(_KtxStagedRootDir)$(_KtxRid)\"
+          SkipUnchangedFiles="true" />
+
+    <Message Importance="high" Text="Staged KTX $(KtxVersion) for $(_KtxRid): $(_KtxStagedBinary)" />
+  </Target>
+
+  <!--
+    Multi-RID pack. Expects per-RID binaries to exist under
+    native/ktx/lib/<rid>/<libname> by the time pack runs. CI does this by
+    downloading the build matrix's upload-artifact outputs into those
+    directories before invoking dotnet pack.
+
+    Local pack only includes the host's RID — that's intentional. Producing
+    a fully cross-RID nupkg requires the CI matrix.
+  -->
+  <Target Name="PackKtxRuntimes" BeforeTargets="_GetPackageFiles;GenerateNuspec" Condition="'$(IsPackable)' == 'true'">
+    <ItemGroup>
+      <_KtxPackRid Include="win-x64">   <LibFile>ktx.dll</LibFile>   </_KtxPackRid>
+      <_KtxPackRid Include="linux-x64"> <LibFile>libktx.so</LibFile> </_KtxPackRid>
+    </ItemGroup>
+
+    <ItemGroup>
+      <None Include="$(_KtxStagedRootDir)%(_KtxPackRid.Identity)\%(_KtxPackRid.LibFile)"
+            Condition="Exists('$(_KtxStagedRootDir)%(_KtxPackRid.Identity)\%(_KtxPackRid.LibFile)')">
+        <Pack>true</Pack>
+        <PackagePath>runtimes\%(_KtxPackRid.Identity)\native\%(_KtxPackRid.LibFile)</PackagePath>
+        <Visible>false</Visible>
+      </None>
+    </ItemGroup>
+
+    <Message Importance="high" Text="KTX pack: included RIDs from $(_KtxStagedRootDir)" />
+  </Target>
+
+</Project>

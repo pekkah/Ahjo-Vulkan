@@ -1,0 +1,112 @@
+name: Build KTX Native
+
+# Per-RID build of the libktx SHARED library, plus the smoke suite that
+# executes it. Each job builds ktx.dll / libktx.so for one RID, runs
+# Ahjo.Vulkan.Ktx.Native.Tests against that binary, and uploads it as a
+# workflow artifact named ktx-native-<rid>. publish.yml downloads all of
+# them and aggregates them into a single multi-RID nupkg.
+#
+# Building and testing in the SAME job is deliberate. The artifact that
+# reaches NuGet is then, by construction, a binary something has loaded and
+# transcoded a real KTX2 payload with — which is the failure VMA's issue
+# #144 shipped: a Linux .so that compiled cleanly, was packed by a job that
+# only knew how to compile, and SIGSEGVed on its first real call.
+#
+# Triggers:
+#   - workflow_call: invoked by ci.yml (proof) and publish.yml (artifacts)
+#   - workflow_dispatch: manual run to refresh artifacts during dev
+#   - push to main, paths-filtered: rebuild whenever the pinned KTX tag,
+#     the cmake feature flags, the project, or this workflow changes.
+
+on:
+  workflow_call: {}
+  workflow_dispatch: {}
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/Ahjo.Vulkan.Ktx.Native/**'
+      - 'tests/Ahjo.Vulkan.Ktx.Native.Tests/**'
+      - 'Directory.Build.props'
+      - '.github/workflows/build-ktx-native.yml'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  DOTNET_NOLOGO: "true"
+
+jobs:
+  build:
+    name: Build + smoke ktx (${{ matrix.rid }})
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      # Don't let one RID's failure hide the other's result — the whole
+      # point is knowing which RIDs are actually proven.
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            runs-on: windows-latest
+            lib-file: ktx.dll
+          - rid: linux-x64
+            runs-on: ubuntu-latest
+            lib-file: libktx.so
+          # arm64 and macOS are deliberately absent. libktx links
+          # astc-encoder, whose SIMD backend is chosen at compile time, so
+          # a RID without a lane that loads the binary and transcodes is a
+          # RID nobody has proven. Add the lane first, then the RID —
+          # here, in the csproj's _KtxRid/_KtxPackRid lists, and in the
+          # package README's support table.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The staged binary IS the cache: BuildKtxForHost is conditioned on
+      # its absence, so a hit skips the ~170 MB shallow clone of
+      # KTX-Software and the cmake build entirely. Keyed on every input
+      # that can change the output — the pinned KtxVersion and the cmake
+      # feature flags (both in Directory.Build.props), and the project that
+      # drives the build.
+      #
+      # The smoke tests run on a hit as well as a miss. A cached binary
+      # that no longer loads is exactly the thing worth finding out about.
+      - name: Cache staged ktx binary
+        id: cache-ktx
+        uses: actions/cache@v4
+        with:
+          path: native/ktx/staged/${{ matrix.rid }}/${{ matrix.lib-file }}
+          key: ktx-${{ matrix.rid }}-${{ hashFiles('Directory.Build.props', 'src/Ahjo.Vulkan.Ktx.Native/Ahjo.Vulkan.Ktx.Native.csproj', '.github/workflows/build-ktx-native.yml') }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: Directory.Packages.props
+
+      # Builds the managed bindings and, on a cache miss, fetches the
+      # pinned KTX tag and runs cmake with $(KtxCMakeFeatureFlags). The
+      # flags live in Directory.Build.props rather than in this file
+      # precisely so a developer's local binary and the one that ships
+      # cannot be configured differently.
+      - name: Build ktx native + bindings
+        run: dotnet build src/Ahjo.Vulkan.Ktx.Native/Ahjo.Vulkan.Ktx.Native.csproj -c Release --nologo
+
+      - name: List staged output
+        shell: bash
+        run: ls -la native/ktx/staged/${{ matrix.rid }} || true
+
+      # No Vulkan provisioning, deliberately: the library is built with
+      # KTX_FEATURE_VK_UPLOAD=OFF and KTX_FEATURE_GL_UPLOAD=OFF, so it has
+      # no graphics API dependency and this lane needs no ICD, no loader
+      # and no device. If this ever starts needing one, something has been
+      # linked in that the package's contract says is not there.
+      - name: Test — Ahjo.Vulkan.Ktx.Native.Tests
+        run: dotnet test tests/Ahjo.Vulkan.Ktx.Native.Tests/Ahjo.Vulkan.Ktx.Native.Tests.csproj -c Release --nologo -l "console;verbosity=detailed"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ktx-native-${{ matrix.rid }}
+          path: native/ktx/staged/${{ matrix.rid }}/${{ matrix.lib-file }}
+          if-no-files-found: error
+          retention-days: 14
