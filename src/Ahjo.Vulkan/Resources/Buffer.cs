@@ -94,6 +94,15 @@ public readonly unsafe struct Buffer : IVulkanHandle<Buffer>, IDisposable
     /// GPU virtual address for use with <c>bufferDeviceAddress</c> features.
     /// Caller must have created the buffer with <see cref="BufferUsage.ShaderDeviceAddress"/>.
     /// </summary>
+    /// <summary>
+    /// Whether this handle owns the memory behind it as well as the resource. False for a
+    /// resource created into a shared <see cref="MemoryBlock"/> by the aliasing creators:
+    /// it owns its own <c>Vk*</c> object, but the block owns the bytes, so disposing it
+    /// frees nothing and every operation that addresses the ALLOCATION rather than the
+    /// resource is a no-op.
+    /// </summary>
+    public bool OwnsMemory => AllocationHandle != null;
+
     public ulong GetDeviceAddress(Device device)
     {
         var info = new VkBufferDeviceAddressInfo
@@ -154,7 +163,9 @@ public readonly unsafe struct Buffer : IVulkanHandle<Buffer>, IDisposable
     /// </summary>
     public void Flush(ulong offset = 0, ulong size = ulong.MaxValue)
     {
-        if (Handle == null || IsHostCoherent) return;
+        // !OwnsMemory is an aliasing view into a MemoryBlock: there is no allocation of its
+        // own to flush, and the block's owner is the only party that can meaningfully do it.
+        if (Handle == null || IsHostCoherent || !OwnsMemory) return;
         VmaApi.vmaFlushAllocation(Owner.Handle, AllocationHandle, offset, size).ThrowIfFailed();
     }
 
@@ -166,7 +177,7 @@ public readonly unsafe struct Buffer : IVulkanHandle<Buffer>, IDisposable
     /// </summary>
     public void Invalidate(ulong offset = 0, ulong size = ulong.MaxValue)
     {
-        if (Handle == null || IsHostCoherent) return;
+        if (Handle == null || IsHostCoherent || !OwnsMemory) return;
         VmaApi.vmaInvalidateAllocation(Owner.Handle, AllocationHandle, offset, size).ThrowIfFailed();
     }
 
@@ -178,6 +189,9 @@ public readonly unsafe struct Buffer : IVulkanHandle<Buffer>, IDisposable
         // allocator would crash. Skip the destroy.
         if (!OwnsHandle) return;
         HandleRegistry.TrackDispose(this);
+        // A null AllocationHandle (an aliasing view — see OwnsMemory) is deliberate, not a
+        // missing case: VMA documents both arguments of vmaDestroyBuffer as optional, so
+        // this destroys the buffer and frees no memory, which is exactly the contract.
         VmaApi.vmaDestroyBuffer(Owner.Handle, Handle, AllocationHandle);
     }
 }

@@ -101,6 +101,15 @@ public readonly unsafe struct Image : IVulkanHandle<Image>, IDisposable
     /// returned view's lifetime — dispose it before this <see cref="Image"/>
     /// goes away.
     /// </summary>
+    /// <summary>
+    /// Whether this handle owns the memory behind it as well as the resource. False for a
+    /// resource created into a shared <see cref="MemoryBlock"/> by the aliasing creators:
+    /// it owns its own <c>Vk*</c> object, but the block owns the bytes, so disposing it
+    /// frees nothing and every operation that addresses the ALLOCATION rather than the
+    /// resource is a no-op.
+    /// </summary>
+    public bool OwnsMemory => AllocationHandle != null;
+
     public ImageView CreateView(Device device, in ImageViewDescription view)
     {
         // levelCount / layerCount forward straight through: a valid range
@@ -145,6 +154,9 @@ public readonly unsafe struct Image : IVulkanHandle<Image>, IDisposable
         // guard makes the borrow contract real. Skip the destroy.
         if (!OwnsHandle) return;
         HandleRegistry.TrackDispose(this);
+        // A null AllocationHandle (an aliasing view — see OwnsMemory) is deliberate, not a
+        // missing case: VMA documents both arguments of vmaDestroyImage as optional, so
+        // this destroys the image and frees no memory, which is exactly the contract.
         VmaApi.vmaDestroyImage(Owner.Handle, Handle, AllocationHandle);
     }
 }

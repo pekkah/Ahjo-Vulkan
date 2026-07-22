@@ -536,6 +536,78 @@ public sealed unsafe class Device : IDisposable
         return new PipelineLayout(raw, Handle, metadata);
     }
 
+    /// <summary>
+    /// What memory an image built from <paramref name="image"/> would need, WITHOUT
+    /// creating one the caller has to own.
+    /// </summary>
+    /// <remarks>
+    /// <para>For the aliasing path: a caller packing several resources into one
+    /// <see cref="MemoryBlock"/> must know every size and alignment before anything is
+    /// created. Ordinary code never needs this — <see cref="Allocator.CreateImage"/> lets
+    /// VMA size, allocate and bind in one call.</para>
+    /// <para>Implemented by creating an UNBOUND <c>VkImage</c>, querying it and destroying
+    /// it again. Vulkan 1.3's <c>vkGetDeviceImageMemoryRequirements</c> would answer with no
+    /// resource at all, but it is deliberately not used: the wrapper already caps VMA's
+    /// <c>vulkanApiVersion</c> at 1.2 because lavapipe's exposure of exactly that entry
+    /// point is unstable (see <see cref="Allocator.Create"/>), and one path that works on
+    /// every device beats two that differ by driver. An unbound image is cheap — no memory
+    /// is committed — but it is not free, so a per-frame caller should cache by
+    /// description rather than ask every frame.</para>
+    /// </remarks>
+    public unsafe MemoryRequirements GetImageMemoryRequirements(in ImageDescription image)
+    {
+        VkImageCreateInfo ci = image.ToNative();
+
+        VkImage_T* probe = null;
+        Vk.vkCreateImage(Handle, &ci, null, &probe).ThrowIfFailed();
+        try
+        {
+            VkMemoryRequirements mr = default;
+            Vk.vkGetImageMemoryRequirements(Handle, probe, &mr);
+            return new MemoryRequirements
+            {
+                Size = mr.size,
+                Alignment = mr.alignment,
+                MemoryTypeBits = mr.memoryTypeBits,
+            };
+        }
+        finally
+        {
+            // In a finally, not after the query: the probe is the only thing this method
+            // creates, and leaking a VkImage per query would show up as a device-teardown
+            // leak report long after the call that caused it.
+            Vk.vkDestroyImage(Handle, probe, null);
+        }
+    }
+
+    /// <summary>
+    /// What memory a buffer built from <paramref name="buffer"/> would need — the buffer
+    /// counterpart of <see cref="GetImageMemoryRequirements"/>, with the same
+    /// probe-and-destroy implementation and the same advice about caching.
+    /// </summary>
+    public unsafe MemoryRequirements GetBufferMemoryRequirements(in BufferDescription buffer)
+    {
+        VkBufferCreateInfo ci = buffer.ToNative();
+
+        VkBuffer_T* probe = null;
+        Vk.vkCreateBuffer(Handle, &ci, null, &probe).ThrowIfFailed();
+        try
+        {
+            VkMemoryRequirements mr = default;
+            Vk.vkGetBufferMemoryRequirements(Handle, probe, &mr);
+            return new MemoryRequirements
+            {
+                Size = mr.size,
+                Alignment = mr.alignment,
+                MemoryTypeBits = mr.memoryTypeBits,
+            };
+        }
+        finally
+        {
+            Vk.vkDestroyBuffer(Handle, probe, null);
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
