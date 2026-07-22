@@ -139,30 +139,10 @@ public readonly unsafe struct Allocator : IDisposable
     /// </summary>
     public Buffer CreateBuffer(in BufferDescription buffer, in AllocationDescription allocation)
     {
-        // Every native field assigned explicitly so a future binding regen
-        // that reorders / adds fields can't silently inherit a zero from
-        // managed default-init. Costs nothing — the JIT folds the default
-        // assignments — and the call site reads as the wrapper's actual
-        // contract with VMA rather than "whatever zero means today".
-        VkBufferCreateInfo bci = default;
-        bci.sType                 = VkStructureType.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bci.pNext                 = null;
-        bci.flags                 = 0;
-        bci.size                  = buffer.Size;
-        bci.usage                 = (uint)buffer.Usage;
-        bci.sharingMode           = VkSharingMode.VK_SHARING_MODE_EXCLUSIVE;
-        bci.queueFamilyIndexCount = 0;
-        bci.pQueueFamilyIndices   = null;
-
-        VmaAllocationCreateInfo aci = default;
-        aci.flags          = (uint)allocation.Flags;
-        aci.usage          = (VmaMemoryUsage)allocation.Usage;
-        aci.requiredFlags  = 0;
-        aci.preferredFlags = 0;
-        aci.memoryTypeBits = 0;
-        aci.pool           = null;
-        aci.pUserData      = null;
-        aci.priority       = 0f;
+        // The create-info mapping lives on the description (BufferDescription.ToNative) so
+        // the aliasing creator and the requirements query cannot drift from this one.
+        VkBufferCreateInfo bci = buffer.ToNative();
+        VmaAllocationCreateInfo aci = ToNative(allocation);
 
         VkBuffer_T*       rawBuffer = null;
         VmaAllocation_T*  rawAlloc  = null;
@@ -195,47 +175,10 @@ public readonly unsafe struct Allocator : IDisposable
     /// </summary>
     public Image CreateImage(in ImageDescription image, in AllocationDescription allocation)
     {
-        // Same explicit-baseline reasoning as CreateBuffer — every native
-        // field assigned, so a future struct shape change surfaces at
-        // build time rather than as a silent zero on a renamed field.
-        VkImageCreateInfo ici = default;
-        ici.sType                 = VkStructureType.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        ici.pNext                 = null;
-        ici.flags                 = (uint)image.Flags;
-        ici.imageType             = image.ImageType;
-        ici.format                = image.Format;
-        ici.extent                = new VkExtent3D { width = image.Width, height = image.Height, depth = image.Depth };
-        // mipLevels / arrayLayers / samples / depth forward straight through:
-        // the >= 1 baseline that VUID-VkImageCreateInfo-mipLevels-00947 /
-        // -arrayLayers-00948 / -samples-parameter require is supplied by
-        // ImageDescription's field initializers (issue #119, which subsumes
-        // #113). No call-site `== 0 ? 1` guard here on purpose — unlike the
-        // span-consuming ToNative / descriptor-layout boundaries (which guard
-        // because a zeroed array element is a legitimate input), CreateImage
-        // takes a single `in` description whose only zero-bypass is an
-        // explicit `default(ImageDescription)`, which the design documents as
-        // not contractually valid. See the "default(T) caveat (decided)"
-        // section of docs/superpowers/specs/…-issue-119-…-design.md before
-        // adding one.
-        ici.mipLevels             = image.MipLevels;
-        ici.arrayLayers           = image.ArrayLayers;
-        ici.samples               = image.Samples;
-        ici.tiling                = image.Tiling;
-        ici.usage                 = (uint)image.Usage;
-        ici.sharingMode           = VkSharingMode.VK_SHARING_MODE_EXCLUSIVE;
-        ici.queueFamilyIndexCount = 0;
-        ici.pQueueFamilyIndices   = null;
-        ici.initialLayout         = image.InitialLayout;
-
-        VmaAllocationCreateInfo aci = default;
-        aci.flags          = (uint)allocation.Flags;
-        aci.usage          = (VmaMemoryUsage)allocation.Usage;
-        aci.requiredFlags  = 0;
-        aci.preferredFlags = 0;
-        aci.memoryTypeBits = 0;
-        aci.pool           = null;
-        aci.pUserData      = null;
-        aci.priority       = 0f;
+        // The create-info mapping lives on the description (ImageDescription.ToNative) so
+        // the aliasing creator and the requirements query cannot drift from this one.
+        VkImageCreateInfo ici = image.ToNative();
+        VmaAllocationCreateInfo aci = ToNative(allocation);
 
         VkImage_T*        rawImage = null;
         VmaAllocation_T*  rawAlloc = null;
@@ -254,6 +197,130 @@ public readonly unsafe struct Allocator : IDisposable
             image.Format, image.Width, image.Height, image.Depth,
             image.MipLevels, image.ArrayLayers, image.Usage,
             info.pMappedData);
+    }
+
+    /// <summary>
+    /// Allocates device memory with NO resource bound to it, for a caller that will
+    /// sub-allocate the block itself with <see cref="CreateAliasingImage"/> /
+    /// <see cref="CreateAliasingBuffer"/>.
+    /// </summary>
+    /// <param name="requirements">
+    /// What the block must satisfy. Fold every resource's
+    /// <see cref="Device.GetImageMemoryRequirements"/> /
+    /// <see cref="Device.GetBufferMemoryRequirements"/> answer together with
+    /// <see cref="MemoryRequirements.CombineWith"/>, then raise
+    /// <see cref="MemoryRequirements.Size"/> to whatever the packing actually needs — the
+    /// combined size is only the largest single resource.
+    /// </param>
+    /// <param name="allocation">
+    /// Pass <see cref="AllocationFlags.CanAlias"/> whenever more than one resource will be
+    /// created into the block. VMA needs it to stop applying optimizations that assume one
+    /// allocation backs one resource, and it is not inferred here — nothing at this point
+    /// knows how many resources are coming.
+    /// </param>
+    public MemoryBlock AllocateMemory(in MemoryRequirements requirements, in AllocationDescription allocation)
+    {
+        // VMA derives an Auto* usage's memory type from the RESOURCE's usage flags, and a
+        // block allocated before any resource exists has none. VMA answers that with an
+        // internal assert and an opaque VK_ERROR_FEATURE_NOT_PRESENT, which reads like a
+        // missing device feature; say what is actually wrong instead.
+        if (allocation.Usage is MemoryUsage.Auto or MemoryUsage.AutoPreferDevice or MemoryUsage.AutoPreferHost)
+        {
+            throw new ArgumentException(
+                "MemoryUsage.Auto* cannot be used to allocate a block with no resource bound to it — VMA infers " +
+                "the memory type from a resource's usage flags, and there is no resource here. Use " +
+                "MemoryUsage.Unknown with AllocationDescription.RequiredFlags (MemoryProperties.DeviceLocal for a " +
+                "GPU-resident block), or call CreateBuffer/CreateImage if one resource per allocation is what you want.",
+                nameof(allocation));
+        }
+
+        VkMemoryRequirements mr = default;
+        mr.size           = requirements.Size;
+        mr.alignment      = requirements.Alignment;
+        mr.memoryTypeBits = requirements.MemoryTypeBits;
+
+        VmaAllocationCreateInfo aci = ToNative(allocation);
+
+        VmaAllocation_T* rawAlloc = null;
+        VmaAllocationInfo info = default;
+        VmaApi.vmaAllocateMemory(Handle, &mr, &aci, &rawAlloc, &info).ThrowIfFailed();
+        return new MemoryBlock(rawAlloc, this, info.size, info.memoryType);
+    }
+
+    /// <summary>
+    /// Creates a <c>VkImage</c> bound at <paramref name="offset"/> bytes into
+    /// <paramref name="block"/>, instead of giving it an allocation of its own.
+    /// </summary>
+    /// <remarks>
+    /// <para>The returned <see cref="Image"/> owns its <c>VkImage</c> and NOT the memory:
+    /// its allocation handle is null, so disposing it destroys the image and frees nothing.
+    /// That is what lets several images share one block. Dispose every resource before the
+    /// block.</para>
+    /// <para><paramref name="offset"/> must be a multiple of the alignment
+    /// <see cref="Device.GetImageMemoryRequirements"/> reported for this description, and
+    /// the image must fit inside the block. Aliased contents are undefined — see
+    /// <see cref="MemoryBlock"/>.</para>
+    /// </remarks>
+    public Image CreateAliasingImage(in MemoryBlock block, ulong offset, in ImageDescription image)
+    {
+        VkImageCreateInfo ici = image.ToNative();
+
+        VkImage_T* rawImage = null;
+        VmaApi.vmaCreateAliasingImage2(Handle, block.Handle, offset, &ici, &rawImage).ThrowIfFailed();
+
+        // The allocation handle stays null: the block owns the memory. Image.Dispose
+        // forwards a null allocation to vmaDestroyImage, which VMA documents as "destroy
+        // the image, free nothing" — exactly the aliasing contract, and it needs no second
+        // disposal path on the handle.
+        return new Image(
+            rawImage, null, this,
+            image.Format, image.Width, image.Height, image.Depth,
+            image.MipLevels, image.ArrayLayers, image.Usage,
+            persistentMapped: null);
+    }
+
+    /// <summary>
+    /// Creates a <c>VkBuffer</c> bound at <paramref name="offset"/> bytes into
+    /// <paramref name="block"/> — the buffer counterpart of
+    /// <see cref="CreateAliasingImage"/>, with the same ownership and undefined-contents
+    /// rules.
+    /// </summary>
+    /// <remarks>
+    /// The returned buffer reports host-visible and host-coherent false and carries no
+    /// mapped pointer, so mapping throws and flush/invalidate are no-ops. Host access to a
+    /// block is the block owner's business, not an aliasing view's: two views of the same
+    /// bytes disagreeing about coherency is a bug with no good answer.
+    /// </remarks>
+    public Buffer CreateAliasingBuffer(in MemoryBlock block, ulong offset, in BufferDescription buffer)
+    {
+        VkBufferCreateInfo bci = buffer.ToNative();
+
+        VkBuffer_T* rawBuffer = null;
+        VmaApi.vmaCreateAliasingBuffer2(Handle, block.Handle, offset, &bci, &rawBuffer).ThrowIfFailed();
+
+        return new Buffer(
+            rawBuffer, null, this, buffer.Size, buffer.Usage,
+            isHostVisible: false, isHostCoherent: false, persistentMapped: null);
+    }
+
+    /// <summary>
+    /// The <c>VmaAllocationCreateInfo</c> an <see cref="AllocationDescription"/> denotes.
+    /// Every field assigned explicitly — the struct exposes several optional pointers and a
+    /// priority the wrapper does not drive, and pinning each to its zero here keeps a future
+    /// field reorder honest.
+    /// </summary>
+    private static VmaAllocationCreateInfo ToNative(in AllocationDescription allocation)
+    {
+        VmaAllocationCreateInfo aci = default;
+        aci.flags          = (uint)allocation.Flags;
+        aci.usage          = (VmaMemoryUsage)allocation.Usage;
+        aci.requiredFlags  = (uint)allocation.RequiredFlags;
+        aci.preferredFlags = (uint)allocation.PreferredFlags;
+        aci.memoryTypeBits = 0;
+        aci.pool           = null;
+        aci.pUserData      = null;
+        aci.priority       = 0f;
+        return aci;
     }
 
     public void Dispose()

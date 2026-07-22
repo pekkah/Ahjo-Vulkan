@@ -56,4 +56,47 @@ public readonly record struct ImageDescription
     /// single-layer, single-sample baseline.
     /// </summary>
     public ImageDescription() { }
+
+    /// <summary>
+    /// The <c>VkImageCreateInfo</c> this description denotes. ONE place decides the
+    /// mapping, because more than one caller needs it now: creating an image with its own
+    /// allocation (<see cref="Allocator.CreateImage"/>), creating one bound into a shared
+    /// block (<see cref="Allocator.CreateAliasingImage"/>), and asking what memory such an
+    /// image would need without creating one at all
+    /// (<see cref="Device.GetImageMemoryRequirements"/>).
+    /// </summary>
+    /// <remarks>
+    /// Every native field is assigned explicitly so a future binding regen that reorders or
+    /// adds fields cannot silently inherit a zero from managed default-init. The JIT folds
+    /// the default assignments away.
+    ///
+    /// <c>mipLevels</c> / <c>arrayLayers</c> / <c>samples</c> / <c>depth</c> forward
+    /// straight through: the &gt;= 1 baseline that VUID-VkImageCreateInfo-mipLevels-00947 /
+    /// -arrayLayers-00948 / -samples-parameter require is supplied by this type's field
+    /// initializers (issue #119, which subsumes #113). No <c>== 0 ? 1</c> guard here on
+    /// purpose — the only way a single description carries a zero is an explicit
+    /// <c>default(ImageDescription)</c>, which the design documents as not contractually
+    /// valid. See the "default(T) caveat (decided)" section of
+    /// docs/superpowers/specs/…-issue-119-…-design.md before adding one.
+    /// </remarks>
+    internal unsafe VkImageCreateInfo ToNative()
+    {
+        VkImageCreateInfo ci = default;
+        ci.sType                 = VkStructureType.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        ci.pNext                 = null;
+        ci.flags                 = (uint)Flags;
+        ci.imageType             = ImageType;
+        ci.format                = Format;
+        ci.extent                = new VkExtent3D { width = Width, height = Height, depth = Depth };
+        ci.mipLevels             = MipLevels;
+        ci.arrayLayers           = ArrayLayers;
+        ci.samples               = Samples;
+        ci.tiling                = Tiling;
+        ci.usage                 = (uint)Usage;
+        ci.sharingMode           = VkSharingMode.VK_SHARING_MODE_EXCLUSIVE;
+        ci.queueFamilyIndexCount = 0;
+        ci.pQueueFamilyIndices   = null;
+        ci.initialLayout         = InitialLayout;
+        return ci;
+    }
 }

@@ -1,3 +1,5 @@
+using Ahjo.Vulkan.Native;
+
 namespace Ahjo.Vulkan;
 
 /// <summary>
@@ -19,4 +21,23 @@ public readonly record struct BufferDescription
 
     /// <summary>Bitwise-OR of buffer usage bits.</summary>
     public BufferUsage Usage { get; init; }
+
+    /// <summary>
+    /// The <c>VkBufferCreateInfo</c> this description denotes — see
+    /// <see cref="ImageDescription.ToNative"/> for why the mapping lives on the description
+    /// rather than at each call site.
+    /// </summary>
+    internal unsafe VkBufferCreateInfo ToNative()
+    {
+        VkBufferCreateInfo ci = default;
+        ci.sType                 = VkStructureType.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        ci.pNext                 = null;
+        ci.flags                 = 0;
+        ci.size                  = Size;
+        ci.usage                 = (uint)Usage;
+        ci.sharingMode           = VkSharingMode.VK_SHARING_MODE_EXCLUSIVE;
+        ci.queueFamilyIndexCount = 0;
+        ci.pQueueFamilyIndices   = null;
+        return ci;
+    }
 }

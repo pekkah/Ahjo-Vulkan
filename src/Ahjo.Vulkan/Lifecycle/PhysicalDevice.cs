@@ -117,6 +117,31 @@ public sealed unsafe class PhysicalDevice
     /// ignore unsupported bits, which is permitted by the spec when the
     /// instance/device is 1.4-aware.</para>
     /// </remarks>
+    /// <summary>
+    /// The <c>VkPhysicalDeviceLimits</c> fields that govern sub-allocation — chiefly
+    /// <see cref="DeviceMemoryLimits.BufferImageGranularity"/>, which a caller packing
+    /// resources into one <see cref="MemoryBlock"/> must obey.
+    /// </summary>
+    /// <remarks>
+    /// The full limits struct is reachable only through <c>PhysicalDeviceInfo</c>, which is
+    /// a <c>ref struct</c> that cannot escape the device-picker callback — so a caller that
+    /// needs a limit AFTER the device exists has nowhere to read it from. This is that
+    /// accessor, kept narrow to the memory-relevant subset rather than surfacing everything.
+    /// </remarks>
+    public unsafe DeviceMemoryLimits GetMemoryLimits()
+    {
+        VkPhysicalDeviceProperties props;
+        Vk.vkGetPhysicalDeviceProperties(Handle, &props);
+        return new DeviceMemoryLimits
+        {
+            BufferImageGranularity = props.limits.bufferImageGranularity,
+            MinUniformBufferOffsetAlignment = props.limits.minUniformBufferOffsetAlignment,
+            MinStorageBufferOffsetAlignment = props.limits.minStorageBufferOffsetAlignment,
+            NonCoherentAtomSize = props.limits.nonCoherentAtomSize,
+            MaxMemoryAllocationCount = props.limits.maxMemoryAllocationCount,
+        };
+    }
+
     public Device CreateDevice(in DeviceDescription desc)
     {
         VkPhysicalDeviceProperties props;

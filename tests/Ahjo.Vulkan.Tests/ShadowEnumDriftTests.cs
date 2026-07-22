@@ -108,4 +108,16 @@ public sealed class ShadowEnumDriftTests
         Assert.Equal((uint)VkDescriptorBindingFlagBits.VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT, (uint)DescriptorBindingFlags.PartiallyBound);
         Assert.Equal((uint)VkDescriptorBindingFlagBits.VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, (uint)DescriptorBindingFlags.VariableDescriptorCount);
     }
+
+    [Fact]
+    public void MemoryProperties_MatchesNative()
+    {
+        Assert.Equal((uint)VkMemoryPropertyFlagBits.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, (uint)MemoryProperties.DeviceLocal);
+        Assert.Equal((uint)VkMemoryPropertyFlagBits.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, (uint)MemoryProperties.HostVisible);
+        Assert.Equal((uint)VkMemoryPropertyFlagBits.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, (uint)MemoryProperties.HostCoherent);
+        Assert.Equal((uint)VkMemoryPropertyFlagBits.VK_MEMORY_PROPERTY_HOST_CACHED_BIT, (uint)MemoryProperties.HostCached);
+        Assert.Equal((uint)VkMemoryPropertyFlagBits.VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT, (uint)MemoryProperties.LazilyAllocated);
+        Assert.Equal((uint)VkMemoryPropertyFlagBits.VK_MEMORY_PROPERTY_PROTECTED_BIT, (uint)MemoryProperties.Protected);
+        Assert.Equal(0u, (uint)MemoryProperties.None);
+    }
 }
