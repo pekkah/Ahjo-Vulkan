@@ -111,7 +111,7 @@ AhjoDiagnostics.Sink = (severity, source, message) => myLogger.Log(severity, sou
   `KhrSwapchain`).
 
 Deeper rationale on each layer lives under
-[`docs/superpowers/specs/`](https://github.com/pekkah/Ahjo-Vulkan/tree/main/docs/superpowers/specs)
+[`docs/design/specs/`](https://github.com/pekkah/Ahjo-Vulkan/tree/main/docs/design/specs)
 in the source repo.
 
 ## Repository

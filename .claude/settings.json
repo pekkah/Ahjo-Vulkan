@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(src/*/Generated/**)",
+      "Write(src/*/Generated/**)",
+      "Edit(native/downloaded/**)",
+      "Write(native/downloaded/**)",
+      "Edit(native/ktx/downloaded/**)",
+      "Write(native/ktx/downloaded/**)"
+    ],
+    "allow": [
+      "Bash(dotnet build:*)",
+      "Bash(dotnet test:*)",
+      "Bash(dotnet tool restore)",
+      "Bash(dotnet restore:*)",
+      "Bash(dotnet run --project tests/Ahjo.Vulkan.Benchmarks:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh issue list:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh run list:*)",
+      "PowerShell(dotnet build:*)",
+      "PowerShell(dotnet test:*)",
+      "PowerShell(git status:*)",
+      "PowerShell(git diff:*)",
+      "PowerShell(git log:*)"
+    ]
+  }
+}

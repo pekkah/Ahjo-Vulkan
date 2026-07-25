@@ -71,9 +71,9 @@ will dangle. `VulkanExtensions.KhrSurface` / `KhrSwapchain` / etc. expose
 the names the wrapper actively wraps as ready-made `Utf8Name` values.
 
 Full design rationale (instance lifecycle, validation wiring, callback
-contract): [`docs/superpowers/specs/2026-05-04-issue-06-instance-creation-design.md`](docs/superpowers/specs/2026-05-04-issue-06-instance-creation-design.md).
+contract): [`docs/design/specs/2026-05-04-issue-06-instance-creation-design.md`](docs/design/specs/2026-05-04-issue-06-instance-creation-design.md).
 Porting from Vortice.Vulkan: [`docs/migration-vortice-to-ahjo.md`](docs/migration-vortice-to-ahjo.md).
-Other specs and plans live under [`docs/superpowers/specs/`](docs/superpowers/specs/) and [`docs/superpowers/plans/`](docs/superpowers/plans/).
+Other specs and plans live under [`docs/design/specs/`](docs/design/specs/) and [`docs/design/plans/`](docs/design/plans/).
 
 ## Layout
 

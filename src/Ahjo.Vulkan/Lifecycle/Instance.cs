@@ -11,7 +11,7 @@ namespace Ahjo.Vulkan;
 /// struct-handle convention because <see cref="Instance"/> is created once
 /// per process, never copied, never on a hot path, and benefits from a
 /// finalizer that backstops a missed <c>Dispose</c>. See the design spec at
-/// <c>docs/superpowers/specs/2026-05-04-issue-06-instance-creation-design.md</c>
+/// <c>docs/design/specs/2026-05-04-issue-06-instance-creation-design.md</c>
 /// for the rationale.
 /// </summary>
 /// <remarks>

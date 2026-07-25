@@ -1,6 +1,6 @@
 # Issue #8 — Device creation API + queue access — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Execute this plan with the repo's `implementer` agent (`.claude/agents/implementer.md`) task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship `physicalDevice.CreateDevice(in DeviceDescription)` returning a `Device` (sealed class) with a pre-baked `Queue[]` and the wrapper's 1.4 default features auto-enabled. Bundle a small refactor: `PhysicalDevice` becomes a `sealed class` (drops `IVulkanHandle<>`) and is cached on its owning `Instance` so picker round-trips remain zero-allocation.
 
@@ -8,7 +8,7 @@
 
 **Tech stack:** .NET 10, C# 11+ (`unsafe`, `ref` fields in `ref struct`, `Unsafe.AsPointer`), xUnit v3, BenchmarkDotNet `[MemoryDiagnoser]` (benchmark optional). Existing primitives: `IVulkanHandle<TSelf>` (#3), `ChainBuilder<TRoot>` (#4), `VkResult.ThrowIfFailed()` (#5), `Instance` (#6), `PhysicalDeviceInfo` + picker (#7), `VulkanDriverProbe`.
 
-**Spec:** `docs/superpowers/specs/2026-05-04-issue-08-device-creation-design.md`. Read it before starting.
+**Spec:** `docs/design/specs/2026-05-04-issue-08-device-creation-design.md`. Read it before starting.
 
 ---
 

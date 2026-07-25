@@ -77,7 +77,7 @@ public readonly record struct ImageDescription
     /// purpose — the only way a single description carries a zero is an explicit
     /// <c>default(ImageDescription)</c>, which the design documents as not contractually
     /// valid. See the "default(T) caveat (decided)" section of
-    /// docs/superpowers/specs/…-issue-119-…-design.md before adding one.
+    /// docs/design/specs/…-issue-119-…-design.md before adding one.
     /// </remarks>
     internal unsafe VkImageCreateInfo ToNative()
     {
