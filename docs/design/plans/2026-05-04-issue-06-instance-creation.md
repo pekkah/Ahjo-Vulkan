@@ -1,6 +1,6 @@
 # Issue #6 — Instance creation API — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Execute this plan with the repo's `implementer` agent (`.claude/agents/implementer.md`) task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship `Instance.Create(in InstanceDescription)` for `Ahjo.Vulkan` — Vulkan 1.4 baseline, opt-in Khronos validation with a debug-utils messenger, and full `IDisposable` lifetime.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** .NET 10, C# (unsafe), xUnit v3. Existing primitives from prior issues: `IVulkanHandle<TSelf>` (issue #3), `ChainBuilder<TRoot>` (issue #4), `VkResult.ThrowIfFailed()` + `VulkanException` (issue #5). Native bindings in `Ahjo.Vulkan.Native`.
 
-**Spec:** `docs/superpowers/specs/2026-05-04-issue-06-instance-creation-design.md`. Read it before starting.
+**Spec:** `docs/design/specs/2026-05-04-issue-06-instance-creation-design.md`. Read it before starting.
 
 ---
 
@@ -658,7 +658,7 @@ namespace Ahjo.Vulkan;
 /// struct-handle convention because <see cref="Instance"/> is created once
 /// per process, never copied, never on a hot path, and benefits from a
 /// finalizer that backstops a missed <c>Dispose</c>. See the design spec at
-/// <c>docs/superpowers/specs/2026-05-04-issue-06-instance-creation-design.md</c>
+/// <c>docs/design/specs/2026-05-04-issue-06-instance-creation-design.md</c>
 /// for the rationale.
 /// </summary>
 public sealed unsafe class Instance : IDisposable

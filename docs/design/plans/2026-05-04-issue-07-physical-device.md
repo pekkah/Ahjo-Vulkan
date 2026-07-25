@@ -1,6 +1,6 @@
 # Issue #7 — PhysicalDevice selection + capabilities API — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Execute this plan with the repo's `implementer` agent (`.claude/agents/implementer.md`) task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship `instance.PickPhysicalDevice(picker)` for `Ahjo.Vulkan` — declarative physical-device selection with a zero-alloc `PhysicalDeviceInfo` view (properties, all four 1.x feature structs, memory, queue families, device extensions, name).
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** .NET 10, C# 11+ (unsafe, `ref` fields in `ref struct`), xUnit v3, BenchmarkDotNet `[MemoryDiagnoser]`. Existing primitives: `IVulkanHandle<TSelf>` (#3), `ChainBuilder<TRoot>` (#4), `VkResult.ThrowIfFailed()` (#5), `Instance` (#6), `VulkanDriverProbe`.
 
-**Spec:** `docs/superpowers/specs/2026-05-04-issue-07-physical-device-design.md`. Read it before starting.
+**Spec:** `docs/design/specs/2026-05-04-issue-07-physical-device-design.md`. Read it before starting.
 
 ---
 

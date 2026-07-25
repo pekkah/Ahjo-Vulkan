@@ -2,71 +2,17 @@
 
 .NET 10 / C# 14 Vulkan bindings + low-allocation wrapper, aimed at the [Logos game engine](https://github.com/pekkah/logos). Four publishable NuGet packages live in this repo; see `README.md` for the consumer-facing overview.
 
-## Load-bearing invariants
+Work is driven by GitHub issues. `/work-issue <number>` runs the standard flow: triage → architect (spec + plan) → approval → implementer → reviewers → PR.
 
-Violating any of these will either break CI or cause a silent runtime bug. Treat them as non-negotiable unless the user explicitly asks otherwise.
+## Load-bearing invariants (index)
 
-### 1. UTF-8 string literals for Vulkan `const char*`
+Full details live in scoped CLAUDE.md files that load automatically when you work in the relevant directory. The one-line versions, so none get violated from a distance:
 
-Vulkan APIs that take `const char*` (extension names, layer names, application name, debug labels) require a UTF-8, null-terminated, non-GC-movable pointer. The convention is:
-
-```csharp
-Utf8Name.FromLiteral("VK_KHR_surface"u8)
-```
-
-`"…"u8` literals live in the assembly's read-only data segment — process lifetime, null-terminated, no GC pinning. **Never** round-trip through `string` + `Encoding.UTF8.GetBytes(...)`: the resulting `byte[]` is GC-movable and not null-terminated, so the pointer Vulkan sees will dangle.
-
-`VulkanExtensions.KhrSurface` / `KhrSwapchain` / etc. expose the names the wrapper actively wraps as ready-made `Utf8Name` values — prefer those over re-quoting the literal at each call site.
-
-### 2. Native AOT must stay clean
-
-`samples/AotSmoke/` is published with `PublishAot=true` in CI and the produced exe runs the full render→PNG round-trip. Trim warnings, ILC errors, or runtime trim-related crashes will fail the build.
-
-Forbidden on any code path reachable from the wrapper:
-- `Type.MakeGenericType`, `MethodInfo.MakeGenericMethod`
-- Reflection-based discovery (`Assembly.GetTypes()`, attribute scans)
-- Dynamic code generation (`System.Reflection.Emit`, `DynamicMethod`, expression trees compiled at runtime)
-- Anything that triggers `RequiresUnreferencedCodeAttribute` / `RequiresDynamicCodeAttribute`
-
-See `docs/aot-notes.md` for the full inventory of patterns and the trim-attribute approach.
-
-### 3. Zero per-frame allocations on hot paths
-
-Stated explicitly in `README.md`: "Low allocation, raw-pointer friendly, minimal ceremony… perf and zero per-frame allocations take precedence." This is a hard constraint on:
-
-- `src/Ahjo.Vulkan/Recording/**` — every command-recording call
-- `src/Ahjo.Vulkan/Sync/**` — fence/semaphore operations
-- `src/Ahjo.Vulkan/Pools/**` — `FrameRing`, `CommandBufferPool`, descriptor pools
-- `src/Ahjo.Vulkan/Memory/**` — `StagingUploader`, `MappedRegion`, `ChainBuilder`
-- Any other API expected to run inside a per-frame loop
-
-`tests/Ahjo.Vulkan.Benchmarks/` has a `[MemoryDiagnoser]` benchmark per hot-path subsystem and `docs/benchmarks.md` records the baseline (every `Allocated` cell should read `-`). When changing a hot path, run the matching benchmark or use the `bench-coverage-checker` agent to confirm coverage hasn't slipped.
-
-Setup-time allocations (constructors, builder finalization, one-shot config) are fine. The constraint is per-frame, not lifetime.
-
-### 4. Generated code is generated — never hand-edit
-
-These directories are output of the codegen tools and get overwritten on the next regen:
-
-- `src/Ahjo.Vulkan.Native/Generated/` — ClangSharp P/Invokes from `vulkan.h`
-- `src/Ahjo.Vulkan.Vma.Native/Generated/` — ClangSharp P/Invokes from `vk_mem_alloc.h`
-- `src/Ahjo.Vulkan.Ktx.Native/Generated/` — ClangSharp P/Invokes from Khronos `ktx.h`
-- `native/ktx/downloaded/` — shallow sparse KTX-Software checkout at the pinned tag
-- `native/downloaded/` — pinned Vulkan-Headers + VMA tarball cache
-
-To change the bindings, edit the `*.rsp` files under `tools/`, bump the version in `Directory.Build.props` if needed, then regenerate:
-
-```bash
-dotnet build src/Ahjo.Vulkan.Native -t:Regenerate       # Vulkan
-dotnet build src/Ahjo.Vulkan.Vma.Native -t:Regenerate   # VMA (also needs cmake on PATH)
-dotnet build src/Ahjo.Vulkan.Ktx.Native -t:Regenerate   # libktx (needs git; cmake to build the binary)
-```
-
-Both packages ship under a single `v*` tag, so bump deliberately — see `Directory.Build.props` for the pinned `VulkanHeadersVersion` and `VmaVersion`.
-
-### 5. `TreatWarningsAsErrors=true`
-
-Set repo-wide in `Directory.Build.props` with `AnalysisLevel=latest`. Analyzer warnings break the build. Don't suppress diagnostics with `#pragma warning disable` to make code green — fix the underlying issue or move the suppression into a justified, file-scoped attribute with a comment.
+1. **UTF-8 string literals** — Vulkan `const char*` takes `Utf8Name.FromLiteral("…"u8)`; never round-trip through `string` + `Encoding.UTF8.GetBytes`. → `src/Ahjo.Vulkan/CLAUDE.md`
+2. **Native AOT stays clean** — no reflection discovery, no dynamic codegen, nothing trim-unsafe reachable from the wrapper; CI publishes `samples/AotSmoke` with `PublishAot=true`. → `src/Ahjo.Vulkan/CLAUDE.md`, `docs/aot-notes.md`
+3. **Zero per-frame allocations** on `Recording/`, `Sync/`, `Pools/`, `Memory/` hot paths; setup-time allocation is fine. → `src/Ahjo.Vulkan/CLAUDE.md`
+4. **Generated code is generated** — never hand-edit `src/*/Generated/`, `native/downloaded/`, `native/ktx/downloaded/`; edit `tools/*.rsp` + regenerate (`/regen-bindings`). → per-project CLAUDE.md files
+5. **`TreatWarningsAsErrors=true`** repo-wide with `AnalysisLevel=latest`. Fix the diagnostic; don't `#pragma`-suppress to get green.
 
 ## Project shape (quick reference)
 
@@ -78,13 +24,11 @@ src/
   Ahjo.Vulkan.Ktx.Native/      ClangSharp P/Invokes against Khronos ktx.h + prebuilt ktx.dll/libktx.so
   Ahjo.Vulkan.Utilities/       dep-free helpers for samples/tests (not published)
 
-native/vma/                    VMA impl translation unit + CMakeLists.txt
-samples/                       HelloTriangle, HelloCube, HelloVma, HelloVmaWindowed, HeadlessTriangle, AotSmoke
-tests/Ahjo.Vulkan.Tests/       xUnit integration suite over the wrapper
-tests/Ahjo.Vulkan.Native.Tests xUnit smoke suite over raw bindings
-tests/Ahjo.Vulkan.Benchmarks/  BenchmarkDotNet — zero-allocation regression canary
-tools/                         StructExtendsGen + generate-vma.rsp + generate.rsp (codegen config)
-docs/superpowers/              spec-driven design docs (specs/ + plans/, paired per issue)
+native/                        pinned upstream sources, VMA translation unit, staged binaries
+samples/                       HelloTriangle, HelloCube, HelloVma, HelloVmaWindowed, HeadlessTriangle, HeadlessExport, AotSmoke
+tests/                         wrapper + native test suites, BenchmarkDotNet allocation canary
+tools/                         codegen config (*.rsp) + StructExtendsGen/ResultPolicyGen
+docs/design/                   spec-driven design docs (specs/ + plans/, paired per issue)
 ```
 
 ## Common commands
@@ -95,53 +39,58 @@ dotnet tool restore
 dotnet build Ahjo.Vulkan.slnx
 dotnet test
 
-# Regenerate bindings (after a Directory.Build.props version bump)
-dotnet build src/Ahjo.Vulkan.Native -t:Regenerate
-dotnet build src/Ahjo.Vulkan.Vma.Native -t:Regenerate
-dotnet build src/Ahjo.Vulkan.Ktx.Native -t:Regenerate
-
-# Skip VMA native build (e.g. when consuming a pre-staged binary)
-dotnet build Ahjo.Vulkan.slnx -p:SkipVmaNativeBuild=true
-
-# Run benchmarks (filter syntax matches benchmark class names)
+# Benchmarks — use /run-bench; always -c Release
 dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*ChainBuilder*"
+
+# Regenerate bindings — use /regen-bindings for the full procedure
+dotnet build src/Ahjo.Vulkan.Native -t:Regenerate
 
 # AOT smoke locally (Windows; needs MSVC env via vcvars or VS dev shell)
 dotnet publish samples/AotSmoke/AotSmoke.csproj -c Release -r win-x64 -p:IlcUseEnvironmentalTools=true
 ```
 
-## CI
+## CI (summary)
 
-The **wrapper test suite** runs on `windows-latest` only. Linux is parked for it — issue #32 established that SwiftShader on Linux SIGSEGVs mid-suite across every loader+build combination tested, and gating driver-dependent tests behind a software rasterizer isn't honest coverage. When a self-hosted Linux runner with real Vulkan drivers becomes available, the Linux job can come back.
+Wrapper tests run on `windows-latest` only — issue #32 closed Linux wrapper coverage (SwiftShader SIGSEGV; software rasterizers aren't honest coverage). Two narrow lanes (`vma-linux`, `ktx-native`) exist solely to prove shipped native binaries execute before they reach NuGet — they are **not** wrapper coverage; don't grow them. Full rationale and rules: `.github/CLAUDE.md`.
 
-Windows CI provisions the Khronos Vulkan loader + Silk.NET-packaged SwiftShader ICD and routes the loader at it via `VK_DRIVER_FILES`.
+Publishing: preview packages on `push:main`, stable on GitHub release; one `v0.x.y` tag ships all four packages.
 
-The one exception is the `vma-linux` lane (both Linux RIDs, Mesa lavapipe), which runs `Ahjo.Vulkan.Vma.Native.Tests` and nothing else. It is a **build-artifact check, not wrapper coverage**, and does not reopen the issue-32 decision: `Ahjo.Vulkan.Vma.Native` publishes Linux binaries, so something has to execute one before it reaches NuGet. Issue #144 shipped a `libvma.so` that SIGSEGVed on the first `vmaCreateAllocator` precisely because nothing ever did. Allocation-only work is both what lavapipe handles reliably and what actually broke, which is why the lane stops there — don't grow it into a general Linux test lane. It sets `AHJO_REQUIRE_VULKAN_DEVICE=1`, which turns the suite's driverless skip into a hard failure so a broken ICD install can't report green while executing nothing.
+## Roles: architect and implementer
 
-The `ktx-native` lane (win-x64 + linux-x64) is the same idea with less nuance, and is defined ONCE in `build-ktx-native.yml`, called by both `ci.yml` and `publish.yml` — so the binary a release attaches comes from the definition CI proves. Each job builds libktx for its RID **and runs `Ahjo.Vulkan.Ktx.Native.Tests` against it before uploading the artifact**, which is #144's lesson applied up front instead of after the fact. It provisions no ICD and no loader on purpose: libktx ships with both uploaders off, so needing one would mean something got linked in that the package's contract says isn't there. The staged binary under `native/ktx/staged/<rid>/` is both the cache key and the artifact; a cache hit skips the clone and cmake but still runs the tests.
+Non-trivial work splits into two roles, each a subagent in `.claude/agents/`:
 
-`publish.yml` ships preview packages on `push:main` (MinVer-derived pre-release version) and stable packages on `release:published` events. Tag with `v0.x.y` → create a GitHub release → all four packages publish under that single tag.
+- **architect** — turns a GitHub issue into a paired design spec + implementation plan under `docs/design/`. Explores the code, weighs options, decides. Touches docs only, never `src/`.
+- **implementer** — executes an approved plan step by step: edits code, builds, tests. Doesn't redesign; deviations from the plan get reported back, not improvised.
+
+The bar for "non-trivial" is: would a reviewer want the *why* written down? Typo/one-liner fixes skip the spec and go straight to implementation.
+
+Reviewers close the loop before a PR: `vulkan-validation-reviewer` (Vulkan correctness) and `bench-coverage-checker` (allocation coverage) on any diff touching the wrapper surface.
 
 ## Spec-driven workflow
 
-Non-trivial design work goes through `docs/superpowers/`:
+- `docs/design/specs/YYYY-MM-DD-issue-NN-<topic>-design.md` — "what and why"
+- `docs/design/plans/YYYY-MM-DD-issue-NN-<topic>.md` — "how"
 
-- `docs/superpowers/specs/YYYY-MM-DD-issue-NN-<topic>-design.md` — design spec, "what and why"
-- `docs/superpowers/plans/YYYY-MM-DD-issue-NN-<topic>.md` — implementation plan, "how"
-
-Specs paired with issues (currently issues #06 instance creation, #07 physical device, #08 device creation). When the user asks for a new spec, follow that naming convention.
+Conventions and the quality bar: `docs/design/CLAUDE.md`.
 
 ## Commit + PR style
 
-Recent commits use `<area>: <imperative>` — examples from the log: `CI: enable auto-publish`, `Packaging: add LICENSE + Source Link`, `Versioning: ship all three packages under one v* tag`. Match that shape.
+Commits: `<area>: <imperative>` — e.g. `CI: enable auto-publish`, `Packaging: add LICENSE + Source Link`. PRs reference their issue (`Closes #NN`) and merge to `main`.
 
-## Custom agents in this repo
+## Skills + agents in this repo
 
-- `.claude/agents/vulkan-validation-reviewer.md` — reviews diffs for the bugs `VK_LAYER_KHRONOS_validation` catches at runtime (image layouts, sync2 masks, queue ownership, descriptor lifetime, fence/semaphore signaling, VMA lifetime, pNext validity, UTF-8 string lifetime).
-- `.claude/agents/bench-coverage-checker.md` — given a diff touching hot-path code, checks whether a matching benchmark in `tests/Ahjo.Vulkan.Benchmarks/` was updated and flags allocation smells.
+| Kind | Name | Purpose |
+|---|---|---|
+| skill | `/work-issue` | end-to-end GitHub-issue flow (triage → spec → implement → review → PR) |
+| skill | `/regen-bindings` | safe codegen regeneration across the three Native projects |
+| skill | `/run-bench` | run BenchmarkDotNet with the right config + filter |
+| agent | `architect` | issue → spec + plan (docs only) |
+| agent | `implementer` | approved plan → code + tests |
+| agent | `vulkan-validation-reviewer` | finds bugs `VK_LAYER_KHRONOS_validation` would catch |
+| agent | `bench-coverage-checker` | hot-path diff → benchmark coverage + allocation smells |
 
-Both kick in automatically on relevant diffs; invoke explicitly when reviewing a PR.
+Reviewer agents kick in automatically on relevant diffs; invoke explicitly when reviewing a PR.
 
 ## What lives in `~/.claude/projects/.../memory/` (auto-memory)
 
-Long-running project context that's likely to drift (issue numbers, design decisions in flight, user-specific preferences) lives in auto-memory, not in this file. This `CLAUDE.md` is the **stable** layer — invariants that hold across sessions and that anyone working in the repo should follow.
+Long-running project context that's likely to drift (issue numbers, design decisions in flight, user-specific preferences) lives in auto-memory, not in this file. The CLAUDE.md layer (this file + the scoped ones) is **stable** — invariants that hold across sessions and that anyone working in the repo should follow.

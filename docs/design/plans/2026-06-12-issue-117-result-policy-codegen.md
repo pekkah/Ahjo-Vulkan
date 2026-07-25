@@ -16,7 +16,7 @@ on a negative/error result) is the fix primitive for the count→fill idiom.
 `[GeneratedRegex]` (guard test). No Vulkan driver needed — the guard test is
 pure source scanning.
 
-**Spec:** `docs/superpowers/specs/2026-06-12-issue-117-result-policy-codegen-design.md`.
+**Spec:** `docs/design/specs/2026-06-12-issue-117-result-policy-codegen-design.md`.
 Read it before starting.
 
 ---
