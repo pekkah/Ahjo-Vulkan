@@ -23,7 +23,8 @@ namespace Ahjo.Vulkan;
 /// dynamic viewport + scissor, BindPipeline (compute and graphics),
 /// BindDescriptorSets, typed PushConstants, BindVertexBuffers /
 /// BindIndexBuffer, Draw / DrawIndexed / DrawIndirect /
-/// DrawIndexedIndirect, Dispatch / DispatchIndirect.</para>
+/// DrawIndirectCount / DrawIndexedIndirect / DrawIndexedIndirectCount,
+/// Dispatch / DispatchIndirect.</para>
 /// </remarks>
 public unsafe ref struct CommandRecorder : IDisposable
 {
@@ -506,6 +507,32 @@ public unsafe ref struct CommandRecorder : IDisposable
         => Fns.CmdDrawIndirect(Handle, buffer.Handle, offset, drawCount, stride);
 
     /// <summary>
+    /// <c>vkCmdDrawIndirectCount</c> — like <see cref="DrawIndirect"/>, but
+    /// the draw count is read from <paramref name="countBuffer"/> at
+    /// <paramref name="countBufferOffset"/> (a single <c>uint32</c>) rather
+    /// than passed as an immediate. Up to <paramref name="maxDrawCount"/>
+    /// <c>VkDrawIndirectCommand</c> structs are read from
+    /// <paramref name="buffer"/> at <paramref name="offset"/>,
+    /// <paramref name="stride"/> bytes apart; the effective count is
+    /// <c>min(maxDrawCount, *countBuffer)</c>. Both buffers must have been
+    /// created with <see cref="BufferUsage.IndirectBuffer"/>, and the device
+    /// must have the <c>drawIndirectCount</c> feature enabled (Vulkan 1.2
+    /// core; flip it via
+    /// <c>VkPhysicalDeviceVulkan12Features.drawIndirectCount</c> in
+    /// <see cref="DeviceDescription.ConfigureFeatures"/>).
+    /// </summary>
+    public void DrawIndirectCount(
+        in Buffer buffer,
+        ulong     offset,
+        in Buffer countBuffer,
+        ulong     countBufferOffset,
+        uint      maxDrawCount,
+        uint      stride)
+        => Fns.CmdDrawIndirectCount(
+            Handle, buffer.Handle, offset,
+            countBuffer.Handle, countBufferOffset, maxDrawCount, stride);
+
+    /// <summary>
     /// <c>vkCmdDrawIndexedIndirect</c> — reads
     /// <paramref name="drawCount"/> <c>VkDrawIndexedIndirectCommand</c>
     /// structs from <paramref name="buffer"/>. Caller is responsible for
@@ -514,6 +541,34 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// </summary>
     public void DrawIndexedIndirect(in Buffer buffer, ulong offset, uint drawCount, uint stride)
         => Fns.CmdDrawIndexedIndirect(Handle, buffer.Handle, offset, drawCount, stride);
+
+    /// <summary>
+    /// <c>vkCmdDrawIndexedIndirectCount</c> — like
+    /// <see cref="DrawIndexedIndirect"/>, but the draw count is read from
+    /// <paramref name="countBuffer"/> at <paramref name="countBufferOffset"/>
+    /// (a single <c>uint32</c>) rather than passed as an immediate. Up to
+    /// <paramref name="maxDrawCount"/> <c>VkDrawIndexedIndirectCommand</c>
+    /// structs are read from <paramref name="buffer"/> at
+    /// <paramref name="offset"/>, <paramref name="stride"/> bytes apart; the
+    /// effective count is <c>min(maxDrawCount, *countBuffer)</c>. Both buffers
+    /// must have been created with <see cref="BufferUsage.IndirectBuffer"/>,
+    /// and the device must have the <c>drawIndirectCount</c> feature enabled
+    /// (Vulkan 1.2 core; flip it via
+    /// <c>VkPhysicalDeviceVulkan12Features.drawIndirectCount</c> in
+    /// <see cref="DeviceDescription.ConfigureFeatures"/>). Caller is
+    /// responsible for having bound an index buffer via
+    /// <see cref="BindIndexBuffer"/> beforehand.
+    /// </summary>
+    public void DrawIndexedIndirectCount(
+        in Buffer buffer,
+        ulong     offset,
+        in Buffer countBuffer,
+        ulong     countBufferOffset,
+        uint      maxDrawCount,
+        uint      stride)
+        => Fns.CmdDrawIndexedIndirectCount(
+            Handle, buffer.Handle, offset,
+            countBuffer.Handle, countBufferOffset, maxDrawCount, stride);
 
     public void Dispatch(uint groupCountX, uint groupCountY = 1, uint groupCountZ = 1)
         => Fns.CmdDispatch(Handle, groupCountX, groupCountY, groupCountZ);
