@@ -88,7 +88,13 @@ internal readonly unsafe struct DeviceFunctionTable
         VkCommandBuffer_T*, VkBuffer_T*, ulong, uint, uint, void> CmdDrawIndirect;
 
     public readonly delegate* unmanaged[Stdcall]<
+        VkCommandBuffer_T*, VkBuffer_T*, ulong, VkBuffer_T*, ulong, uint, uint, void> CmdDrawIndirectCount;
+
+    public readonly delegate* unmanaged[Stdcall]<
         VkCommandBuffer_T*, VkBuffer_T*, ulong, uint, uint, void> CmdDrawIndexedIndirect;
+
+    public readonly delegate* unmanaged[Stdcall]<
+        VkCommandBuffer_T*, VkBuffer_T*, ulong, VkBuffer_T*, ulong, uint, uint, void> CmdDrawIndexedIndirectCount;
 
     public readonly delegate* unmanaged[Stdcall]<
         VkCommandBuffer_T*, uint, uint, uint, void> CmdDispatch;
@@ -236,9 +242,15 @@ internal readonly unsafe struct DeviceFunctionTable
         CmdDrawIndirect =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkBuffer_T*, ulong, uint, uint, void>)
             ResolveRequired(Utf8Name.FromLiteral("vkCmdDrawIndirect"u8));
+        CmdDrawIndirectCount =
+            (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkBuffer_T*, ulong, VkBuffer_T*, ulong, uint, uint, void>)
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdDrawIndirectCount"u8));
         CmdDrawIndexedIndirect =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkBuffer_T*, ulong, uint, uint, void>)
             ResolveRequired(Utf8Name.FromLiteral("vkCmdDrawIndexedIndirect"u8));
+        CmdDrawIndexedIndirectCount =
+            (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkBuffer_T*, ulong, VkBuffer_T*, ulong, uint, uint, void>)
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdDrawIndexedIndirectCount"u8));
         CmdDispatch =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, uint, uint, uint, void>)
             ResolveRequired(Utf8Name.FromLiteral("vkCmdDispatch"u8));

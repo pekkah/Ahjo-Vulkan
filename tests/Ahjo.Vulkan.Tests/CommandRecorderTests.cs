@@ -290,6 +290,9 @@ public sealed unsafe class CommandRecorderTests
         using var indirectIndexed = device.Allocator.CreateBuffer(
             new BufferDescription { Size = (ulong)sizeof(VkDrawIndexedIndirectCommand), Usage = BufferUsage.IndirectBuffer },
             new AllocationDescription { Usage = MemoryUsage.AutoPreferDevice });
+        using var drawCountBuffer = device.Allocator.CreateBuffer(
+            new BufferDescription { Size = sizeof(uint),                                Usage = BufferUsage.IndirectBuffer },
+            new AllocationDescription { Usage = MemoryUsage.AutoPreferDevice });
 
         using var cmdPool = new CommandBufferPool(device, family);
         using var rec = cmdPool.Begin();
@@ -330,7 +333,15 @@ public sealed unsafe class CommandRecorderTests
 
         rec.DrawIndexed(indexCount: 3, instanceCount: 2, firstIndex: 0, vertexOffset: 0, firstInstance: 0);
         rec.DrawIndirect(in indirectDraw, offset: 0, drawCount: 1, stride: (uint)sizeof(VkDrawIndirectCommand));
+        rec.DrawIndirectCount(
+            in indirectDraw, offset: 0,
+            in drawCountBuffer, countBufferOffset: 0,
+            maxDrawCount: 1, stride: (uint)sizeof(VkDrawIndirectCommand));
         rec.DrawIndexedIndirect(in indirectIndexed, offset: 0, drawCount: 1, stride: (uint)sizeof(VkDrawIndexedIndirectCommand));
+        rec.DrawIndexedIndirectCount(
+            in indirectIndexed, offset: 0,
+            in drawCountBuffer, countBufferOffset: 0,
+            maxDrawCount: 1, stride: (uint)sizeof(VkDrawIndexedIndirectCommand));
 
         rec.EndRendering();
         rec.End();
