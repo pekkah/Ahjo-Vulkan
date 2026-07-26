@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Native.Tests;
@@ -31,6 +32,14 @@ public unsafe class VulkanLoaderSmokeTests
     [Fact]
     public void CreateAndDestroyInstance_Succeeds()
     {
+        // A usable ICD is required for vkCreateInstance to actually create an
+        // instance. Without one this skips [gate:driver] rather than accepting
+        // VK_ERROR_INCOMPATIBLE_DRIVER as a pass — a driverless lane that
+        // declares AHJO_VULKAN_TIER=software still goes red through
+        // VulkanTierContractTests, so the skip is a visible coverage gap and not
+        // a green that proves nothing. See docs/ci-coverage.md and issue #161.
+        TestGate.RequireDriver();
+
         VkInstance_T* instance = null;
 
         try
@@ -65,17 +74,11 @@ public unsafe class VulkanLoaderSmokeTests
 
                 VkResult result = Vk.vkCreateInstance(&createInfo, null, &instance);
 
-                // VK_ERROR_INCOMPATIBLE_DRIVER means the loader is present but no
-                // ICD answered (e.g. CI runner with no Vulkan driver and lavapipe
-                // missing). That's still proof the loader resolved correctly.
-                Assert.True(
-                    result == VkResult.VK_SUCCESS || result == VkResult.VK_ERROR_INCOMPATIBLE_DRIVER,
-                    $"vkCreateInstance returned {result}");
-
-                if (result == VkResult.VK_SUCCESS)
-                {
-                    Assert.True(instance != null, "VK_SUCCESS but instance pointer is null");
-                }
+                // RequireDriver guaranteed a usable ICD, so this must genuinely
+                // succeed — VK_ERROR_INCOMPATIBLE_DRIVER here would be a real
+                // regression, not an accepted environment.
+                Assert.Equal(VkResult.VK_SUCCESS, result);
+                Assert.True(instance != null, "VK_SUCCESS but instance pointer is null");
             }
             finally
             {
@@ -95,27 +98,20 @@ public unsafe class VulkanLoaderSmokeTests
     [Fact]
     public void EnumeratePhysicalDevices_ReturnsConsistentCount()
     {
+        // Enumeration needs a usable ICD with at least one device — exactly what
+        // RequireDriver checks. Without one this skips [gate:driver] rather than
+        // early-returning a green pass that enumerated nothing. See issue #161.
+        TestGate.RequireDriver();
+
         VkInstance_T* instance = CreateMinimalInstance();
-        if (instance == null)
-        {
-            // No driver available — can't enumerate. Test is informational
-            // in that environment; CreateAndDestroyInstance_Succeeds already
-            // proved the loader works.
-            return;
-        }
+        Assert.True(instance != null, "RequireDriver passed but vkCreateInstance returned no instance");
 
         try
         {
             uint count = 0;
             VkResult firstCall = Vk.vkEnumeratePhysicalDevices(instance, &count, null);
             Assert.Equal(VkResult.VK_SUCCESS, firstCall);
-
-            if (count == 0)
-            {
-                // Loader resolved, no physical devices visible. Still a pass —
-                // the call succeeded, the protocol is correct.
-                return;
-            }
+            Assert.True(count >= 1, "RequireDriver passed but zero physical devices enumerated");
 
             VkPhysicalDevice_T** devices = (VkPhysicalDevice_T**)NativeMemory.Alloc(
                 (nuint)(count * (uint)sizeof(nint)));
