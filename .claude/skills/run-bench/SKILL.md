@@ -67,7 +67,7 @@ dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*"
 Most benchmarks call into a real Vulkan device at `[GlobalSetup]` and fail there if no ICD is available:
 
 - **Host-only** (no driver needed): `ChainBuilder`, `ResultPolicy`, `SpecializationInfo`, `PushConstants` (partially).
-- **Driver-bound** (need `vulkan-1.dll` + an ICD on path): `FrameRing`, `Buffer.Map_AsSpan`, `CommandRecorder`, `PipelineBarrier`, `PushDescriptors`, `StagingUploader`, `SyncPool`, `CommandBufferPool`, `GraphicsPipelineBuilder`, `PhysicalDevicePicker`.
+- **Driver-bound** (need `vulkan-1.dll` + an ICD on path): `FrameRing`, `BufferBenchmarks`, `CommandRecorder`, `PipelineBarrier`, `PushDescriptors`, `StagingUploader`, `SyncPool`, `CommandBufferPool`, `GraphicsPipelineBuilder`, `PhysicalDevicePicker`.
 
 On a host with no Vulkan driver, point the user at one of the host-only benchmarks instead, or provision SwiftShader the way CI does (`.github/workflows/ci.yml` is the reference recipe).
 

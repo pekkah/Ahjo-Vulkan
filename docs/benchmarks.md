@@ -24,7 +24,7 @@ dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*Chain
 
 # Driver-bound: needs a real Vulkan ICD on the host. Fails at GlobalSetup
 # if the host cannot create a VkInstance.
-dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*FrameRing*|*PushDescriptors*|*PipelineBarrier*|*CommandRecorder*"
+dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*FrameRing*|*PushDescriptors*|*PipelineBarrier*|*CommandRecorder*|*BufferBenchmarks*"
 ```
 
 `BenchmarkDotNet.Artifacts/` is gitignored — the run produces CSV / Markdown
@@ -72,7 +72,10 @@ managed-byte count BDN's `MemoryDiagnoser` reports; `-` is zero.
 | Benchmark                                       | Mean       | Allocated | Notes                                                                     |
 |-------------------------------------------------|-----------:|----------:|---------------------------------------------------------------------------|
 | `ChainBuilder.BuildThreeNodeChain`              |   3.66 ns  |        -  | Pure host: features2 + vk13 + vk12 over a stack-only `ChainBuilder`.      |
-| `Buffer.Map_AsSpan`                             | 166.8 ns   |        -  | Persistent-mapped buffer, alloc-free `AsSpan<T>` round-trip.             |
+| `Buffer.AsSpan_ViewOnly`                        |   1.54 ns  |        -  | Persistent-mapped `AsSpan<T>` through a non-inlined helper, consuming pointer + length and **touching no device memory** — an upper bound on the API (includes the call). |
+| `Buffer.AsSpan_SequentialWrite`                 |   1.85 ns  |        -  | One `AsSpan<T>` + one sequential `int` store per op; one invoke = one 4 KiB sequential fill of a `HostAccessSequentialWrite` allocation. |
+| `Buffer.AsSpan_WriteThenRead_SeqWriteAlloc`     | 173.4 ns   |        -  | #157 probe, **not a wrapper canary**: store + read-back of the same element on a `HostAccessSequentialWrite` allocation. This is the former `Buffer.Map_AsSpan` (166.8 ns) renamed — the number did not change. |
+| `Buffer.AsSpan_WriteThenRead_RandomAlloc`       |   1.53 ns  |        -  | #157 probe, **not a wrapper canary**: identical body on a `HostAccessRandom` allocation. Only the ratio against the row above carries information. |
 | `CommandBufferPool.Frame_Begin_100Cmds_End_Reset` | 6.44 µs |        -  | Begin → 100 dynamic-state + fill commands → End → ResetForFrame.          |
 | `CommandRecorder.RenderingPass100Cmds`          |   3.23 µs  |        -  | BeginRendering → 100 SetViewport → EndRendering, dynamic rendering path.  |
 | `CommandRecorder.CopyBuffer_8Regions`           | 810.0 ns   |        -  | #141 canary: multi-region CopyBuffer; stackalloc ≤16 path stays 0 B/op.   |
@@ -90,7 +93,7 @@ managed-byte count BDN's `MemoryDiagnoser` reports; `-` is zero.
 | `HandleOwnership.ConstrainedGenericDispatch`    |   3.69 ns  |        -  | `ObjectName.Set`-shaped `struct, IVulkanHandle<T>` dispatch — devirtualized, box-free under the relaxed constraint. |
 
 **Reading the Mean column.** Many benchmarks here unroll an inner loop and
-declare `OperationsPerInvoke` (e.g. `Buffer.Map_AsSpan`, `PipelineBarrier.*`,
+declare `OperationsPerInvoke` (e.g. `Buffer.AsSpan_*`, `PipelineBarrier.*`,
 `PushDescriptors.*`, `PushConstants.*`, `SyncPool.*`, `ResultPolicy.*`,
 `HandleOwnership.*`, `DescriptorSetPool.*` — not an exhaustive list). When it
 is set, **BDN has already divided: the reported Mean and Allocated are
@@ -106,11 +109,56 @@ were already the correct per-call numbers. For
 
 - **Variance**: timings on a desktop host vary 5-15% run-to-run. Treat
   changes < 20% as noise; investigate larger swings.
-- **Driver dependency**: the FrameRing / Buffer.Map / CommandRecorder /
+- **Driver dependency**: the FrameRing / `BufferBenchmarks` / CommandRecorder /
   PipelineBarrier / PushDescriptors / StagingUploader / SyncPool benchmarks
   fail at `[GlobalSetup]` on a host without a Vulkan ICD. That is the
   expected behavior — there is no soft skip in the benchmark project (BDN
   reports the failure and moves on).
+- **Host reads are a memory-type property, not a wrapper property (#157)**:
+  the old `Buffer.Map_AsSpan` row's 166.8 ns was a **host read** from the
+  mapped allocation, not the cost of `AsSpan<T>`. The method
+  (`src/Ahjo.Vulkan/Resources/Buffer.cs`) is a null check, a span construction
+  over the cached `pMappedData`, and a cast that is a length division; its
+  loop body did `span[0] = i; sum += span[0];`, and the read-back was the
+  whole figure. The row is **renamed, not deleted** — it is now
+  `Buffer.AsSpan_WriteThenRead_SeqWriteAlloc` and its number did not change
+  (166.8 → 173.4 ns, same body, same allocation). `AsSpan_ViewOnly` at 1.54 ns
+  is **a new measurement of a different thing, not a speed-up**: no wrapper
+  code changed in #157, only comments.
+  - **Why.** `HostAccessSequentialWrite` "[d]eclares that mapped memory will
+    only be written sequentially […] never read or accessed randomly, so a
+    memory type can be selected that is uncached and write-combined"
+    (`native/vma/include/vk_mem_alloc.h:652-658`, which also warns about
+    "implicit reads introduced by doing e.g. `pMappedData[i] += x`"). That is
+    implemented, not just documented: VMA's type selection sets
+    `HOST_CACHED` as **not preferred** for this flag
+    (`vk_mem_alloc.h:4085-4090`), and the scoring loop then picks the
+    candidate with the fewest not-preferred bits.
+  - **Captured evidence** — `[GlobalSetup]` prints what VMA actually selected,
+    and on the capture host the two allocations landed on *different* memory
+    types, exactly as that code predicts:
+
+    ```
+    [BufferBenchmarks] seq-write alloc: memoryType=2 flags=HostVisible, HostCoherent heap=1 heapSizeMiB=32336
+    [BufferBenchmarks] host-random alloc: memoryType=3 flags=HostVisible, HostCoherent, HostCached heap=1 heapSizeMiB=32336
+    ```
+
+    `HostCached` is **absent** from the sequential-write type and **present**
+    on the random-access one. The 32 GiB heap identifies both as system
+    memory, not a small-BAR device mapping — so the slow read is an uncached
+    host access, not a PCIe round trip.
+  - **It is the read, not the store.** A one-off probe writing index 0 (the
+    same address the `WriteThenRead` rows touch, so identical addressing)
+    through the same non-inlined helper measured **1.688 ns/op** on the
+    sequential-write allocation. Stores into write-combined memory are cheap;
+    adding the read-back of that same element takes the op to 173.4 ns. The
+    probe was not kept as a permanent row.
+  - **Portability.** The flag makes `HOST_CACHED` unlikely, not impossible —
+    `notPreferred` is a penalty, and VMA notes platforms with no
+    `HOST_CACHED` type at all (`vk_mem_alloc.h:4068-4069`). On an
+    integrated/UMA host, or under MoltenVK, both `WriteThenRead` rows may
+    collapse onto each other. That is not a regression; run the class and read
+    the two `[BufferBenchmarks]` lines to see what your own host chose.
 - **Inline-array threshold**: `CommandRecorder.PipelineBarrier` uses a
   method-local `stackalloc` for both the single-barrier and 64-barrier
   paths. There is no fast/slow split today; `LargeBatch_8x8x1` is therefore
