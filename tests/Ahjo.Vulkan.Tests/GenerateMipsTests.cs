@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -14,8 +15,8 @@ public sealed unsafe class GenerateMipsTests
     [Fact]
     public void GenerateMips_4x4_RGBA_LandsAllMipsInFinalLayout()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
 
         using var instance = Instance.Create(default);
@@ -105,8 +106,8 @@ public sealed unsafe class GenerateMipsTests
     [Fact]
     public void GenerateMips_NonPowerOfTwo_5x3_BuildsToMip1x1()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
 
         using var instance = Instance.Create(default);
@@ -167,8 +168,8 @@ public sealed unsafe class GenerateMipsTests
     [Fact]
     public void GenerateMips_SingleMip_TransitionsOnlyToFinalLayout()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
 
         using var instance = Instance.Create(default);
@@ -227,8 +228,8 @@ public sealed unsafe class GenerateMipsTests
     [Fact]
     public void GenerateMips_Mip0FilledByClear_PropagatesColorToAllMips()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
 
         using var instance = Instance.Create(default);

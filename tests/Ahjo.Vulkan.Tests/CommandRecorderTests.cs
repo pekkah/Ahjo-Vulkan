@@ -1,6 +1,7 @@
 using System.IO;
 using System.Runtime.CompilerServices;
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -18,7 +19,7 @@ public sealed unsafe class CommandRecorderTests
     [Fact]
     public void Recorder_End_IsIdempotent()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -32,10 +33,10 @@ public sealed unsafe class CommandRecorderTests
     [Fact]
     public void ComputeDispatch_FillBuffer_RoundTrips()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
-        Assert.SkipUnless(File.Exists(FillSpvPath), $"fill.comp.spv missing at {FillSpvPath}.");
+        TestGate.RequireSpirv(FillSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -125,10 +126,10 @@ public sealed unsafe class CommandRecorderTests
     [Fact]
     public void DispatchIndirect_FillBuffer_RoundTrips()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
-        Assert.SkipUnless(File.Exists(FillSpvPath), $"fill.comp.spv missing at {FillSpvPath}.");
+        TestGate.RequireSpirv(FillSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -236,9 +237,9 @@ public sealed unsafe class CommandRecorderTests
         // surface. Real submit + pixel readback for indexed and indirect draws is
         // HelloTriangle's job (#25 follow-on); this just proves the wrapper
         // dispatches the right vkCmd* and accepts our parameter shapes.
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
-        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+        TestGate.RequireDriver();
+        TestGate.RequireSpirv(VertSpvPath);
+        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -350,11 +351,11 @@ public sealed unsafe class CommandRecorderTests
     [Fact]
     public void DrawIndexed_Instanced_RendersTriangle()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
-        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
-        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+        TestGate.RequireSpirv(VertSpvPath);
+        TestGate.RequireSpirv(FragSpvPath);
 
         // Closes acceptance #1 of issue #45. triangle.vert hard-codes positions
         // by gl_VertexIndex, so an index buffer of [0,1,2] paired with
@@ -479,11 +480,11 @@ public sealed unsafe class CommandRecorderTests
     [Fact]
     public void DrawIndirect_GpuFilledIndirectBuffer_RendersTriangle()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
-        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
-        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+        TestGate.RequireSpirv(VertSpvPath);
+        TestGate.RequireSpirv(FragSpvPath);
 
         // Closes acceptance #2 of issue #45. The indirect buffer is
         // device-local — host has no mapping; the only way data lands in it
@@ -629,7 +630,7 @@ public sealed unsafe class CommandRecorderTests
     [Fact]
     public void BindVertexBuffers_RejectsMismatchedOffsets()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -653,9 +654,9 @@ public sealed unsafe class CommandRecorderTests
     [Fact]
     public void GraphicsRecording_BeginEndRender_NoValidationErrors()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
-        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+        TestGate.RequireDriver();
+        TestGate.RequireSpirv(VertSpvPath);
+        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -739,8 +740,8 @@ public sealed unsafe class CommandRecorderTests
     [Fact]
     public void PushConstants_64ByteStruct_PassesValidation()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver,          "No Vulkan driver on host.");
-        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer, "Validation layer not installed.");
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer();
 
         var errors = new List<DebugMessage>();
         using var instance = Instance.Create(new InstanceDescription

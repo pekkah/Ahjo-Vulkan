@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -20,8 +21,8 @@ public sealed unsafe class QueueOwnershipTransferTests
     [Fact]
     public void BufferOwnership_GraphicsToTransfer_PassesValidation()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver,          "No Vulkan driver on host.");
-        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer, "Validation layer not installed.");
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer();
 
         var errors = new List<DebugMessage>();
         using var instance = Instance.Create(new InstanceDescription
@@ -36,7 +37,7 @@ public sealed unsafe class QueueOwnershipTransferTests
         });
 
         if (!TryPickGraphicsAndTransferDevice(instance, out var gpu, out uint graphicsFamily, out uint transferFamily))
-            Assert.Skip("No physical device with separate graphics + dedicated-transfer queue families.");
+            TestGate.Unsupported("No physical device with separate graphics + dedicated-transfer queue families.");
 
         using var device = gpu.CreateDevice(new DeviceDescription
         {
@@ -136,8 +137,8 @@ public sealed unsafe class QueueOwnershipTransferTests
     [Fact]
     public void ImageOwnership_GraphicsToTransfer_PassesValidation()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver,          "No Vulkan driver on host.");
-        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer, "Validation layer not installed.");
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer();
 
         var errors = new List<DebugMessage>();
         using var instance = Instance.Create(new InstanceDescription
@@ -152,7 +153,7 @@ public sealed unsafe class QueueOwnershipTransferTests
         });
 
         if (!TryPickGraphicsAndTransferDevice(instance, out var gpu, out uint graphicsFamily, out uint transferFamily))
-            Assert.Skip("No physical device with separate graphics + dedicated-transfer queue families.");
+            TestGate.Unsupported("No physical device with separate graphics + dedicated-transfer queue families.");
 
         using var device = gpu.CreateDevice(new DeviceDescription
         {

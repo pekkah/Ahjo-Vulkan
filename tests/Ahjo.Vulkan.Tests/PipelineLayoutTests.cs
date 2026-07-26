@@ -1,4 +1,5 @@
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -20,7 +21,7 @@ public sealed class PipelineLayoutTests
     [Fact]
     public void DescriptorSetLayout_OneUniformBufferBinding_RoundTrips()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -46,8 +47,8 @@ public sealed class PipelineLayoutTests
     [Fact]
     public void DescriptorSetLayout_BindingFlags_ChainsBindingFlagsCreateInfo()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(VulkanDriverProbe.SupportsBindlessSampledImage,
+        TestGate.RequireDriver();
+        TestGate.RequireDeviceFeature(VulkanDriverProbe.SupportsBindlessSampledImage,
             "Device does not advertise descriptorBindingPartiallyBound + " +
             "descriptorBindingVariableDescriptorCount + descriptorBindingSampledImageUpdateAfterBind; " +
             "this bindless sampled-image layout test requires all three.");
@@ -80,7 +81,7 @@ public sealed class PipelineLayoutTests
     [Fact]
     public void PipelineLayout_OneSet_OnePushConstantRange_RoundTrips()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -121,7 +122,7 @@ public sealed class PipelineLayoutTests
     [Fact]
     public void PipelineLayout_PoolPath_RoundtripsAcquire()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -161,7 +162,7 @@ public sealed class PipelineLayoutTests
     [Fact]
     public unsafe void CreatePipelineLayout_LargePushRange_FitsDeviceLimit()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -169,7 +170,7 @@ public sealed class PipelineLayoutTests
         VkPhysicalDeviceProperties props;
         Vk.vkGetPhysicalDeviceProperties(device.PhysicalDevice.Handle, &props);
         uint deviceLimit = props.limits.maxPushConstantsSize;
-        Assert.SkipWhen(deviceLimit < 224,
+        TestGate.RequireDeviceFeature(deviceLimit >= 224,
             $"Device's maxPushConstantsSize ({deviceLimit}) is below the 224 B test target.");
 
         // 224 B push range — engine's GpuCullPipeline (CullPushConstants)
@@ -200,7 +201,7 @@ public sealed class PipelineLayoutTests
     [Fact]
     public unsafe void CreatePipelineLayout_PushRangeExceedsDeviceLimit_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);

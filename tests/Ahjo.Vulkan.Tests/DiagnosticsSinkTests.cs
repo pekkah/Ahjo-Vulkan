@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -78,7 +79,7 @@ public sealed class DiagnosticsSinkTests
     [Fact]
     public void PipelineCache_HeaderMismatch_RoutesThroughSink()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);

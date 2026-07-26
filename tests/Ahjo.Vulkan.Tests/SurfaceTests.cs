@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -39,8 +40,8 @@ public sealed unsafe class SurfaceTests
     [Fact]
     public void WrapExternal_NullHandle_Throws()
     {
-        Assert.SkipUnless(IsWindows, "Win32 surface test.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequirePlatform(IsWindows, "Win32 surface test.");
+        TestGate.RequireDriver();
 
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
         using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
@@ -51,9 +52,9 @@ public sealed unsafe class SurfaceTests
     [Fact]
     public void CreateXlib_NullDisplay_Throws()
     {
-        Assert.SkipUnless(IsLinux, "Xlib surface test.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(VulkanDriverProbe.HasInstanceExtension("VK_KHR_xlib_surface"u8),
+        TestGate.RequirePlatform(IsLinux, "Xlib surface test.");
+        TestGate.RequireDriver();
+        TestGate.RequirePlatform(VulkanDriverProbe.HasInstanceExtension("VK_KHR_xlib_surface"u8),
             "VK_KHR_xlib_surface not exposed by the ICD (SwiftShader's Linux build ships Wayland but not Xlib).");
 
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrXlibSurface];
@@ -66,9 +67,9 @@ public sealed unsafe class SurfaceTests
     [Fact]
     public void CreateXlib_NoneWindow_Throws()
     {
-        Assert.SkipUnless(IsLinux, "Xlib surface test.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(VulkanDriverProbe.HasInstanceExtension("VK_KHR_xlib_surface"u8),
+        TestGate.RequirePlatform(IsLinux, "Xlib surface test.");
+        TestGate.RequireDriver();
+        TestGate.RequirePlatform(VulkanDriverProbe.HasInstanceExtension("VK_KHR_xlib_surface"u8),
             "VK_KHR_xlib_surface not exposed by the ICD (SwiftShader's Linux build ships Wayland but not Xlib).");
 
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrXlibSurface];
@@ -88,9 +89,9 @@ public sealed unsafe class SurfaceTests
     [Fact]
     public void CreateXlib_RoundTrip()
     {
-        Assert.SkipUnless(IsLinux, "Xlib surface test.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(LinuxXlibWindow.IsAvailable, "No reachable X server (DISPLAY unset / libX11 missing).");
+        TestGate.RequirePlatform(IsLinux, "Xlib surface test.");
+        TestGate.RequireDriver();
+        TestGate.RequirePlatform(LinuxXlibWindow.IsAvailable, "No reachable X server (DISPLAY unset / libX11 missing).");
 
         using var window = new LinuxXlibWindow(640, 480);
 
@@ -105,8 +106,8 @@ public sealed unsafe class SurfaceTests
     [Fact]
     public void CreateWayland_NullDisplay_Throws()
     {
-        Assert.SkipUnless(IsLinux, "Wayland surface test.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequirePlatform(IsLinux, "Wayland surface test.");
+        TestGate.RequireDriver();
 
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWaylandSurface];
         using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
@@ -118,8 +119,8 @@ public sealed unsafe class SurfaceTests
     [Fact]
     public void CreateWayland_NullSurface_Throws()
     {
-        Assert.SkipUnless(IsLinux, "Wayland surface test.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequirePlatform(IsLinux, "Wayland surface test.");
+        TestGate.RequireDriver();
 
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWaylandSurface];
         using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
@@ -139,16 +140,16 @@ public sealed unsafe class SurfaceTests
     [Fact]
     public void CreateWayland_RoundTrip()
     {
-        Assert.SkipUnless(IsLinux, "Wayland surface test.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(SdlWindow.IsAvailable, "SDL3 video subsystem unavailable.");
-        Assert.SkipWhen(string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY")),
+        TestGate.RequirePlatform(IsLinux, "Wayland surface test.");
+        TestGate.RequireDriver();
+        TestGate.RequirePlatform(SdlWindow.IsAvailable, "SDL3 video subsystem unavailable.");
+        TestGate.RequirePlatform(!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY")),
             "WAYLAND_DISPLAY unset (no Wayland session).");
 
         using var window = new SdlWindow("AhjoVk_WaylandRT", 640, 480);
         nint wlDisplay = window.WaylandDisplay;
         nint wlSurface = window.WaylandSurface;
-        Assert.SkipWhen(wlDisplay == 0 || wlSurface == 0,
+        TestGate.RequirePlatform(wlDisplay != 0 && wlSurface != 0,
             "SDL did not select the Wayland video driver for this window.");
 
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWaylandSurface];
@@ -162,8 +163,8 @@ public sealed unsafe class SurfaceTests
     [Fact]
     public void CreateMetal_NullLayer_Throws()
     {
-        Assert.SkipUnless(IsMacOS, "Metal surface test.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequirePlatform(IsMacOS, "Metal surface test.");
+        TestGate.RequireDriver();
 
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.ExtMetalSurface];
         using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
@@ -184,9 +185,9 @@ public sealed unsafe class SurfaceTests
     [Fact]
     public void CreateMetal_RoundTrip()
     {
-        Assert.SkipUnless(IsMacOS, "Metal surface test.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(SdlWindow.IsAvailable, "SDL3 video subsystem unavailable.");
+        TestGate.RequirePlatform(IsMacOS, "Metal surface test.");
+        TestGate.RequireDriver();
+        TestGate.RequirePlatform(SdlWindow.IsAvailable, "SDL3 video subsystem unavailable.");
 
         using var window = new SdlWindow("AhjoVk_MetalRT", 640, 480);
         nint metalLayer;
@@ -196,7 +197,7 @@ public sealed unsafe class SurfaceTests
         }
         catch (InvalidOperationException ex)
         {
-            Assert.Skip($"SDL Metal view unavailable: {ex.Message}");
+            TestGate.RequirePlatform(condition: false, $"SDL Metal view unavailable: {ex.Message}");
             return;
         }
 
@@ -229,8 +230,8 @@ public sealed unsafe class SurfaceTests
     [Fact]
     public void CreateHeadless_RoundTrip()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(VulkanDriverProbe.HasInstanceExtension("VK_EXT_headless_surface"u8),
+        TestGate.RequireDriver();
+        TestGate.RequirePlatform(VulkanDriverProbe.HasInstanceExtension("VK_EXT_headless_surface"u8),
             "VK_EXT_headless_surface not exposed by the ICD.");
 
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.ExtHeadlessSurface];
@@ -252,8 +253,8 @@ public sealed unsafe class SurfaceTests
     [Fact]
     public void WrapExternal_OwnsSurface_DisposeDestroysIt()
     {
-        Assert.SkipUnless(IsWindows, "Win32 surface test.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequirePlatform(IsWindows, "Win32 surface test.");
+        TestGate.RequireDriver();
 
         using var window = new Win32Window(640, 480, $"AhjoVk_WrapExt_{Guid.NewGuid():N}");
 

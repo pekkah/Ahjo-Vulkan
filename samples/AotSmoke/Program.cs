@@ -27,13 +27,32 @@ internal static unsafe class Program
         Console.WriteLine($"Ahjo.Vulkan AOT smoke — native AOT? {!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported}");
 
         // Probe for a working Vulkan ICD before doing any other work.
-        // On hosts without one (e.g. windows-latest GitHub runners — no
-        // ICD provisioned per issue 32), AOT publishing the wrapper is
-        // still meaningful regression coverage even though the smoke
-        // run itself can't proceed. Skip cleanly with exit 0 so CI's
-        // publish + run step still passes.
+        // AOT publishing the wrapper is meaningful regression coverage on its
+        // own, so a host with no usable ICD still exits 0 — but only when
+        // nothing was declared. A lane that sets AHJO_VULKAN_TIER to
+        // `software` or above provisions an ICD on purpose (the Windows lane's
+        // does not currently answer — issue 152), and there a driverless run
+        // means the provisioning broke, so it exits non-zero instead of
+        // reporting a green smoke run that executed nothing. Issue 158.
         if (!HasVulkanDriver())
         {
+            // Read AHJO_VULKAN_TIER locally and deliberately: samples must not
+            // depend on tests/Shared/*.cs, and an env-var read plus a string
+            // compare is the whole requirement. Do not "fix" this duplication
+            // by linking the test sources in — it would put xunit on a
+            // PublishAot=true sample.
+            string? tier = Environment.GetEnvironmentVariable("AHJO_VULKAN_TIER");
+            bool declaresDevice = !string.IsNullOrWhiteSpace(tier)
+                && !string.Equals(tier.Trim(), "none", StringComparison.OrdinalIgnoreCase);
+            if (declaresDevice)
+            {
+                Console.Error.WriteLine(
+                    $"AHJO_VULKAN_TIER={tier} requires a Vulkan device, but none was found; " +
+                    "AOT publish succeeded, smoke run did not execute.");
+                // 2 is the missing-shader path, 3 the fence timeout below.
+                return 4;
+            }
+
             Console.WriteLine("No Vulkan driver detected; AOT publish verified, skipping smoke run.");
             return 0;
         }
@@ -171,10 +190,16 @@ internal static unsafe class Program
 
     private static bool HasVulkanDriver()
     {
-        // Match the wrapper-test harness: try vkCreateInstance with a
-        // default ApplicationInfo and tear it down on success.
-        // DllNotFoundException = no vulkan-1 loader; INCOMPATIBLE_DRIVER
-        // / INITIALIZATION_FAILED = loader present but no usable ICD.
+        // Must agree with tests/Shared/VulkanEnvironment.cs's `software` rung:
+        // an instance AND at least one enumerable physical device. Instance
+        // creation alone is not enough — on a host where the instance creates
+        // but zero devices enumerate, a laxer probe here would fall through the
+        // exit-4 branch above and die inside PickPhysicalDevice with an
+        // unhandled exception instead of the designed message. Issue #158.
+        //
+        // DllNotFoundException = no vulkan-1 loader; anything else thrown =
+        // a loader that resolved but cannot be called (wrong architecture,
+        // missing export). Either way there is no driver here.
         try
         {
             VkInstance_T* raw = null;
@@ -188,15 +213,26 @@ internal static unsafe class Program
                 sType            = VkStructureType.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
                 pApplicationInfo = &ai,
             };
-            var r = Vk.vkCreateInstance(&ci, null, &raw);
-            if (r == VkResult.VK_SUCCESS)
+            if (Vk.vkCreateInstance(&ci, null, &raw) != VkResult.VK_SUCCESS || raw == null)
+            {
+                return false;
+            }
+            try
+            {
+                uint gpuCount = 0;
+                return Vk.vkEnumeratePhysicalDevices(raw, &gpuCount, null) == VkResult.VK_SUCCESS
+                    && gpuCount != 0;
+            }
+            finally
             {
                 Vk.vkDestroyInstance(raw, null);
-                return true;
             }
-            return false;
         }
         catch (DllNotFoundException)
+        {
+            return false;
+        }
+        catch (Exception)
         {
             return false;
         }

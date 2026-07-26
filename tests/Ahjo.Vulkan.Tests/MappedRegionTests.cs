@@ -1,3 +1,4 @@
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -7,7 +8,7 @@ public sealed class MappedRegionTests
     [Fact]
     public void Map_HostVisible_WriteRead_Roundtrips()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -41,7 +42,7 @@ public sealed class MappedRegionTests
     [Fact]
     public void PersistentMapped_AsSpan_NoExplicitMap()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -65,7 +66,7 @@ public sealed class MappedRegionTests
     [Fact]
     public void PersistentMapped_Map_ReusesPointer_NoMapCall()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -96,7 +97,7 @@ public sealed class MappedRegionTests
     [Fact]
     public void Map_NonHostVisible_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -119,7 +120,7 @@ public sealed class MappedRegionTests
     [Fact]
     public void AsSpan_NonPersistent_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -145,7 +146,7 @@ public sealed class MappedRegionTests
     [Fact]
     public void Pin_AtLength_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -168,7 +169,7 @@ public sealed class MappedRegionTests
     [Fact]
     public void Map_MemoryProperty_RoundtripsThroughAsyncBoundary()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);

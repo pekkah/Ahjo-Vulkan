@@ -1,5 +1,6 @@
 using System.IO;
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -45,7 +46,7 @@ public sealed class MemoryAliasingTests
     [Fact]
     public void GetMemoryRequirements_AnswersWithoutLeavingAResourceBehind()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         uint gfxFamily = PickGraphicsFamily(instance, out var gpu);
@@ -89,7 +90,7 @@ public sealed class MemoryAliasingTests
     [Fact]
     public void GetMemoryLimits_ReportsAUsableGranularity()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         _ = PickGraphicsFamily(instance, out var gpu);
@@ -107,7 +108,7 @@ public sealed class MemoryAliasingTests
     [Fact]
     public void AliasingResources_ShareOneBlock_AndFreeNoMemoryWhenDisposed()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         int errorCount = 0;
         Action<DebugMessage> sink = msg =>
@@ -207,7 +208,7 @@ public sealed class MemoryAliasingTests
     [Fact]
     public void AliasingBuffer_OwnsNoMemory_AndHostSyncIsANoOp()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         uint gfxFamily = PickGraphicsFamily(instance, out var gpu);
@@ -251,7 +252,7 @@ public sealed class MemoryAliasingTests
     [Fact]
     public void AllocateMemory_RejectsAutoUsage_WithAnActionableMessage()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         uint gfxFamily = PickGraphicsFamily(instance, out var gpu);

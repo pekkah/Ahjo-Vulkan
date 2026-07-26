@@ -87,6 +87,7 @@ Other specs and plans live under [`docs/design/specs/`](docs/design/specs/) and 
 - `tests/Ahjo.Vulkan.Native.Tests` — xUnit smoke suite over the raw bindings.
 - `tests/Ahjo.Vulkan.Tests` — xUnit integration tests over the wrapper.
 - `tests/Ahjo.Vulkan.Ktx.Native.Tests` — xUnit smoke suite that loads the packaged libktx and transcodes a pinned KTX2 fixture. Runs per RID in the job that builds the binary.
+- `tests/Shared` — the declared Vulkan capability tier (`AHJO_VULKAN_TIER`) shared by the three Vulkan-touching suites. Most of the wrapper suite needs a device, so what a green run actually covered depends on the tier the lane declared: see [`docs/ci-coverage.md`](docs/ci-coverage.md).
 
 ## Design principles
 

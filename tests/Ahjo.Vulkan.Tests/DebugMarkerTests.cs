@@ -1,4 +1,5 @@
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -20,7 +21,7 @@ public sealed class DebugMarkerTests
         // four debug-utils fn pointers resolve to null →
         // ObjectName.Set, BeginLabel/EndLabel/InsertLabel, and
         // LabelScope must all silently no-op rather than NRE.
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -45,11 +46,10 @@ public sealed class DebugMarkerTests
     [Fact]
     public void DebugMarkers_WithValidation_NameAndLabel_NoValidationErrors()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer,
-            "Khronos validation layer not installed — needed to confirm marker calls don't trip validation.");
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer();
         // Same lavapipe gate as the rest of the queue-submitting suite.
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireHardwareDriver(
             "Software driver — vkQueueSubmit2 SIGSEGV on lavapipe; gated.");
 
         // Capture any validation messages so we can assert no error-
@@ -132,11 +132,10 @@ public sealed class DebugMarkerTests
     [Fact]
     public void LabelScope_EmptyName_WithValidation_NoUnbalancedEndLabel()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer,
-            "Khronos validation layer not installed — needed to confirm the empty-name scope stays balanced.");
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer();
         // Same lavapipe gate as the rest of the queue-submitting suite.
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireHardwareDriver(
             "Software driver — vkQueueSubmit2 SIGSEGV on lavapipe; gated.");
 
         // Capture any validation messages so we can assert no error-

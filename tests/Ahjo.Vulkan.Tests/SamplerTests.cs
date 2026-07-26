@@ -1,4 +1,5 @@
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -23,11 +24,11 @@ public sealed class SamplerTests
     [Fact]
     public void CreateSampler_AnisotropicFilter_RoundTrips()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device = CreateGraphicsDeviceWithAnisotropy(instance, out bool anisotropySupported);
-        Assert.SkipUnless(anisotropySupported, "Physical device does not advertise samplerAnisotropy.");
+        TestGate.RequireDeviceFeature(anisotropySupported, "Physical device does not advertise samplerAnisotropy.");
 
         using var sampler = device.CreateSampler(new SamplerDescription
         {
@@ -49,14 +50,14 @@ public sealed class SamplerTests
     [Fact]
     public void CreateSampler_AnisotropyRequestedButFeatureUnsupported_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device = CreateGraphicsDevice(instance);
 
         VkPhysicalDeviceFeatures features;
         unsafe { Vk.vkGetPhysicalDeviceFeatures(device.PhysicalDevice.Handle, &features); }
-        Assert.SkipWhen(features.samplerAnisotropy != 0,
+        TestGate.RequireDeviceFeature(features.samplerAnisotropy == 0,
             "Physical device advertises samplerAnisotropy; cannot exercise the unsupported branch.");
 
         var ex = Assert.Throws<ArgumentException>(() => device.CreateSampler(
@@ -67,7 +68,7 @@ public sealed class SamplerTests
     [Fact]
     public void CreateSampler_ComparisonSampler_RoundTrips()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -92,7 +93,7 @@ public sealed class SamplerTests
     [Fact]
     public void CreateSampler_ClampToBorderShadow_FloatOpaqueWhite_RoundTrips()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -117,7 +118,7 @@ public sealed class SamplerTests
     [Fact]
     public void Sampler_FlowsIntoSamplerDescriptorWrite()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);

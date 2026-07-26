@@ -2,6 +2,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -34,7 +35,7 @@ public sealed unsafe class DescriptorTemplateTests
     [Fact]
     public void Layout_Push_UniformImageSampler_BuildsTemplate()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out _);
@@ -73,8 +74,8 @@ public sealed unsafe class DescriptorTemplateTests
     [Fact]
     public void Template_Update_RoundTrips_StorageBufferDispatch()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(File.Exists(FillSpvPath), $"fill.comp.spv missing at {FillSpvPath}.");
+        TestGate.RequireDriver();
+        TestGate.RequireSpirv(FillSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -158,7 +159,7 @@ public sealed unsafe class DescriptorTemplateTests
     [Fact]
     public void BuildEntries_FieldCount_Mismatch_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out _);

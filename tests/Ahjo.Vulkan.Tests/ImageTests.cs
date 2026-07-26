@@ -1,4 +1,5 @@
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -20,8 +21,8 @@ public sealed class ImageTests
     [Fact]
     public void CreateImage_2D_Rgba8_AndDefaultColorView_Roundtrips()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): hangs inside the driver during image-view creation.");
 
         using var instance = Instance.Create(default);
@@ -66,8 +67,8 @@ public sealed class ImageTests
     [Fact]
     public void CreateView_DefaultFormat_InheritsFromImage()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): hangs inside the driver during image-view creation.");
 
         using var instance = Instance.Create(default);
@@ -102,8 +103,8 @@ public sealed class ImageTests
     [Fact]
     public void CreateImage_CubeCompatible_BuildsCubeAndPerFace2DViews()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): hangs inside the driver during image-view creation.");
 
         using var instance = Instance.Create(default);
@@ -161,8 +162,8 @@ public sealed class ImageTests
     [Fact]
     public void CreateImage_DefaultFlags_StaysExclusive()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): hangs inside the driver during image-view creation.");
 
         using var instance = Instance.Create(default);

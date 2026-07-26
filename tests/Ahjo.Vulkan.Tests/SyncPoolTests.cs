@@ -1,3 +1,4 @@
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -7,7 +8,7 @@ public sealed class SyncPoolTests
     [Fact]
     public void FencePool_Acquire_InitiallySignaled_IsSignaledTrue()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -25,7 +26,7 @@ public sealed class SyncPoolTests
     [Fact]
     public void FencePool_Unsignaled_Wait_ReturnsTimeout()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -43,7 +44,7 @@ public sealed class SyncPoolTests
     [Fact]
     public void FencePool_AcquireRelease_RecyclesHandle()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -66,7 +67,7 @@ public sealed class SyncPoolTests
     [Fact]
     public void FencePool_AcquireSignaled_AfterReleasingUnsignaled_StillSignaled()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -94,7 +95,7 @@ public sealed class SyncPoolTests
     [Fact]
     public void FencePool_Release_RoutesByFenceState()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -135,7 +136,7 @@ public sealed class SyncPoolTests
     [Fact]
     public void FencePool_Release_KnownState_SkipsStatusQuery()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -159,7 +160,7 @@ public sealed class SyncPoolTests
     [Fact]
     public void SemaphorePool_Discard_DestroysAndDropsTracking()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -191,7 +192,7 @@ public sealed class SyncPoolTests
     [Fact]
     public void SemaphorePool_Discard_AfterRelease_RemovesFromFreeList()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -229,7 +230,7 @@ public sealed class SyncPoolTests
     [Fact]
     public void SemaphorePool_Discard_ForeignHandle_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -250,7 +251,7 @@ public sealed class SyncPoolTests
     [Fact]
     public void SemaphorePool_BinaryAndTimeline_AreSeparateFreeLists()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -276,7 +277,7 @@ public sealed class SyncPoolTests
     [Fact]
     public void TimelineSemaphore_Signal_AdvancesValue()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -303,7 +304,7 @@ public sealed class SyncPoolTests
     [Fact]
     public void AcquireTimeline_RecycledHandle_ResumesFromPriorCounterValue()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -328,7 +329,7 @@ public sealed class SyncPoolTests
     [Fact]
     public void TimelineSemaphore_WaitFor_NeverSignaled_Times_Out()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);

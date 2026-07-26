@@ -1,4 +1,5 @@
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -185,8 +186,8 @@ public sealed unsafe class PipelineBarrierTests
     [Fact]
     public void Image_Layout_Transitions_Through_Three_Layouts()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
 
         using var instance = Instance.Create(default);
@@ -248,8 +249,8 @@ public sealed unsafe class PipelineBarrierTests
     [Fact]
     public void Batched_Barriers_Memory_Buffer_Image_In_Single_Call()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
 
         using var instance = Instance.Create(default);
@@ -315,7 +316,7 @@ public sealed unsafe class PipelineBarrierTests
     [Fact]
     public void Empty_Barrier_Call_Is_NoOp()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);

@@ -1,4 +1,5 @@
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -8,7 +9,7 @@ public sealed unsafe class DeviceTests
     [Fact]
     public void CreateDevice_DefaultDescription_OneGraphicsQueue()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
 
@@ -43,7 +44,7 @@ public sealed unsafe class DeviceTests
     [Fact]
     public void CreateDevice_EmptyQueues_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         var gpu = instance.PickPhysicalDevice(static (in PhysicalDeviceInfo _) => true);
@@ -59,7 +60,7 @@ public sealed unsafe class DeviceTests
     [Fact]
     public void CreateDevice_BogusFamilyIndex_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         var gpu = instance.PickPhysicalDevice(static (in PhysicalDeviceInfo _) => true);
@@ -78,7 +79,7 @@ public sealed unsafe class DeviceTests
     [Fact]
     public void CreateDevice_DuplicateFamilyIndex_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         uint gfxFamily = PickGraphicsFamily(instance, out var gpu);
@@ -103,7 +104,7 @@ public sealed unsafe class DeviceTests
     [Fact]
     public void CreateDevice_QueueOversubscribed_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
 
@@ -137,7 +138,7 @@ public sealed unsafe class DeviceTests
     [Fact]
     public void CreateDevice_GetQueueByFamilyIndex_ReturnsCachedInstance()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         uint gfxFamily = PickGraphicsFamily(instance, out var gpu);
@@ -156,7 +157,7 @@ public sealed unsafe class DeviceTests
     [Fact]
     public void CreateDevice_GetQueue_UnknownSlot_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         uint gfxFamily = PickGraphicsFamily(instance, out var gpu);
@@ -173,7 +174,7 @@ public sealed unsafe class DeviceTests
     [Fact]
     public void CreateDevice_ConfigureFeaturesCallback_Invoked()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         uint gfxFamily = PickGraphicsFamily(instance, out var gpu);
@@ -207,7 +208,7 @@ public sealed unsafe class DeviceTests
     [Fact]
     public void CreateDevice_ConfigureFeaturesCallback_SeesWrapperDefaultsOnRefs()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         uint gfxFamily = PickGraphicsFamily(instance, out var gpu);
@@ -251,7 +252,7 @@ public sealed unsafe class DeviceTests
     [Fact]
     public void CreateDevice_DuplicateVulkan13Features_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         uint gfxFamily = PickGraphicsFamily(instance, out var gpu);
@@ -281,7 +282,7 @@ public sealed unsafe class DeviceTests
     [Fact]
     public void Dispose_IsIdempotent()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         uint gfxFamily = PickGraphicsFamily(instance, out var gpu);

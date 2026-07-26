@@ -1,4 +1,5 @@
 using System.IO;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -16,7 +17,7 @@ public sealed class ShaderModuleTests
     [Fact]
     public void CreateShaderModule_EmptySpan_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -28,7 +29,7 @@ public sealed class ShaderModuleTests
     [Fact]
     public void CreateShaderModule_MisalignedByteSpan_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -99,7 +100,7 @@ public sealed class ShaderModuleTests
     [Fact]
     public void CreateShaderModule_FromCompiledTriangleSpv_RoundTrips()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         // The csproj's CompileShaders target invokes glslc on every
         // Shaders/*.{vert,frag,comp} input and drops the output as
@@ -110,8 +111,8 @@ public sealed class ShaderModuleTests
         string shadersDir = Path.Combine(AppContext.BaseDirectory, "Shaders");
         string vertSpv    = Path.Combine(shadersDir, "triangle.vert.spv");
         string fragSpv    = Path.Combine(shadersDir, "triangle.frag.spv");
-        Assert.SkipUnless(File.Exists(vertSpv) && File.Exists(fragSpv),
-            $"Compiled SPIR-V missing (glslc not on PATH at build time): {vertSpv}, {fragSpv}");
+        TestGate.RequireSpirv(vertSpv);
+        TestGate.RequireSpirv(fragSpv);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);

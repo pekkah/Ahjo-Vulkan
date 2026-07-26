@@ -1,4 +1,5 @@
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -50,8 +51,8 @@ public sealed unsafe class CopyCommandTests
     [Fact]
     public void Buffer_To_Buffer_RoundTrip_1MB()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
 
         using var instance = Instance.Create(default);
@@ -108,7 +109,7 @@ public sealed unsafe class CopyCommandTests
         // work is recorded or submitted, so this only needs a device to obtain
         // a CommandRecorder — gate on driver availability, not on whether the
         // driver can actually execute a submission.
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -138,8 +139,8 @@ public sealed unsafe class CopyCommandTests
     [Fact]
     public void Buffer_To_Buffer_MultiRegion_DisjointCopies()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
 
         using var instance = Instance.Create(default);
@@ -215,8 +216,8 @@ public sealed unsafe class CopyCommandTests
     [Fact]
     public void FillBuffer_Sets_Pattern()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
 
         using var instance = Instance.Create(default);
@@ -256,8 +257,8 @@ public sealed unsafe class CopyCommandTests
     [Fact]
     public void BufferImage_RoundTrip_Through_Image()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Mesa lavapipe SIGSEGVs inside the driver during the buffer↔image copy submission.");
 
         using var instance = Instance.Create(default);
@@ -347,8 +348,8 @@ public sealed unsafe class CopyCommandTests
     [Fact]
     public void ClearColorImage_Whole_Image()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
 
         using var instance = Instance.Create(default);

@@ -24,9 +24,27 @@ env:
   SILK_VULKAN_LOADER_VERSION: "2025.9.12"
 
 jobs:
+  # AHJO_VULKAN_TIER is this lane's declaration of what Vulkan capability the
+  # host provides; VulkanTierContractTests fails the run when the host is below
+  # it. `none` is the honest description of this runner today: the SwiftShader
+  # ICD is provisioned and wired, but it does not answer vkCreateInstance
+  # (issue 152), so 225 driver-gated tests skip. Raising this to `software` is
+  # what #152's fix will do — and the contract test is what will prove it.
+  #
+  # Lowering a declared tier to make a lane green is prohibited: see
+  # docs/ci-coverage.md and .github/CLAUDE.md. The single-entry matrix exists
+  # only so the tier can reach the job name — `env` is not a valid context in
+  # `jobs.<id>.name`, `matrix` is — which puts the coverage ceiling in the
+  # checks list instead of in the logs.
   build-test:
-    name: Build & Test (windows-latest)
+    name: Build & Test (windows-latest, Vulkan ${{ matrix.vulkan-tier }})
     runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - vulkan-tier: none
+    env:
+      AHJO_VULKAN_TIER: ${{ matrix.vulkan-tier }}
 
     steps:
       - name: Checkout
@@ -89,6 +107,11 @@ jobs:
         run: |
           $dir = Join-Path $env:GITHUB_WORKSPACE "build/vulkan/win-x64"
           $icd = Join-Path $dir "vk_swiftshader_icd.json"
+          # Necessary, not sufficient: a present manifest is not proof the ICD
+          # answers vkCreateInstance — it is present on this runner today and
+          # the ICD still never answers (issue 152). The capability check is
+          # VulkanTierContractTests against AHJO_VULKAN_TIER; this throw only
+          # catches a provisioning step that produced nothing at all.
           if (-not (Test-Path $icd)) { throw "SwiftShader ICD manifest missing: $icd" }
           # VK_DRIVER_FILES (loader 1.3.207+) overrides system ICD
           # discovery and routes exclusively at SwiftShader.
@@ -119,7 +142,128 @@ jobs:
       # also writes Sequence.xml naming the test that was running when
       # the test host crashed — printed below on step failure.
       - name: Test — Ahjo.Vulkan.Tests
-        run: dotnet test tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj -c Release --no-build --nologo -l "console;verbosity=detailed" --blame --blame-crash --results-directory TestResults
+        id: wrapper-tests
+        run: dotnet test tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj -c Release --no-build --nologo -l "console;verbosity=detailed" --logger "trx;LogFileName=wrapper.trx" --blame --blame-crash --results-directory TestResults
+
+      # Turns the run's skips into the headline verdict instead of a number
+      # nobody reads out of the log (issue 158). Two conditions fail this step:
+      #
+      #  1. Any skip with no [gate:*] class. This is the load-bearing check —
+      #     it is what stops the classification rotting, because the next
+      #     ad-hoc Assert.Skip("...") cannot slip back into invisibility.
+      #     Route new gates through Ahjo.Vulkan.Testing.TestGate.
+      #  2. A gap class with a non-zero count at or below the declared tier.
+      #     VulkanTierContractTests should already have failed in that case, so
+      #     it means a tier-aware gate is miswired.
+      #
+      # Runs even when the test step failed, so a red run still gets its
+      # coverage verdict; the test step's own result stands on its own and this
+      # step never masks it. Skipped only when the tests never ran at all (a
+      # broken build), where demanding a trx would just add noise to the real
+      # failure.
+      - name: Vulkan coverage summary
+        if: always() && steps.wrapper-tests.conclusion != 'skipped'
+        shell: pwsh
+        run: |
+          $declared = if ([string]::IsNullOrWhiteSpace($env:AHJO_VULKAN_TIER)) { "none" } else { $env:AHJO_VULKAN_TIER.Trim().ToLowerInvariant() }
+          $rank = @{ none = 0; software = 1; hardware = 2; validation = 3 }
+          if (-not $rank.ContainsKey($declared)) {
+            Write-Output "::error::AHJO_VULKAN_TIER='$declared' is not a recognized tier. Expected one of: none, software, hardware, validation."
+            exit 1
+          }
+          $declaredRank = $rank[$declared]
+
+          $trx = "TestResults/wrapper.trx"
+          if (-not (Test-Path $trx)) {
+            Write-Output "::error::$trx was not produced, so this run's Vulkan coverage cannot be verified. The trx logger on the 'Test — Ahjo.Vulkan.Tests' step is what the coverage summary reads."
+            exit 1
+          }
+
+          $ns = @{ t = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010" }
+          $results = @(Select-Xml -Path $trx -XPath "//t:UnitTestResult" -Namespace $ns | ForEach-Object { $_.Node })
+
+          $total    = $results.Count
+          $skipped  = @($results | Where-Object { $_.outcome -eq "NotExecuted" })
+          $failed   = @($results | Where-Object { $_.outcome -eq "Failed" })
+          $executed = $total - $skipped.Count
+
+          # Gap classes need a tier to be provable; platform/feature are correct
+          # and permanent wherever they fire.
+          $needs = [ordered]@{ driver = 1; hardware = 2; validation = 3; spirv = -1; platform = -1; feature = -1 }
+          $counts = [ordered]@{}
+          foreach ($c in $needs.Keys) { $counts[$c] = 0 }
+          $unclassified = @()
+
+          foreach ($r in $skipped) {
+            $message = [string]$r.Output.ErrorInfo.Message
+            $m = [regex]::Match($message, '^\[gate:([a-z]+)\]')
+            if ($m.Success -and $counts.Contains($m.Groups[1].Value)) {
+              $counts[$m.Groups[1].Value] += 1
+            } else {
+              $unclassified += [pscustomobject]@{ Name = $r.testName; Reason = $message }
+            }
+          }
+
+          $gap = $counts["driver"] + $counts["hardware"] + $counts["validation"] + $counts["spirv"]
+
+          $meaning = @{}
+          foreach ($c in $needs.Keys) {
+            $meaning[$c] = switch ($c) {
+              "spirv"    { "NOT PROVEN — glslc absent (follow-up)" }
+              "platform" { "expected and permanent on this OS" }
+              "feature"  { "device does not advertise the feature" }
+              default    {
+                if ($declaredRank -lt $needs[$c]) { "NOT PROVEN — needs tier ``$(($rank.GetEnumerator() | Where-Object { $_.Value -eq $needs[$c] }).Key)``" }
+                elseif ($counts[$c] -gt 0) { "MISWIRED — tier ``$declared`` declares this present" }
+                else { "covered — tier ``$declared`` declares this present" }
+              }
+            }
+          }
+
+          $md = @()
+          $md += "## Vulkan test coverage — windows-latest"
+          $md += ""
+          $md += "| | |"
+          $md += "|---|---|"
+          $md += "| Declared tier | ``$declared`` |"
+          $md += "| Tests total | $total |"
+          $md += "| Executed | $executed |"
+          $md += "| Skipped | $($skipped.Count) |"
+          $md += "| Failed | $($failed.Count) |"
+          $md += ""
+          $md += "### Skips by class"
+          $md += "| Class | Count | Meaning at declared tier ``$declared`` |"
+          $md += "|---|---|---|"
+          foreach ($c in $needs.Keys) { $md += "| ``$c`` | $($counts[$c]) | $($meaning[$c]) |" }
+          $md += ""
+          if ($gap -eq 0) {
+            $md += "**Every gated test executed.** No coverage gap at or below tier ``$declared``."
+          } elseif ($declaredRank -eq 0) {
+            $md += "**$gap of $total wrapper tests did not execute.** Tier ``none`` is declared, so this run proves nothing about GPU behaviour. See docs/ci-coverage.md."
+          } else {
+            $md += "**$gap of $total wrapper tests did not execute.** Tier ``$declared`` is declared and enforced, so what did execute really ran against that capability; the rest needs a higher tier. See docs/ci-coverage.md."
+          }
+          if ($unclassified.Count -gt 0) {
+            $md += ""
+            $md += "**$($unclassified.Count) skipped tests carry no ``[gate:*]`` class — this step failed.**"
+          }
+          $md += ""
+          if ($env:GITHUB_STEP_SUMMARY) { $md -join "`n" | Add-Content -Path $env:GITHUB_STEP_SUMMARY }
+          $md -join "`n" | Write-Output
+
+          $bad = $false
+          if ($unclassified.Count -gt 0) {
+            $list = ($unclassified | ForEach-Object { "$($_.Name) — `"$($_.Reason)`"" }) -join "; "
+            Write-Output "::error::$($unclassified.Count) skipped tests carry no [gate:*] class. Every skip must go through Ahjo.Vulkan.Testing.TestGate so the coverage summary can tell a permanent platform skip from a coverage gap. Unclassified: $list"
+            $bad = $true
+          }
+          foreach ($c in @("driver", "hardware", "validation")) {
+            if ($counts[$c] -gt 0 -and $declaredRank -ge $needs[$c]) {
+              Write-Output "::error::gate class '$c' skipped $($counts[$c]) tests, but AHJO_VULKAN_TIER=$declared declares that capability present. A tier-aware gate is miswired."
+              $bad = $true
+            }
+          }
+          if ($bad) { exit 1 }
 
       - name: Print blame logs on failure
         if: failure()
@@ -129,12 +273,19 @@ jobs:
           find TestResults -type f \( -name 'Sequence_*.xml' -o -name '*.txt' -o -name '*.dmp.txt' \) -print -exec cat {} \; 2>/dev/null || true
           echo "::endgroup::"
 
-      # Issue 28 — Native AOT smoke. Publishing under PublishAot=true
-      # is the load-bearing check: trim warnings + ILC errors fail the
-      # build, so any reflection / dynamic-codegen creep in the wrapper
-      # is caught here. With SwiftShader provisioned the published exe
-      # also runs the full render→PNG round-trip, exercising the whole
-      # wrapper surface under AOT codegen.
+      # Issue 28 — Native AOT smoke. Publishing under PublishAot=true is the
+      # load-bearing check and the only one that runs on this lane: trim
+      # warnings + ILC errors fail the build, so any reflection /
+      # dynamic-codegen creep in the wrapper is caught here.
+      #
+      # The published exe does NOT currently execute the render→PNG round-trip
+      # on this runner. It probes for an ICD, finds none (issue 152), prints
+      # "No Vulkan driver detected; AOT publish verified, skipping smoke run."
+      # and exits 0 — so the publish above, not the run below, is what this lane
+      # proves today. The round-trip runs as soon as an ICD answers; and once
+      # this lane declares AHJO_VULKAN_TIER `software` or above, a driverless
+      # probe stops exiting 0 and fails the step with exit 4 instead. See
+      # samples/AotSmoke/Program.cs.
       - name: Setup MSVC dev environment
         uses: ilammy/msvc-dev-cmd@v1
 
@@ -168,7 +319,7 @@ jobs:
   # check, not driver-gated wrapper coverage — the honesty argument that
   # closed issue 32 still stands for everything else.
   vma-linux:
-    name: VMA native smoke (${{ matrix.rid }}, lavapipe)
+    name: VMA native smoke (${{ matrix.rid }}, lavapipe, Vulkan software)
     runs-on: ${{ matrix.runs-on }}
     strategy:
       # Don't let one arch's failure hide the other's result — the whole point
@@ -222,13 +373,17 @@ jobs:
           # so the lane can't quietly pick up some other ICD on the image.
           echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
 
-      # AHJO_REQUIRE_VULKAN_DEVICE turns VmaSmokeTests' driverless skip into a
-      # hard failure. Without it a broken ICD install would report green while
-      # executing none of the native code this lane exists to exercise — the
-      # exact silent-coverage failure that let #144 ship.
+      # AHJO_VULKAN_TIER=software declares that lavapipe answers here, and
+      # VulkanTierContractTests fails the lane when it does not. Without that
+      # declaration a broken ICD install would report green while executing none
+      # of the native code this lane exists to exercise — the exact
+      # silent-coverage failure that let #144 ship. This replaces
+      # AHJO_REQUIRE_VULKAN_DEVICE, which is now a hard error if still set
+      # anywhere (issue 158); `software` is the right rung because lavapipe is a
+      # CPU ICD and this lane only ever does allocation work.
       - name: Test — Ahjo.Vulkan.Vma.Native.Tests
         env:
-          AHJO_REQUIRE_VULKAN_DEVICE: "1"
+          AHJO_VULKAN_TIER: "software"
         run: dotnet test tests/Ahjo.Vulkan.Vma.Native.Tests/Ahjo.Vulkan.Vma.Native.Tests.csproj -c Release --nologo -l "console;verbosity=detailed"
 
   # Ahjo.Vulkan.Ktx.Native ships a native binary per RID, and the same

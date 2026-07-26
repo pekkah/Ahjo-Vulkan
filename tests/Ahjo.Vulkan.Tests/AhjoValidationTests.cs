@@ -1,3 +1,4 @@
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -63,7 +64,7 @@ public sealed class AhjoValidationTests
     [Fact]
     public void DoubleDispose_OwningHandle_Throws_WhenValidationEnabled()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         bool original = AhjoValidation.Enabled;
         using var instance = Instance.Create(default);
@@ -93,7 +94,7 @@ public sealed class AhjoValidationTests
     [Fact]
     public void SemaphorePool_Release_ForeignHandle_RespectsValidationSwitch()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         bool original = AhjoValidation.Enabled;
         using var instance = Instance.Create(default);

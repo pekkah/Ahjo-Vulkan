@@ -1,3 +1,4 @@
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -7,8 +8,8 @@ public sealed unsafe class InstanceFunctionTableTests
     [Fact]
     public void Resolve_KnownExtension_ReturnsNonNull()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver,           "No Vulkan driver on host.");
-        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer,  "Validation layer not installed.");
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer();
 
         using var instance = Instance.Create(new InstanceDescription
         {
@@ -23,7 +24,7 @@ public sealed unsafe class InstanceFunctionTableTests
     [Fact]
     public void Resolve_UnknownName_ReturnsNull()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(new InstanceDescription
         {
