@@ -119,6 +119,33 @@ public readonly unsafe struct Buffer : IVulkanHandle<Buffer>, IDisposable
     /// buffer; use <see cref="Map{T}"/> if you need the
     /// <c>vmaMapMemory</c>-on-demand path.
     /// </summary>
+    /// <remarks>
+    /// <para>The <i>view</i> is nearly free — a null check, a span
+    /// construction over the already-cached <c>pMappedData</c>, and a cast
+    /// that is a length division. What is <b>not</b> free is reading through
+    /// it: host read latency is a property of the memory type VMA chose for
+    /// the allocation, not of this method.</para>
+    /// <para><see cref="AllocationFlags.HostAccessSequentialWrite"/> promises
+    /// VMA that the CPU only writes this memory, sequentially, and never reads
+    /// it back — which lets VMA select an <b>uncached, write-combined</b>
+    /// memory type. Writes stay fast, but a host read from such an allocation
+    /// costs orders of magnitude more than a cached one: on the
+    /// <c>docs/benchmarks.md</c> baseline host, a store-then-read-back of the
+    /// same element measures <b>173.4 ns</b> against <b>1.5 ns</b> for the
+    /// identical code on an <see cref="AllocationFlags.HostAccessRandom"/>
+    /// allocation. Never read a sequential-write buffer from the CPU; it'll
+    /// hit uncached memory and your perf numbers will look haunted. Callers
+    /// who have to read should allocate
+    /// <see cref="AllocationFlags.HostAccessRandom"/>, which makes VMA prefer
+    /// a <c>HOST_CACHED</c> type. Watch out for implicit reads too — a
+    /// read-modify-write like <c>span[i] += x</c> is a read.</para>
+    /// <para><see cref="Flush"/>/<see cref="Invalidate"/> will not help here.
+    /// They make host writes visible to the device, and device writes visible
+    /// to the host, on <i>non-coherent</i> allocations; they do nothing about
+    /// the read <i>latency</i> of an uncached, write-combined memory type. On
+    /// the coherent allocations where this cost usually shows up the wrapper
+    /// short-circuits them entirely (see <see cref="IsHostCoherent"/>).</para>
+    /// </remarks>
     public Span<T> AsSpan<T>() where T : unmanaged
     {
         if (PersistentMapped == null)
@@ -129,6 +156,17 @@ public readonly unsafe struct Buffer : IVulkanHandle<Buffer>, IDisposable
     }
 
     /// <summary>Read-only counterpart of <see cref="AsSpan{T}"/>.</summary>
+    /// <remarks>
+    /// A read-only view does <b>not</b> make reads cheap. This is the surface
+    /// that invites the mistake: reading through it on an
+    /// <see cref="AllocationFlags.HostAccessSequentialWrite"/> allocation hits
+    /// uncached, write-combined memory and costs orders of magnitude more than
+    /// a cached read — see <see cref="AsSpan{T}"/>'s remarks for the measured
+    /// figures, and prefer <see cref="AllocationFlags.HostAccessRandom"/> when
+    /// the CPU has to read. The wrapper cannot detect the mistake for you: it
+    /// hands out a span, and the read then happens with no wrapper frame
+    /// involved.
+    /// </remarks>
     public ReadOnlySpan<T> AsReadOnlySpan<T>() where T : unmanaged => AsSpan<T>();
 
     /// <summary>
