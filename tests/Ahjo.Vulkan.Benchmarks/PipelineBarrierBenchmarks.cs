@@ -22,6 +22,7 @@ public class PipelineBarrierBenchmarks
     private Device            _device   = null!;
     private CommandBufferPool _cmdPool  = null!;
     private Image             _image;
+    private Event             _event;
 
     [GlobalSetup]
     public void Setup()
@@ -62,6 +63,8 @@ public class PipelineBarrierBenchmarks
             },
             new AllocationDescription { Usage = MemoryUsage.AutoPreferDevice });
 
+        _event = _device.CreateEvent();
+
         // Warm — first Begin grows the pool by one buffer; subsequent
         // begins/resets hit reuse and steady-state recording is alloc-free.
         var rec = _cmdPool.Begin();
@@ -74,6 +77,7 @@ public class PipelineBarrierBenchmarks
     public void Cleanup()
     {
         _cmdPool?.Dispose();
+        _event.Dispose();
         _image.Dispose();
         _device?.Dispose();
         _instance?.Dispose();
@@ -116,6 +120,66 @@ public class PipelineBarrierBenchmarks
         using scoped var rec = _cmdPool.Begin();
         for (int i = 0; i < CallsPerInvoke; i++)
             rec.PipelineBarrier(default, default, bars);
+        rec.End();
+
+        _cmdPool.ResetForFrame();
+    }
+
+    /// <summary>
+    /// Split-barrier canary (#155): one <c>vkCmdSetEvent2</c> +
+    /// <c>vkCmdWaitEvents2</c> pair per op, both marshalled through the same
+    /// private <c>RecordDependency</c> helper as
+    /// <see cref="SingleImageTransition"/>.
+    /// </summary>
+    /// <remarks>
+    /// <b>Recording only — never submitted.</b> The command buffer is reset,
+    /// not queued, so the repeated / unmatched waits recorded here cannot
+    /// hang a queue and are not a validation error against any executed
+    /// workload.
+    /// </remarks>
+    [Benchmark(OperationsPerInvoke = CallsPerInvoke)]
+    public void SetWaitEventPair_SingleImage()
+    {
+        var bar = ImageBarrier.Transition(
+            in _image,
+            from:     VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
+            to:       VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            srcStage: Stage.TopOfPipe,             srcAccess: Access.None,
+            dstStage: Stage.ColorAttachmentOutput, dstAccess: Access.ColorAttachmentWrite);
+
+        Span<ImageBarrier> bars = stackalloc ImageBarrier[1];
+        bars[0] = bar;
+
+        // `scoped` narrows the recorder's safe-to-escape to this method so
+        // the method-local stackalloc above can flow into SetEvent/WaitEvent
+        // without tripping CS8350.
+        using scoped var rec = _cmdPool.Begin();
+        for (int i = 0; i < CallsPerInvoke; i++)
+        {
+            rec.SetEvent(in _event, default, default, bars);
+            rec.WaitEvent(in _event, default, default, bars);
+        }
+        rec.End();
+
+        _cmdPool.ResetForFrame();
+    }
+
+    /// <summary>
+    /// Split-barrier canary (#155): <c>vkCmdResetEvent2</c>, the recycle half
+    /// of the split-barrier surface — a bare stage-mask pass-through with no
+    /// dependency marshalling.
+    /// </summary>
+    /// <remarks>
+    /// <b>Recording only — never submitted</b>, so the resets recorded
+    /// without a preceding wait are not a validation error against any
+    /// executed workload.
+    /// </remarks>
+    [Benchmark(OperationsPerInvoke = CallsPerInvoke)]
+    public void ResetEvent_Single()
+    {
+        using var rec = _cmdPool.Begin();
+        for (int i = 0; i < CallsPerInvoke; i++)
+            rec.ResetEvent(in _event, Stage.AllTransfer);
         rec.End();
 
         _cmdPool.ResetForFrame();

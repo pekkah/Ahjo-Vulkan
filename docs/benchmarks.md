@@ -58,6 +58,12 @@ Captured on:
 - **BenchmarkDotNet**: v0.14.0
 - **Vulkan**: instance v1.4.341 (vulkaninfo)
 
+The table is **not a single capture**. The four `PipelineBarrier.*` rows were
+recaptured for #155 on .NET 10.0.8 (SDK 10.0.204) / Windows 11 10.0.26200.8894
+with an NVIDIA RTX 4070 Ti; the `HandleOwnership.*` rows came from a Linux
+container. Rows are comparable to their own successors, not to each other —
+re-measure the row you care about before drawing a conclusion from it.
+
 ## Baseline
 
 Each row maps to one `[Benchmark]` method. **Allocated** is the per-op
@@ -66,25 +72,35 @@ managed-byte count BDN's `MemoryDiagnoser` reports; `-` is zero.
 | Benchmark                                       | Mean       | Allocated | Notes                                                                     |
 |-------------------------------------------------|-----------:|----------:|---------------------------------------------------------------------------|
 | `ChainBuilder.BuildThreeNodeChain`              |   3.66 ns  |        -  | Pure host: features2 + vk13 + vk12 over a stack-only `ChainBuilder`.      |
-| `Buffer.Map_AsSpan`                             | 166.8 ns / 1024 ops ≈ **0.16 ns/op** | - | Persistent-mapped buffer, alloc-free `AsSpan<T>` round-trip. |
+| `Buffer.Map_AsSpan`                             | 166.8 ns   |        -  | Persistent-mapped buffer, alloc-free `AsSpan<T>` round-trip.             |
 | `CommandBufferPool.Frame_Begin_100Cmds_End_Reset` | 6.44 µs |        -  | Begin → 100 dynamic-state + fill commands → End → ResetForFrame.          |
 | `CommandRecorder.RenderingPass100Cmds`          |   3.23 µs  |        -  | BeginRendering → 100 SetViewport → EndRendering, dynamic rendering path.  |
 | `CommandRecorder.CopyBuffer_8Regions`           | 810.0 ns   |        -  | #141 canary: multi-region CopyBuffer; stackalloc ≤16 path stays 0 B/op.   |
 | `CommandRecorder.CopyBuffer_24Regions`          |   1.57 µs  |        -  | #141 canary: multi-region CopyBuffer; ArrayPool >16 path stays 0 B/op.    |
-| `PipelineBarrier.SingleImageTransition`         | 131.6 ns / 256 ops ≈ **0.51 ns/op** | - | One `vkCmdPipelineBarrier2` with a single image barrier.       |
-| `PipelineBarrier.LargeBatch_8x8x1`              | 3.08 µs / 256 ops ≈ **12.0 ns/op** | - | One `vkCmdPipelineBarrier2` with 64 image barriers.              |
+| `PipelineBarrier.SingleImageTransition`         | 178.8 ns   |        -  | One `vkCmdPipelineBarrier2` with a single image barrier. Recaptured for #155 — see the split-barrier caveat. |
+| `PipelineBarrier.LargeBatch_8x8x1`              |   2.80 µs  |        -  | One `vkCmdPipelineBarrier2` with 64 image barriers. Recaptured for #155 — **minimum of 5 runs**; strongly bimodal (median 3.61 µs, range 2.80–4.61 µs), so compare minima across ≥3 runs, not single samples. |
+| `PipelineBarrier.SetWaitEventPair_SingleImage`  | 260.7 ns   |        -  | #155 canary: one `vkCmdSetEvent2` + `vkCmdWaitEvents2` pair, one image barrier each. Recording only, never submitted. |
+| `PipelineBarrier.ResetEvent_Single`             |  33.4 ns   |        -  | #155 canary: one `vkCmdResetEvent2` — bare stage-mask pass-through, no dependency marshalling. |
 | `FrameRing.Frame_Begin_Submit_Wait`             |  56.20 µs  |        -  | Full headless frame: BeginFrame → submit no-op cmd → wait fence.          |
 | `PushDescriptors.PushDescriptors_StorageBuffer` |  69.34 ns  |        -  | `vkCmdPushDescriptorSetWithTemplate` × 1024 in one Begin/End scope; bimodal under driver overhead. |
-| `DescriptorSetPool.AcquireReleaseReset_Cycle`   | 39.62 ns / 1000 ops ≈ **0.04 ns/op** | - | #114 canary: per-frame Acquire → Release → Reset; Reset retains the per-layout idle `Stack`s instead of discarding them. |
+| `DescriptorSetPool.AcquireReleaseReset_Cycle`   |  39.62 ns  |        -  | #114 canary: per-frame Acquire → Release → Reset; Reset retains the per-layout idle `Stack`s instead of discarding them. |
 | `HandleOwnership.PassAndReturn_ByValue`         |   3.69 ns  |        -  | #118 canary: `PipelineLayout` (one managed metadata ref) copied through a non-inlined call — stays stack-only, no write barrier, no box. Captured on a Linux container host (driver-free benchmark). |
 | `HandleOwnership.MetadataRead_OwningAndBorrowed` |  0.92 ns  |        -  | Field read replacing the old side-table dictionary lookup + lock.       |
 | `HandleOwnership.OwnershipPredicate`            |   0.47 ns  |        -  | `OwnsHandle` — the Dispose guard / borrow check.                        |
 | `HandleOwnership.ConstrainedGenericDispatch`    |   3.69 ns  |        -  | `ObjectName.Set`-shaped `struct, IVulkanHandle<T>` dispatch — devirtualized, box-free under the relaxed constraint. |
 
-`OperationsPerInvoke` is set on the benchmarks that use it (`Buffer.Map_AsSpan`,
-`PipelineBarrier.*`, `PushDescriptors.*`) so BDN's reported Mean / Allocated
-columns are already per-op — the math above just translates the BDN summary
-back into the per-call cost when the unrolled span is non-trivial.
+**Reading the Mean column.** Many benchmarks here unroll an inner loop and
+declare `OperationsPerInvoke` (e.g. `Buffer.Map_AsSpan`, `PipelineBarrier.*`,
+`PushDescriptors.*`, `PushConstants.*`, `SyncPool.*`, `ResultPolicy.*`,
+`HandleOwnership.*`, `DescriptorSetPool.*` — not an exhaustive list). When it
+is set, **BDN has already divided: the reported Mean and Allocated are
+per-operation. Do not divide by the loop count again.** Earlier revisions of
+this table carried `"166.8 ns / 1024 ops ≈ 0.16 ns/op"`-style tails that did
+exactly that; they were arithmetically wrong (0.16 ns is well under one cycle)
+and have been removed without re-running, since the BDN Means they annotated
+were already the correct per-call numbers. For
+`PipelineBarrier.SetWaitEventPair_SingleImage` one operation is one Set+Wait
+**pair**, i.e. two recorded commands.
 
 ## Caveats
 
@@ -121,5 +137,25 @@ back into the per-call cost when the unrolled span is non-trivial.
   expected win is in the **Mean** column on Windows + a real ICD (the loader
   trampoline is thickest there); refresh those rows from a Windows capture
   before and after to confirm the change earns its keep on real drivers.
+- **Split barriers share the barrier marshalling (#155)**: `PipelineBarrier`,
+  `SetEvent` and `WaitEvent` now route through one private
+  `CommandRecorder.RecordDependency` implementation, which is what keeps a
+  Set/Wait pair's two `VkDependencyInfo`s byte-identical from equal inputs
+  (`VUID-vkCmdWaitEvents2-pEvents-10788`) as a structural property rather
+  than a review obligation. The four `PipelineBarrier.*` rows were recaptured
+  after that extraction. **Neither barrier row regressed** — measured against
+  unmodified `main` (a799194) on this host in the same session, not assumed:
+  - `SingleImageTransition` 131.6 ns → 178.8 ns is **host drift**: `main`
+    measured 180.2 / 184.0 ns today, i.e. at or above the post-change
+    180.3 / 178.8 ns.
+  - `LargeBatch_8x8x1` 3.08 µs → 2.80 µs is **a change of statistic, not of
+    speed**: the old row was a single sample, the new one is the minimum of 5.
+    `main` today gives a 2.769 µs minimum against the branch's 2.795 µs
+    (+0.9%). Single samples on this benchmark span 2.77–4.61 µs on both
+    trees, so one reading can look like a ±25% swing in either direction.
+
+  These four rows were captured on .NET 10.0.8 (SDK 10.0.204) while the rest
+  of the table predates that on .NET 10.0.7 (SDK 10.0.203) — compare within a
+  capture, never across one.
 - **Not run in CI**: benchmark numbers are too noisy on hosted runners.
   This file is a manual capture; refresh it when a hot path changes.
