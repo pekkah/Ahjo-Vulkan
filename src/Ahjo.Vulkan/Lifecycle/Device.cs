@@ -463,6 +463,40 @@ public sealed unsafe class Device : IDisposable
     }
 
     /// <summary>
+    /// Creates an <see cref="Event"/> — a <c>VkEvent</c> for split barriers
+    /// (<see cref="CommandRecorder.SetEvent"/> /
+    /// <see cref="CommandRecorder.WaitEvent"/> /
+    /// <see cref="CommandRecorder.ResetEvent"/>). The returned handle is
+    /// caller-owned; dispose it once no submission still references it.
+    /// </summary>
+    /// <param name="flags">
+    /// Defaults to <see cref="EventCreateFlags.DeviceOnly"/>, the
+    /// split-barrier case. Pass <see cref="EventCreateFlags.None"/> only if
+    /// the event must be reachable from the host event commands
+    /// (<c>vkSetEvent</c> / <c>vkGetEventStatus</c> / <c>vkResetEvent</c>),
+    /// which are illegal on a device-only event and which the wrapper does
+    /// not expose today.
+    /// </param>
+    /// <remarks>
+    /// <b>Portability subset.</b> On a device exposing
+    /// <c>VK_KHR_portability_subset</c> that does not advertise the
+    /// <c>events</c> feature, <c>vkCreateEvent</c> must not be used at all
+    /// (<c>VUID-vkCreateEvent-events-04468</c>) — relevant to macOS via
+    /// MoltenVK.
+    /// </remarks>
+    public Event CreateEvent(EventCreateFlags flags = EventCreateFlags.DeviceOnly)
+    {
+        var ci = new VkEventCreateInfo
+        {
+            sType = VkStructureType.VK_STRUCTURE_TYPE_EVENT_CREATE_INFO,
+            flags = (uint)flags,
+        };
+        VkEvent_T* raw = null;
+        Vk.vkCreateEvent(Handle, &ci, null, &raw).ThrowIfFailed();
+        return new Event(raw, Handle, flags);
+    }
+
+    /// <summary>
     /// Builds a <see cref="PipelineLayout"/> from descriptor-set layouts +
     /// push-constant ranges.
     /// </summary>

@@ -110,6 +110,13 @@ public sealed class ShadowEnumDriftTests
     }
 
     [Fact]
+    public void EventCreateFlags_MatchesNative()
+    {
+        Assert.Equal((uint)VkEventCreateFlagBits.VK_EVENT_CREATE_DEVICE_ONLY_BIT, (uint)EventCreateFlags.DeviceOnly);
+        Assert.Equal(0u, (uint)EventCreateFlags.None);
+    }
+
+    [Fact]
     public void MemoryProperties_MatchesNative()
     {
         Assert.Equal((uint)VkMemoryPropertyFlagBits.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, (uint)MemoryProperties.DeviceLocal);

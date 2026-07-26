@@ -24,7 +24,8 @@ namespace Ahjo.Vulkan;
 /// BindDescriptorSets, typed PushConstants, BindVertexBuffers /
 /// BindIndexBuffer, Draw / DrawIndexed / DrawIndirect /
 /// DrawIndirectCount / DrawIndexedIndirect / DrawIndexedIndirectCount,
-/// Dispatch / DispatchIndirect.</para>
+/// Dispatch / DispatchIndirect, pipeline barriers and split barriers
+/// (SetEvent / WaitEvent / ResetEvent).</para>
 /// </remarks>
 public unsafe ref struct CommandRecorder : IDisposable
 {
@@ -581,7 +582,17 @@ public unsafe ref struct CommandRecorder : IDisposable
     public void DispatchIndirect(in Buffer buffer, ulong offset)
         => Fns.CmdDispatchIndirect(Handle, buffer.Handle, offset);
 
-    // ---- Pipeline barriers (sync2) ----
+    // ---- Pipeline barriers + split barriers (sync2) ----
+
+    /// <summary>
+    /// Which dependency command <see cref="RecordDependency"/> ends in.
+    /// </summary>
+    private enum DependencyOp
+    {
+        Barrier,
+        SetEvent,
+        WaitEvent,
+    }
 
     /// <summary>
     /// Issues one <c>vkCmdPipelineBarrier2</c> for an arbitrary mix of
@@ -595,8 +606,159 @@ public unsafe ref struct CommandRecorder : IDisposable
         ReadOnlySpan<BufferBarrier> buffer,
         ReadOnlySpan<ImageBarrier>  image)
     {
+        // The empty-mix early return belongs here, not in RecordDependency:
+        // skipping the driver call is right for a barrier that orders
+        // nothing, but dropping a vkCmdSetEvent2 would discard a signal the
+        // paired vkCmdWaitEvents2 blocks on forever.
         if (memory.IsEmpty && buffer.IsEmpty && image.IsEmpty) return;
+        RecordDependency(DependencyOp.Barrier, null, memory, buffer, image);
+    }
 
+    /// <summary>Image-only convenience overload — the dominant case.</summary>
+    public void PipelineBarrier(ReadOnlySpan<ImageBarrier> image)
+        => PipelineBarrier(default, default, image);
+
+    /// <summary>Single image-barrier convenience overload.</summary>
+    public void PipelineBarrier(in ImageBarrier image)
+        => PipelineBarrier(default, default,
+            MemoryMarshal.CreateReadOnlySpan(ref Unsafe.AsRef(in image), 1));
+
+    /// <summary>
+    /// Signals <paramref name="evt"/> via <c>vkCmdSetEvent2</c> — the
+    /// producer half of a split barrier. The event is signaled once the
+    /// union of the barriers' <c>SrcStage</c> masks has completed; the
+    /// dependency's second half (the destination scopes and any layout
+    /// transitions) is applied at the matching
+    /// <see cref="WaitEvent"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The dependency must match the wait's exactly.</b> The
+    /// <c>VkDependencyInfo</c> recorded here has to be equal to the one
+    /// passed to <see cref="WaitEvent"/>
+    /// (<c>VUID-vkCmdWaitEvents2-pEvents-10788</c>). Hold one barrier list
+    /// — a field or a local array — and pass it to both calls; the wrapper
+    /// does not enforce this, but routing both through one marshalling
+    /// implementation guarantees equal inputs produce byte-identical
+    /// structs.</para>
+    /// <para>Must be recorded <b>outside</b> a
+    /// <see cref="BeginRendering"/>/<see cref="EndRendering"/> scope
+    /// (<c>VUID-vkCmdSetEvent2-renderpass</c>), and no barrier may carry
+    /// <see cref="Stage.Host"/>
+    /// (<c>VUID-vkCmdSetEvent2-srcStageMask-09391</c>,
+    /// <c>-dstStageMask-09392</c>).</para>
+    /// <para><b>Illegal on a transfer-only queue family.</b> Unlike
+    /// <see cref="PipelineBarrier"/>, all three split-barrier commands
+    /// require a <see cref="CommandBufferPool"/> whose queue family supports
+    /// graphics, compute, or video — <c>VK_QUEUE_TRANSFER_BIT</c> alone is
+    /// not enough (<c>VUID-vkCmdSetEvent2-commandBuffer-cmdpool</c>,
+    /// and the <c>-cmdpool</c> VUIDs on <c>vkCmdWaitEvents2</c> /
+    /// <c>vkCmdResetEvent2</c>). A hazard split across a dedicated transfer
+    /// queue has to use <see cref="PipelineBarrier"/> plus a semaphore
+    /// instead.</para>
+    /// <para>Unlike <see cref="PipelineBarrier"/> this never early-returns
+    /// on an all-empty mix: dropping the call would silently discard the
+    /// signal and hang the paired wait. Under
+    /// <see cref="AhjoValidation.Enabled"/> an empty mix (or a null event)
+    /// fails instead.</para>
+    /// </remarks>
+    public void SetEvent(
+        in Event evt,
+        ReadOnlySpan<MemoryBarrier> memory,
+        ReadOnlySpan<BufferBarrier> buffer,
+        ReadOnlySpan<ImageBarrier>  image)
+    {
+        AssertSplitBarrierUsable("SetEvent", in evt, memory, buffer, image);
+        RecordDependency(DependencyOp.SetEvent, evt.Handle, memory, buffer, image);
+    }
+
+    /// <summary>
+    /// Waits on <paramref name="evt"/> via <c>vkCmdWaitEvents2</c> with
+    /// <c>eventCount = 1</c> — the consumer half of a split barrier.
+    /// </summary>
+    /// <remarks>
+    /// <para>The event must have been signaled by a corresponding
+    /// <see cref="SetEvent"/> <b>earlier in submission order</b>
+    /// (<c>VUID-vkCmdWaitEvents2-pEvents-03841</c>). A wait with no
+    /// preceding set hangs the queue, and the wrapper cannot detect that at
+    /// record time — the pairing spans command buffers and submissions.</para>
+    /// <para>The dependency passed here must be exactly equal to the one
+    /// recorded at <see cref="SetEvent"/>
+    /// (<c>VUID-vkCmdWaitEvents2-pEvents-10788</c>) — pass the same barrier
+    /// list to both calls.</para>
+    /// <para>Unlike <see cref="SetEvent"/> and <see cref="ResetEvent"/>,
+    /// this <em>may</em> be recorded inside a render pass instance, provided
+    /// no barrier's <c>SrcStage</c> includes <see cref="Stage.Host"/>
+    /// (<c>VUID-vkCmdWaitEvents2-dependencyFlags-03844</c> constrains only the
+    /// source mask, and only inside a render pass instance — a
+    /// <c>DstStage</c> of <see cref="Stage.Host"/> stays legal).</para>
+    /// <para>The multi-event form of <c>vkCmdWaitEvents2</c> is not wrapped:
+    /// it needs one <c>VkDependencyInfo</c> per event and no caller batches
+    /// hazards today.</para>
+    /// <para>Requires a non-transfer-only queue family — see
+    /// <see cref="SetEvent"/>.</para>
+    /// </remarks>
+    public void WaitEvent(
+        in Event evt,
+        ReadOnlySpan<MemoryBarrier> memory,
+        ReadOnlySpan<BufferBarrier> buffer,
+        ReadOnlySpan<ImageBarrier>  image)
+    {
+        AssertSplitBarrierUsable("WaitEvent", in evt, memory, buffer, image);
+        RecordDependency(DependencyOp.WaitEvent, evt.Handle, memory, buffer, image);
+    }
+
+    /// <summary>
+    /// Returns <paramref name="evt"/> to the unsignaled state via
+    /// <c>vkCmdResetEvent2</c> so it can be reused on a later frame.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Record the reset in a submission ordered after the wait
+    /// completed</b> — the frame-N+1 command buffer for a frame-N event, or
+    /// after an intervening <see cref="PipelineBarrier"/>. The spec requires
+    /// an execution dependency between the reset and any wait on the same
+    /// event (<c>VUID-vkCmdResetEvent2-event-03831</c>, <c>-03832</c>);
+    /// resetting in the same command buffer as the wait is a validation
+    /// error.</para>
+    /// <para><paramref name="stageMask"/> must not include
+    /// <see cref="Stage.Host"/> (<c>VUID-vkCmdResetEvent2-stageMask-03830</c>),
+    /// and the command must be recorded outside a render pass instance
+    /// (<c>VUID-vkCmdResetEvent2-renderpass</c>).</para>
+    /// <para>Requires a non-transfer-only queue family — see
+    /// <see cref="SetEvent"/>.</para>
+    /// </remarks>
+    public void ResetEvent(in Event evt, Stage stageMask)
+    {
+        // VUID-vkCmdResetEvent2-event-parameter has no VK_NULL_HANDLE
+        // exemption, so a null handle is rejected here for the same reason
+        // AssertSplitBarrierUsable rejects it on SetEvent/WaitEvent. The
+        // empty-mix half of that helper doesn't apply — there is no
+        // dependency to be empty.
+        if (AhjoValidation.IsEnabled && evt.IsNull)
+            AhjoValidation.Fail("CommandRecorder",
+                "ResetEvent: event is a null handle. Create one with Device.CreateEvent().");
+
+        Fns.CmdResetEvent2(Handle, evt.Handle, (ulong)stageMask);
+    }
+
+    /// <summary>
+    /// Marshals a barrier mix into one <c>VkDependencyInfo</c> and dispatches
+    /// it as a pipeline barrier, an event signal, or an event wait. Sharing
+    /// one implementation is what makes "the Set and the Wait produce
+    /// byte-identical <c>VkDependencyInfo</c>s from equal inputs"
+    /// (<c>VUID-vkCmdWaitEvents2-pEvents-10788</c>) a structural property
+    /// rather than a review obligation.
+    /// </summary>
+    /// <remarks>
+    /// Performs no empty-mix check — see <see cref="PipelineBarrier"/>, which
+    /// keeps that early return at its public entry point.
+    /// </remarks>
+    private void RecordDependency(
+        DependencyOp                op,
+        VkEvent_T*                  @event,
+        ReadOnlySpan<MemoryBarrier> memory,
+        ReadOnlySpan<BufferBarrier> buffer,
+        ReadOnlySpan<ImageBarrier>  image)
+    {
         const int Threshold = 16;
         Span<VkMemoryBarrier2>       mSlab = stackalloc VkMemoryBarrier2[Threshold];
         Span<VkBufferMemoryBarrier2> bSlab = stackalloc VkBufferMemoryBarrier2[Threshold];
@@ -625,7 +787,17 @@ public unsafe ref struct CommandRecorder : IDisposable
                     imageMemoryBarrierCount  = (uint)image.Length,
                     pImageMemoryBarriers     = image.Length  > 0 ? pi : null,
                 };
-                Fns.CmdPipelineBarrier2(Handle, &dep);
+                switch (op)
+                {
+                    case DependencyOp.Barrier:  Fns.CmdPipelineBarrier2(Handle, &dep); break;
+                    case DependencyOp.SetEvent: Fns.CmdSetEvent2(Handle, @event, &dep); break;
+                    default:
+                    {
+                        VkEvent_T* e = @event;
+                        Fns.CmdWaitEvents2(Handle, 1, &e, &dep);
+                        break;
+                    }
+                }
             }
         }
         finally
@@ -636,14 +808,26 @@ public unsafe ref struct CommandRecorder : IDisposable
         }
     }
 
-    /// <summary>Image-only convenience overload — the dominant case.</summary>
-    public void PipelineBarrier(ReadOnlySpan<ImageBarrier> image)
-        => PipelineBarrier(default, default, image);
+    private static void AssertSplitBarrierUsable(
+        string caller,
+        in Event evt,
+        ReadOnlySpan<MemoryBarrier> memory,
+        ReadOnlySpan<BufferBarrier> buffer,
+        ReadOnlySpan<ImageBarrier>  image)
+    {
+        if (!AhjoValidation.IsEnabled) return;
 
-    /// <summary>Single image-barrier convenience overload.</summary>
-    public void PipelineBarrier(in ImageBarrier image)
-        => PipelineBarrier(default, default,
-            MemoryMarshal.CreateReadOnlySpan(ref Unsafe.AsRef(in image), 1));
+        if (evt.IsNull)
+            AhjoValidation.Fail("CommandRecorder",
+                $"{caller}: event is a null handle. Create one with Device.CreateEvent().");
+
+        if (memory.IsEmpty && buffer.IsEmpty && image.IsEmpty)
+            AhjoValidation.Fail("CommandRecorder",
+                $"{caller}: the dependency is empty. A split barrier with no barriers has an empty " +
+                "synchronization scope and orders nothing — the paired wait would block on a signal that " +
+                "means nothing. Pass at least one barrier (e.g. " +
+                "MemoryBarrier.Between(srcStage, Access.None, dstStage, Access.None)).");
+    }
 
     // ---- Copy / blit / clear / fill (copy_commands2 path) ----
 

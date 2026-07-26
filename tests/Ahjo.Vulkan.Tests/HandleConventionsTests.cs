@@ -59,8 +59,8 @@ public sealed class HandleConventionsTests
     [Fact]
     public void BorrowContract_HoldsForEveryHandleType()
     {
-        // The full matrix (#118): for every IVulkanHandle struct type, a
-        // FromRaw'd (borrowed) handle and default(T) report
+        // The full matrix (#118): for each of the sixteen IVulkanHandle
+        // struct types, a FromRaw'd (borrowed) handle and default(T) report
         // OwnsHandle == false, and — for the IDisposable types — Dispose is
         // a no-op rather than a vkDestroy*/vmaDestroy* dispatched through a
         // null device/allocator (issue #106's crash matrix). A missing
@@ -82,6 +82,7 @@ public sealed class HandleConventionsTests
         AssertBorrowContract<BinarySemaphore>();
         AssertBorrowContract<TimelineSemaphore>();
         AssertBorrowContract<DescriptorSet>();
+        AssertBorrowContract<Event>();
     }
 
     [Fact]
@@ -101,12 +102,31 @@ public sealed class HandleConventionsTests
         Assert.True(new GraphicsPipeline((VkPipeline_T*)0x2000, null, device).OwnsHandle);
         Assert.True(new ComputePipeline((VkPipeline_T*)0x2000, null, device).OwnsHandle);
         Assert.True(new Surface((VkSurfaceKHR_T*)0x2000, instance).OwnsHandle);
+        // Event is the first owning handle in Sync/ (#155): its neighbours
+        // Fence/BinarySemaphore/TimelineSemaphore are pool-owned, Event is
+        // caller-owned and destroys on Dispose.
+        Assert.True(new Event((VkEvent_T*)0x2000, device, EventCreateFlags.DeviceOnly).OwnsHandle);
 
         // Pool-owned types never own, even when device-bound.
         Assert.False(new Fence((VkFence_T*)0x2000, device).OwnsHandle);
         Assert.False(new TimelineSemaphore((VkSemaphore_T*)0x2000, device).OwnsHandle);
         Assert.False(new BinarySemaphore((VkSemaphore_T*)0x2000).OwnsHandle);
         Assert.False(new DescriptorSet((VkDescriptorSet_T*)0x2000, (VkDescriptorSetLayout_T*)0x3000).OwnsHandle);
+    }
+
+    [Fact]
+    public void Event_ObjectType_IsEvent()
+    {
+        Assert.Equal(VkObjectType.VK_OBJECT_TYPE_EVENT, Event.ObjectType);
+    }
+
+    [Fact]
+    public void Event_FromRaw_ReportsDeviceOnlyUnknown()
+    {
+        // false means *unknown* for a borrowed handle — the wrapper never
+        // learns a FromRaw'd event's create flags. It must not be read as
+        // "this event is host-capable".
+        Assert.False(Event.FromRaw(0x1234_5678).IsDeviceOnly);
     }
 
     [Fact]
