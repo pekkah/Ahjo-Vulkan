@@ -256,9 +256,31 @@ Four teeth, each independent:
   the ladder separates `software` from `hardware` rather than collapsing them.
 - **`VulkanDriverProbe._hasValidationLayer` short-circuits on `_hasDriver`**
   (`VulkanDriverProbe.cs:37`). Layer enumeration does not actually require an ICD,
-  so this couples two independent facts. It has no effect on any current outcome
-  (every layer-gated test needs a device anyway) and this design keeps the
-  coupling rather than changing observable behaviour as a side effect.
+  so this couples two independent facts. The coupling to *a driver* is kept: every
+  layer-gated test needs a device to do anything with the layer, so a driverless
+  host should report the driver gap, not a layer gap.
+
+  **Corrected after review (2026-07-26).** An earlier draft of this note claimed the
+  coupling "has no effect on any current outcome (every layer-gated test needs a
+  device anyway)" and proposed deriving the layer bit from the ordered ladder as
+  `Observed >= Validation`. That was wrong, and the implementation does not do it:
+  - True for `RequireDriver`, false for `RequireHardwareDriver`. Ten sites gate on
+    driver + validation with **no** hardware gate — `InstanceCreateTests.cs:36, 102,
+    154, 188, 226, 250`, `InstanceFunctionTableTests.cs:12`,
+    `QueueOwnershipTransferTests.cs:25, 141`, `CommandRecorderTests.cs:744`. A CPU
+    device caps `Observed` at `Software`, so on a software-ICD host that *has* the
+    layer those ten tests ran before this change and would skip after it, reported
+    as `[gate:validation] … not installed` when the layer is installed and the real
+    cause is the device type. A misdiagnosis by the mechanism whose purpose is
+    honest classification.
+  - It would also cap the Windows lane at `software` forever, foreclosing the prize
+    named two bullets down — the one route to CI-provable validation-layer coverage.
+
+  So: the ordered enum describes the **declaration** only. `HasValidationLayer` is
+  `HasDriver && <independent layer probe>`, and the `Validation` rung of `Observed`
+  reads that same independent bit. Adding `RequireHardwareDriver` to those ten sites
+  was considered and rejected — it would silently narrow ten tests' coverage to buy
+  a tidier ladder.
 
 ## Stopping the recurrence
 

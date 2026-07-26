@@ -5,7 +5,9 @@ namespace Ahjo.Vulkan.Testing;
 /// <summary>Ordered ladder of Vulkan capability a test host can offer.</summary>
 /// <remarks>
 /// Ordered on purpose: a comparison against the declared tier is the whole
-/// mechanism, so every higher rung implies every lower one.
+/// mechanism, so every higher rung implies every lower one. The ordering
+/// describes the <em>declaration</em> only — individual capabilities are probed
+/// independently, see <see cref="VulkanEnvironment.HasValidationLayer"/>.
 /// </remarks>
 internal enum VulkanCapability
 {
@@ -49,6 +51,7 @@ internal static unsafe class VulkanEnvironment
 
     private static readonly Lazy<VulkanCapability> _declared = new(ParseDeclaredTier);
     private static readonly Lazy<(VulkanCapability Capability, string Detail)> _observed = new(Probe);
+    private static readonly Lazy<bool> _hasLayer = new(ProbeValidationLayer);
 
     /// <summary>
     /// Parsed <c>AHJO_VULKAN_TIER</c>. Unset or empty =&gt;
@@ -57,7 +60,7 @@ internal static unsafe class VulkanEnvironment
     /// </summary>
     public static VulkanCapability Declared => _declared.Value;
 
-    /// <summary>What this host actually offers. Probed once, cached.</summary>
+    /// <summary>What this host actually offers. Probed once, cached, never throws.</summary>
     public static VulkanCapability Observed => _observed.Value.Capability;
 
     /// <summary>One sentence naming why <see cref="Observed"/> stopped where it did.</summary>
@@ -69,8 +72,26 @@ internal static unsafe class VulkanEnvironment
     /// <summary>The ICD that answered reports <c>VK_PHYSICAL_DEVICE_TYPE_CPU</c>.</summary>
     public static bool IsSoftwareDriver => Observed == VulkanCapability.Software;
 
-    /// <summary><c>VK_LAYER_KHRONOS_validation</c> is available on a hardware device.</summary>
-    public static bool HasValidationLayer => Observed >= VulkanCapability.Validation;
+    /// <summary>
+    /// <c>VK_LAYER_KHRONOS_validation</c> is available on this host.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately <em>not</em> <c>Observed &gt;= Validation</c>. The layer is an
+    /// instance-level fact independent of the device type, and reading it off the
+    /// ladder would cap a software-ICD host at <see cref="VulkanCapability.Software"/>
+    /// and make ten driver+validation-gated tests report
+    /// <c>[gate:validation] … not installed</c> when the layer is in fact
+    /// installed and the real cause is the CPU device. That is a misdiagnosis by
+    /// the mechanism whose entire purpose is honest classification. It would also
+    /// mean the Windows lane could never declare above <c>software</c> even with a
+    /// working SwiftShader ICD, foreclosing the one route to CI-provable
+    /// validation-layer coverage.
+    ///
+    /// Still gated on <see cref="HasDriver"/>: every layer-gated test needs a
+    /// device to do anything with the layer, and this keeps a driverless host
+    /// reporting the driver gap rather than a layer gap.
+    /// </remarks>
+    public static bool HasValidationLayer => HasDriver && _hasLayer.Value;
 
     /// <summary>The lowercase spelling a lane writes into <c>AHJO_VULKAN_TIER</c>.</summary>
     public static string Name(VulkanCapability capability) => capability switch
@@ -111,17 +132,63 @@ internal static unsafe class VulkanEnvironment
         };
     }
 
+    private static (VulkanCapability, string) Probe() => GuardProbe(ProbeCore);
+
+    /// <summary>
+    /// Turns any throw out of the probe into <see cref="VulkanCapability.None"/>
+    /// plus a detail naming the exception. The seam exists so
+    /// <c>VulkanEnvironmentProbeTests</c> can prove the conversion without a
+    /// deliberately broken loader on the host.
+    /// </summary>
+    /// <remarks>
+    /// Load-bearing, not defensive tidiness. <see cref="Lazy{T}"/> in its default
+    /// mode caches a factory exception and rethrows it on every subsequent
+    /// <c>.Value</c>, so one throw here turns all ~225
+    /// <c>TestGate.RequireDriver()</c> gates into <em>errors</em> rather than
+    /// skips. Those errors report <c>outcome="Failed"</c>, which the coverage
+    /// summary counts as neither a coverage gap nor an unclassified skip — the
+    /// table would claim zero gaps in exactly the situation it was built for —
+    /// and <c>VulkanTierContractTests</c> would error too, so the one actionable
+    /// message never prints. Fail closed instead: the gates skip, and the tier
+    /// contract goes red once with the exception text as its detail.
+    /// </remarks>
+    internal static (VulkanCapability Capability, string Detail) GuardProbe(
+        Func<(VulkanCapability, string)> probe)
+    {
+        try
+        {
+            return probe();
+        }
+        catch (DllNotFoundException)
+        {
+            return (VulkanCapability.None, "no vulkan-1 loader on this host");
+        }
+        catch (Exception ex)
+        {
+            // Realistic and not DllNotFoundException: a wrong-architecture
+            // vulkan-1.dll on the search path (BadImageFormatException), a
+            // loader that resolves but does not export vkCreateInstance
+            // (EntryPointNotFoundException).
+            return (VulkanCapability.None, $"vulkan probe threw {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
     // Walks the ladder bottom-up and stops at the first rung the host fails,
-    // recording why. The apiVersion values are the ones the pre-#158
-    // VulkanDriverProbe used — 1.0 to ask "is there any ICD at all", 1.3 for
-    // the device query. Changing either changes what the probe accepts.
-    private static (VulkanCapability, string) Probe()
+    // recording why. One instance at apiVersion 1.3, which is what the pre-#158
+    // device probe used: a modern loader clamps a higher request down, and
+    // vkEnumeratePhysicalDevices / vkGetPhysicalDeviceProperties are both core
+    // 1.0, so a 1.0-only ICD behind a modern loader still answers.
+    //
+    // Every ObservedDetail below has to be distinct and literally true: it is the
+    // one sentence VulkanTierContractTests prints when a lane goes red, so it is
+    // the deliverable, not decoration.
+    private static (VulkanCapability, string) ProbeCore()
     {
         VkInstance_T* instance = null;
         var appInfo = new VkApplicationInfo
         {
             sType      = VkStructureType.VK_STRUCTURE_TYPE_APPLICATION_INFO,
-            apiVersion = (1u << 22) | (0u << 12), // 1.0
+            apiVersion = (1u << 22) | (3u << 12), // 1.3
         };
         var createInfo = new VkInstanceCreateInfo
         {
@@ -129,47 +196,36 @@ internal static unsafe class VulkanEnvironment
             pApplicationInfo = &appInfo,
         };
 
-        VkResult result;
-        try
-        {
-            result = Vk.vkCreateInstance(&createInfo, null, &instance);
-        }
-        catch (DllNotFoundException)
-        {
-            return (VulkanCapability.None, "no vulkan-1 loader on this host");
-        }
+        VkResult created = Vk.vkCreateInstance(&createInfo, null, &instance);
+        if (created != VkResult.VK_SUCCESS)
+            return (VulkanCapability.None, $"vkCreateInstance returned {created}");
 
-        if (result != VkResult.VK_SUCCESS)
-            return (VulkanCapability.None, $"vkCreateInstance returned {result}");
-
-        Vk.vkDestroyInstance(instance, null);
-
-        // Device query on its own 1.3 instance, matching the pre-#158 probe.
-        VkInstance_T* deviceInstance = null;
-        var deviceAppInfo = new VkApplicationInfo
-        {
-            sType      = VkStructureType.VK_STRUCTURE_TYPE_APPLICATION_INFO,
-            apiVersion = (1u << 22) | (3u << 12), // 1.3
-        };
-        var deviceCreateInfo = new VkInstanceCreateInfo
-        {
-            sType            = VkStructureType.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-            pApplicationInfo = &deviceAppInfo,
-        };
-        VkResult deviceInstanceResult = Vk.vkCreateInstance(&deviceCreateInfo, null, &deviceInstance);
-        if (deviceInstanceResult != VkResult.VK_SUCCESS)
-            return (VulkanCapability.None, $"vkCreateInstance returned {deviceInstanceResult}");
+        // VK_SUCCESS with a null handle is a configuration this repo already
+        // treats as reachable (VmaSmokeTests asserts it). `instance` is not
+        // optional on vkEnumeratePhysicalDevices — passing VK_NULL_HANDLE faults
+        // in the loader's dispatch-table lookup rather than returning an error.
+        if (instance == null)
+            return (VulkanCapability.None, "vkCreateInstance returned VK_SUCCESS but wrote a null instance handle");
 
         try
         {
             uint gpuCount = 0;
-            if (Vk.vkEnumeratePhysicalDevices(deviceInstance, &gpuCount, null) != VkResult.VK_SUCCESS || gpuCount == 0)
+            VkResult counted = Vk.vkEnumeratePhysicalDevices(instance, &gpuCount, null);
+            if (counted != VkResult.VK_SUCCESS)
+                return (VulkanCapability.None, $"vkEnumeratePhysicalDevices (count query) returned {counted}");
+            if (gpuCount == 0)
                 return (VulkanCapability.None, "vkEnumeratePhysicalDevices reported zero devices");
 
             VkPhysicalDevice_T* gpu = null;
             uint one = 1;
-            if (Vk.vkEnumeratePhysicalDevices(deviceInstance, &one, &gpu) is not (VkResult.VK_SUCCESS or VkResult.VK_INCOMPLETE) || gpu == null)
-                return (VulkanCapability.None, "vkEnumeratePhysicalDevices reported zero devices");
+            VkResult fetched = Vk.vkEnumeratePhysicalDevices(instance, &one, &gpu);
+            if (fetched is not (VkResult.VK_SUCCESS or VkResult.VK_INCOMPLETE))
+                return (VulkanCapability.None, $"vkEnumeratePhysicalDevices (handle fetch) returned {fetched}");
+            if (gpu == null)
+            {
+                return (VulkanCapability.None,
+                    $"vkEnumeratePhysicalDevices returned {fetched} but wrote a null physical-device handle");
+            }
 
             VkPhysicalDeviceProperties props;
             Vk.vkGetPhysicalDeviceProperties(gpu, &props);
@@ -181,40 +237,49 @@ internal static unsafe class VulkanEnvironment
         }
         finally
         {
-            Vk.vkDestroyInstance(deviceInstance, null);
+            Vk.vkDestroyInstance(instance, null);
         }
 
-        // The layer probe needs no ICD in principle, but the pre-#158 code
-        // reached it only when a driver existed and the ladder keeps that
-        // coupling — see the spec's uncertainty section. Do not decouple here.
-        if (!HasKhronosValidationLayer())
+        if (!_hasLayer.Value)
             return (VulkanCapability.Hardware, "VK_LAYER_KHRONOS_validation is not installed");
 
         return (VulkanCapability.Validation, "hardware device + VK_LAYER_KHRONOS_validation");
     }
 
-    private static bool HasKhronosValidationLayer()
+    // Independent of any instance and of the device type — see HasValidationLayer.
+    // Guarded for the same reason Probe is: a throw cached in this Lazy would turn
+    // the 13 layer gates into errors instead of skips.
+    private static bool ProbeValidationLayer()
     {
-        uint count = 0;
-        if (Vk.vkEnumerateInstanceLayerProperties(&count, null) != VkResult.VK_SUCCESS || count == 0)
-            return false;
-
-        var props = new VkLayerProperties[count];
-        fixed (VkLayerProperties* p = props)
+        try
         {
-            if (Vk.vkEnumerateInstanceLayerProperties(&count, p) != VkResult.VK_SUCCESS)
+            uint count = 0;
+            if (Vk.vkEnumerateInstanceLayerProperties(&count, null) != VkResult.VK_SUCCESS || count == 0)
                 return false;
-        }
 
-        ReadOnlySpan<byte> target = "VK_LAYER_KHRONOS_validation"u8;
-        for (int i = 0; i < count; i++)
-        {
-            fixed (VkLayerProperties* entry = &props[i])
+            var props = new VkLayerProperties[count];
+            fixed (VkLayerProperties* p = props)
             {
-                if (Match((sbyte*)entry, target)) return true;
+                if (Vk.vkEnumerateInstanceLayerProperties(&count, p) != VkResult.VK_SUCCESS)
+                    return false;
             }
+
+            ReadOnlySpan<byte> target = "VK_LAYER_KHRONOS_validation"u8;
+            for (int i = 0; i < count; i++)
+            {
+                fixed (VkLayerProperties* entry = &props[i])
+                {
+                    if (Match((sbyte*)entry, target)) return true;
+                }
+            }
+            return false;
         }
-        return false;
+        catch (Exception)
+        {
+            // No layer we can prove is present. Gates skip; a lane that declared
+            // `validation` still goes red through the tier contract.
+            return false;
+        }
     }
 
     /// <summary>
