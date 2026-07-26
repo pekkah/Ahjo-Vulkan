@@ -1,4 +1,5 @@
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -8,7 +9,7 @@ public sealed unsafe class InstanceCreateTests
     [Fact]
     public void Create_MinimalDescription_Succeeds()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(new InstanceDescription
         {
@@ -21,7 +22,7 @@ public sealed unsafe class InstanceCreateTests
     [Fact]
     public void Create_DefaultsApiVersionWhenZero()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
 
@@ -31,8 +32,8 @@ public sealed unsafe class InstanceCreateTests
     [Fact]
     public void Create_WithValidation_DefaultCallback_FiresOnUnknownExtension()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver,           "No Vulkan driver on host.");
-        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer,  "Validation layer not installed.");
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer();
 
         var stderr = new StringWriter();
         var oldErr = Console.Error;
@@ -70,7 +71,7 @@ public sealed unsafe class InstanceCreateTests
     [Fact]
     public void IsExtensionSupported_KnownInstanceExtension_True()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         // VK_KHR_surface is advertised by every desktop loader with at least
         // one WSI-capable ICD — the probe already established a driver exists.
@@ -80,7 +81,7 @@ public sealed unsafe class InstanceCreateTests
     [Fact]
     public void IsExtensionSupported_UnknownExtension_False()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         Assert.False(Instance.IsExtensionSupported(
             Utf8Name.FromLiteral("VK_FAKE_extension_does_not_exist"u8)));
@@ -97,8 +98,8 @@ public sealed unsafe class InstanceCreateTests
     [Fact]
     public void Create_WithValidation_ManagedCallback_RoundTripsMessage()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver,           "No Vulkan driver on host.");
-        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer,  "Validation layer not installed.");
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer();
 
         var captured = new List<DebugMessage>();
 
@@ -149,8 +150,8 @@ public sealed unsafe class InstanceCreateTests
     [Fact]
     public void Create_WithValidation_RawCallback_IsInvoked()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver,           "No Vulkan driver on host.");
-        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer,  "Validation layer not installed.");
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer();
 
         s_rawCallbackHits = 0;
 
@@ -183,8 +184,8 @@ public sealed unsafe class InstanceCreateTests
     [Fact]
     public void PersistentMessenger_FiresOnPostCreateValidationViolation()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver,           "No Vulkan driver on host.");
-        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer,  "Validation layer not installed.");
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer();
 
         var captured = new List<DebugMessage>();
         using var instance = Instance.Create(new InstanceDescription
@@ -211,7 +212,7 @@ public sealed unsafe class InstanceCreateTests
     [Fact]
     public void Dispose_TwiceIsIdempotent()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         var instance = Instance.Create(new InstanceDescription { ApiVersion = VulkanVersion.V1_4 });
         instance.Dispose();
@@ -221,8 +222,8 @@ public sealed unsafe class InstanceCreateTests
     [Fact]
     public void Dispose_AfterValidationCreate_DestroysMessengerAndInstance()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver,           "No Vulkan driver on host.");
-        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer,  "Validation layer not installed.");
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer();
 
         var first = Instance.Create(new InstanceDescription
         {
@@ -245,8 +246,8 @@ public sealed unsafe class InstanceCreateTests
     [Fact]
     public void Create_FailureWithManagedCallback_FreesGCHandleAndAllowsSubsequentCreate()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver,           "No Vulkan driver on host.");
-        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer,  "Validation layer not installed.");
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer();
 
         // Same try/catch CS8175 workaround pattern used by the other validation tests.
         VulkanException? ex = null;

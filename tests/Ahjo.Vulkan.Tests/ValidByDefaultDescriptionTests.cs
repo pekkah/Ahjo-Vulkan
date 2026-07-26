@@ -1,4 +1,5 @@
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -89,8 +90,8 @@ public sealed class ValidByDefaultDescriptionTests
     [Fact]
     public void CreateImage_MinimalDescription_Succeeds()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): hangs inside the driver during image-view creation.");
 
         using var instance = Instance.Create(default);
@@ -127,8 +128,8 @@ public sealed class ValidByDefaultDescriptionTests
     [Fact]
     public void CreateView_ArrayImage_RemainingLayersValidOnceViewTypeSet()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): hangs inside the driver during image-view creation.");
 
         using var instance = Instance.Create(default);
@@ -162,7 +163,7 @@ public sealed class ValidByDefaultDescriptionTests
     [Fact]
     public void CreateDescriptorSetLayout_DefaultBindingElement_NormalizesCount()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);

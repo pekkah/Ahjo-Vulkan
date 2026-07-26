@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -73,11 +74,11 @@ public sealed unsafe class ExportableResourceTests
     [Fact]
     public void ExportableImage_Create_Export_RoundTrip()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using Device? device = TryCreateDeviceWith(instance, ExternalMemoryExt, out uint _);
-        Assert.SkipWhen(device is null, "Device does not expose the external-memory export extension.");
+        TestGate.RequireDeviceFeature(device is not null, "Device does not expose the external-memory export extension.");
 
         using var exportable = ExportableImage.Create(device!, new ImageDescription
         {
@@ -115,11 +116,11 @@ public sealed unsafe class ExportableResourceTests
     [Fact]
     public void ExportableSemaphore_Binary_Export_RoundTrip()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using Device? device = TryCreateDeviceWith(instance, ExternalSemaphoreExt, out uint _);
-        Assert.SkipWhen(device is null, "Device does not expose the external-semaphore export extension.");
+        TestGate.RequireDeviceFeature(device is not null, "Device does not expose the external-semaphore export extension.");
 
         using var sem = ExportableSemaphore.CreateBinary(device!);
         Assert.False(sem.IsNull);
@@ -144,11 +145,11 @@ public sealed unsafe class ExportableResourceTests
     [Fact]
     public void ExportableSemaphore_Timeline_Export_RoundTrip()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using Device? device = TryCreateDeviceWith(instance, ExternalSemaphoreExt, out uint _);
-        Assert.SkipWhen(device is null, "Device does not expose the external-semaphore export extension.");
+        TestGate.RequireDeviceFeature(device is not null, "Device does not expose the external-semaphore export extension.");
 
         using var sem = ExportableSemaphore.CreateTimeline(device!, initialValue: 7);
         Assert.False(sem.IsNull);

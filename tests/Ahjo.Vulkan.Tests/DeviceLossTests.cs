@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -19,7 +20,7 @@ public sealed class DeviceLossTests
     [Fact]
     public void IsLost_DefaultsFalse_MarkLostFlipsOnce()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out _);
@@ -40,7 +41,7 @@ public sealed class DeviceLossTests
     [Fact]
     public void Fence_Wait_AfterLoss_ReturnsDeviceLostImmediately()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out _);
@@ -65,7 +66,7 @@ public sealed class DeviceLossTests
     [Fact]
     public void Fence_IsSignaled_AfterLoss_ThrowsDeviceLost_Deterministically()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out _);
@@ -88,7 +89,7 @@ public sealed class DeviceLossTests
     [Fact]
     public void FencePool_Release_AfterLoss_SkipsStatusQuery()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out _);
@@ -104,7 +105,7 @@ public sealed class DeviceLossTests
     [Fact]
     public void TimelineSemaphore_WaitFor_AfterLoss_ReturnsDeviceLostImmediately()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out _);
@@ -130,8 +131,8 @@ public sealed class DeviceLossTests
     [Fact]
     public void FrameRing_Dispose_AfterLoss_WithPendingSubmit_CompletesAllSlots()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
 
         using var instance = Instance.Create(default);
@@ -181,7 +182,7 @@ public sealed class DeviceLossTests
     [Fact]
     public void ResultExtensions_DeviceLostThrow_MarksLiveDevices()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out _);
@@ -195,7 +196,7 @@ public sealed class DeviceLossTests
     [Fact]
     public void ResultExtensions_DeviceLostThrow_DoesNotMarkDisposedDevices()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         var device = CreateGraphicsDevice(instance, out _);

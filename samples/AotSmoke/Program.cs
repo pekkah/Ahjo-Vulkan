@@ -27,13 +27,32 @@ internal static unsafe class Program
         Console.WriteLine($"Ahjo.Vulkan AOT smoke — native AOT? {!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported}");
 
         // Probe for a working Vulkan ICD before doing any other work.
-        // On hosts without one (e.g. windows-latest GitHub runners — no
-        // ICD provisioned per issue 32), AOT publishing the wrapper is
-        // still meaningful regression coverage even though the smoke
-        // run itself can't proceed. Skip cleanly with exit 0 so CI's
-        // publish + run step still passes.
+        // AOT publishing the wrapper is meaningful regression coverage on its
+        // own, so a host with no usable ICD still exits 0 — but only when
+        // nothing was declared. A lane that sets AHJO_VULKAN_TIER to
+        // `software` or above provisions an ICD on purpose (the Windows lane's
+        // does not currently answer — issue 152), and there a driverless run
+        // means the provisioning broke, so it exits non-zero instead of
+        // reporting a green smoke run that executed nothing. Issue 158.
         if (!HasVulkanDriver())
         {
+            // Read AHJO_VULKAN_TIER locally and deliberately: samples must not
+            // depend on tests/Shared/*.cs, and an env-var read plus a string
+            // compare is the whole requirement. Do not "fix" this duplication
+            // by linking the test sources in — it would put xunit on a
+            // PublishAot=true sample.
+            string? tier = Environment.GetEnvironmentVariable("AHJO_VULKAN_TIER");
+            bool declaresDevice = !string.IsNullOrWhiteSpace(tier)
+                && !string.Equals(tier.Trim(), "none", StringComparison.OrdinalIgnoreCase);
+            if (declaresDevice)
+            {
+                Console.Error.WriteLine(
+                    $"AHJO_VULKAN_TIER={tier} requires a Vulkan device, but none was found; " +
+                    "AOT publish succeeded, smoke run did not execute.");
+                // 2 is the missing-shader path, 3 the fence timeout below.
+                return 4;
+            }
+
             Console.WriteLine("No Vulkan driver detected; AOT publish verified, skipping smoke run.");
             return 0;
         }

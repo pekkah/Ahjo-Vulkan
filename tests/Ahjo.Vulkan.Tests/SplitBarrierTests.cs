@@ -1,4 +1,5 @@
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -36,7 +37,7 @@ public sealed unsafe class SplitBarrierTests
     [Fact]
     public void CreateEvent_DeviceOnly_IsOwningAndDisposes()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out _);
@@ -182,7 +183,7 @@ public sealed unsafe class SplitBarrierTests
     [Fact]
     public void SetEvent_NullEvent_FailsUnderValidation()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -213,7 +214,7 @@ public sealed unsafe class SplitBarrierTests
     [Fact]
     public void SetEvent_EmptyDependency_FailsUnderValidation()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -244,7 +245,7 @@ public sealed unsafe class SplitBarrierTests
     [Fact]
     public void ResetEvent_NullEvent_FailsUnderValidation()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -275,10 +276,10 @@ public sealed unsafe class SplitBarrierTests
 
     private static void SkipUnlessValidatedSubmitPossible()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
-        Assert.SkipUnless(VulkanDriverProbe.HasValidationLayer, "Validation layer not installed.");
+        TestGate.RequireValidationLayer();
     }
 
     private static Instance CreateValidatedInstance(List<DebugMessage> errors)

@@ -1,6 +1,7 @@
 using System.IO;
 using System.Runtime.InteropServices;
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -162,8 +163,8 @@ public sealed class SpecializationInfoTests
     [Fact]
     public void Builder_SpecializesLocalSizeAtRuntime()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(File.Exists(SpecFillSpvPath), $"spec_fill.comp.spv missing at {SpecFillSpvPath}.");
+        TestGate.RequireDriver();
+        TestGate.RequireSpirv(SpecFillSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);

@@ -1,6 +1,6 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Ahjo.Vulkan.Vma.Native;
 using Xunit;
 
@@ -24,6 +24,13 @@ public unsafe class VmaSmokeTests
     [Fact]
     public void CreateAllocator_AllocateBuffer_DestroyAllocator_RoundTrips()
     {
+        // A driverless host genuinely can't run this, so it skips — but the
+        // lane that provisions an ICD on purpose declares AHJO_VULKAN_TIER
+        // and VulkanTierContractTests fails there instead, which is what
+        // keeps the #144 guard (a shipped libvma.so nothing ever executed)
+        // from quietly evaporating. See docs/ci-coverage.md.
+        TestGate.RequireDriver();
+
         VkInstance_T* instance = null;
         VkDevice_T* device = null;
         VmaAllocator_T* allocator = null;
@@ -45,21 +52,13 @@ public unsafe class VmaSmokeTests
             };
 
             VkResult instanceResult = Vk.vkCreateInstance(&instanceCreateInfo, null, &instance);
-            if (instanceResult == VkResult.VK_ERROR_INCOMPATIBLE_DRIVER || instance == null)
-            {
-                // No driver in this environment — the test can't proceed.
-                // The Vulkan smoke suite already proves loader resolution works.
-                NoDriver($"vkCreateInstance returned {instanceResult}");
-            }
             Assert.Equal(VkResult.VK_SUCCESS, instanceResult);
+            Assert.True(instance != null, "VK_SUCCESS but instance pointer is null");
 
             // ---- Pick a physical device ----
             uint deviceCount = 0;
             Assert.Equal(VkResult.VK_SUCCESS, Vk.vkEnumeratePhysicalDevices(instance, &deviceCount, null));
-            if (deviceCount == 0)
-            {
-                NoDriver("vkEnumeratePhysicalDevices reported zero devices");
-            }
+            Assert.True(deviceCount >= 1, "vkEnumeratePhysicalDevices reported zero devices");
 
             VkPhysicalDevice_T** physicalDevices = (VkPhysicalDevice_T**)NativeMemory.Alloc(
                 (nuint)(deviceCount * (uint)sizeof(nint)));
@@ -164,31 +163,6 @@ public unsafe class VmaSmokeTests
                 Vk.vkDestroyInstance(instance, null);
             }
         }
-    }
-
-    /// <summary>
-    /// Bail out of a run that has no usable driver: a reported skip normally,
-    /// a hard failure when <c>AHJO_REQUIRE_VULKAN_DEVICE=1</c>.
-    /// </summary>
-    /// <remarks>
-    /// A driverless host genuinely can't run this test, but a lane that
-    /// provisions an ICD on purpose has no business passing without one —
-    /// there, a missing device means the provisioning broke and the test
-    /// silently stopped covering the native library it exists to cover.
-    /// That gap is why issue #144 (linux-x64 VMA SIGSEGV, C++14 landing on
-    /// VMA's null-returning aligned_alloc stub) reached NuGet: nothing on any
-    /// lane ever executed the Linux binary. CI sets the variable wherever it
-    /// installs a driver.
-    /// </remarks>
-    [DoesNotReturn]
-    private static void NoDriver(string reason)
-    {
-        Assert.False(
-            Environment.GetEnvironmentVariable("AHJO_REQUIRE_VULKAN_DEVICE") == "1",
-            $"AHJO_REQUIRE_VULKAN_DEVICE=1 demands a working driver, but {reason}. " +
-            "The ICD provisioning for this lane is broken — fix it rather than relaxing this assert.");
-        Assert.Skip($"No Vulkan driver on host ({reason}).");
-        throw new InvalidOperationException("unreachable"); // Assert.Skip always throws.
     }
 
     private static uint MakeApiVersion(uint variant, uint major, uint minor, uint patch)

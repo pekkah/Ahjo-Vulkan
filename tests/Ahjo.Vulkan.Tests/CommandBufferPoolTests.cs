@@ -1,4 +1,5 @@
 using System.Threading;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -8,7 +9,7 @@ public sealed class CommandBufferPoolTests
     [Fact]
     public void Begin_End_Allocates_Once()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         uint family = PickGraphicsFamily(instance, out var gpu);
@@ -36,7 +37,7 @@ public sealed class CommandBufferPoolTests
     [Fact]
     public void Begin_Twice_AllocatesTwo_BeforeReset()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         uint family = PickGraphicsFamily(instance, out var gpu);
@@ -57,7 +58,7 @@ public sealed class CommandBufferPoolTests
     [Fact]
     public void ResetForFrame_RecyclesSpentBuffers()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         uint family = PickGraphicsFamily(instance, out var gpu);
@@ -90,11 +91,11 @@ public sealed class CommandBufferPoolTests
         // the recorded buffer by raw handle (CommandRecorder is a
         // ref struct so it can't cross threads, but the VkCommandBuffer
         // pointer can — see Queue.Submit2(nint, in Fence)).
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
         // vkQueueSubmit2 SIGSEGVs inside Mesa lavapipe ~17 tests' worth
         // (see project_lavapipe_vma_segfault memory) — gate the same
         // way the rest of the queue-submitting suite does.
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireHardwareDriver(
             "Software driver — vkQueueSubmit2 SIGSEGV on lavapipe; gated.");
 
         using var instance = Instance.Create(default);
@@ -188,7 +189,7 @@ public sealed class CommandBufferPoolTests
     [Fact]
     public void Begin_AfterDispose_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         uint family = PickGraphicsFamily(instance, out var gpu);

@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -16,8 +17,8 @@ public sealed unsafe class SwapchainTests
     [Fact]
     public void Win32_Surface_Plus_Swapchain_Creates_Multiple_Images()
     {
-        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
 
         using var window = new Win32Window(800, 600, $"AhjoVk_{Guid.NewGuid():N}");
 
@@ -54,8 +55,8 @@ public sealed unsafe class SwapchainTests
     [Fact]
     public void Recreate_Swapchain_At_New_Extent()
     {
-        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
 
         using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
 
@@ -101,8 +102,8 @@ public sealed unsafe class SwapchainTests
     [Fact]
     public void Recreate_InvokesSyncCallback_InsteadOfWaitIdle()
     {
-        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
 
         using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
@@ -125,8 +126,8 @@ public sealed unsafe class SwapchainTests
     [Fact]
     public void Swapchain_Recreate_With_Different_Surface_Throws()
     {
-        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
 
         using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
@@ -167,8 +168,8 @@ public sealed unsafe class SwapchainTests
     [Fact]
     public void NegotiateFormat_Walks_PreferredFormats_In_Priority_Order()
     {
-        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
 
         using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
@@ -263,8 +264,8 @@ public sealed unsafe class SwapchainTests
     [Fact]
     public void AcquireNextImage_Writes_ImageIndex_Into_HeapTarget()
     {
-        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
 
         using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
@@ -335,8 +336,8 @@ public sealed unsafe class SwapchainTests
     [Fact]
     public void Request_ImmediatePresentMode_IsHonouredWhenSupported()
     {
-        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
 
         using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
@@ -352,7 +353,7 @@ public sealed unsafe class SwapchainTests
             Vk.vkGetPhysicalDeviceSurfacePresentModesKHR(device.PhysicalDevice.Handle, surface.Handle, &count, p).ThrowIfFailed();
 
         bool supportsImmediate = Array.IndexOf(modes, VkPresentModeKHR.VK_PRESENT_MODE_IMMEDIATE_KHR) >= 0;
-        Assert.SkipUnless(supportsImmediate, "Surface does not expose VK_PRESENT_MODE_IMMEDIATE_KHR.");
+        TestGate.RequireDeviceFeature(supportsImmediate, "Surface does not expose VK_PRESENT_MODE_IMMEDIATE_KHR.");
 
         var desc = new SwapchainDescription
         {
@@ -371,8 +372,8 @@ public sealed unsafe class SwapchainTests
     [Fact]
     public void NewSwapchain_StartsReady()
     {
-        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
 
         using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
@@ -389,8 +390,8 @@ public sealed unsafe class SwapchainTests
     [Fact]
     public void Recreate_ReturnsReady_OnSuccess()
     {
-        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
 
         using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
@@ -414,8 +415,8 @@ public sealed unsafe class SwapchainTests
     [Fact]
     public void AcquireAndPresent_InMinimizedOrPoisoned_Throw()
     {
-        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
 
         using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
@@ -451,8 +452,8 @@ public sealed unsafe class SwapchainTests
     [Fact]
     public void Recreate_AfterDeviceLoss_ThrowsAndPoisons()
     {
-        Assert.SkipUnless(IsWindows, "Surface tests are Win32-only for now.");
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
 
         using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
         Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];

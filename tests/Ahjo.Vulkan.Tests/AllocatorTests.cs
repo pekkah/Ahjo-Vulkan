@@ -1,4 +1,5 @@
 using System.IO;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -8,7 +9,7 @@ public sealed class AllocatorTests
     [Fact]
     public void Create_AllocateBuffer_DestroyBuffer_Dispose_RoundTrips()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         uint gfxFamily = PickGraphicsFamily(instance, out var gpu);
@@ -42,7 +43,7 @@ public sealed class AllocatorTests
     [Fact]
     public void Device_AllocatorProperty_LazyAndCached()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         uint gfxFamily = PickGraphicsFamily(instance, out var gpu);
@@ -63,7 +64,7 @@ public sealed class AllocatorTests
     [Fact]
     public void Dispose_LeakedBuffer_LogsWarning()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         uint gfxFamily = PickGraphicsFamily(instance, out var gpu);

@@ -1,4 +1,5 @@
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -12,7 +13,7 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void Construction_Builds_N_Slots_With_Resources()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -26,7 +27,7 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void BeginFrame_Rotates_Slot_Index()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -52,8 +53,8 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void Hundred_Headless_Frames_Loop_Without_Errors()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
 
         using var instance = Instance.Create(default);
@@ -89,8 +90,8 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void Backpressure_BeginFrame_Waits_On_Reused_Slot()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
 
         using var instance = Instance.Create(default);
@@ -129,7 +130,7 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void DescriptorSets_Default_NullWhenNotConfigured()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -143,7 +144,7 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void DescriptorSets_Mismatched_Args_Throw()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -164,8 +165,8 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void DescriptorSets_Pool_ResetsBetweenFrames()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
 
         using var instance = Instance.Create(default);
@@ -224,7 +225,7 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void DescriptorSets_Pool_IsPerSlot()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -252,7 +253,7 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void Construction_StagingUploader_Failure_Unwinds_Earlier_Resources()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -279,7 +280,7 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void Construction_LaterSlot_Failure_Disposes_EarlierSlots()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -308,8 +309,8 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void Dispose_AfterBeginFrameWithoutSubmit_DoesNotHang()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
 
         using var instance = Instance.Create(default);
@@ -367,7 +368,7 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void Aborted_Frame_DoesNot_Poison_Subsequent_Ring()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -406,7 +407,7 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void RecycleStaleAcquireSemaphores_RotatesFlaggedSlotsOnly()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -455,8 +456,8 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void RecycleStaleAcquireSemaphores_AfterSubmit_LeavesHandleUntouched()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
 
         using var instance = Instance.Create(default);
@@ -512,7 +513,7 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void WaitForInFlightFences_NoPendingSubmits_ReturnsImmediately()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -529,8 +530,8 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void WaitForInFlightFences_AfterSubmit_DrainsPendingWork()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
 
         using var instance = Instance.Create(default);
@@ -565,7 +566,7 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void Dispose_Is_Idempotent()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -578,7 +579,7 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void BeginFrame_After_Dispose_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -598,7 +599,7 @@ public sealed unsafe class FrameRingTests
     [Fact]
     public void Dispose_WithPendingAcquireSignal_Completes()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);

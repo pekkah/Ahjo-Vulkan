@@ -24,6 +24,17 @@
   </ItemGroup>
 
   <!--
+    The declared-tier mechanism (issue #158), shared by every suite that
+    touches Vulkan so each `dotnet test` carries its own proof that the
+    lane's AHJO_VULKAN_TIER was actually met. Ahjo.Vulkan.Ktx.Native.Tests
+    deliberately does not link these — its contract is to pass with no
+    loader and no ICD. See docs/ci-coverage.md.
+  -->
+  <ItemGroup>
+    <Compile Include="..\Shared\*.cs" LinkBase="Shared" />
+  </ItemGroup>
+
+  <!--
     Compile every .vert/.frag/.comp shader in Shaders/ to .spv via glslc
     before the build copies test content. The output lands next to the
     test DLL as "Shaders/<name>.spv" so SpirvBlob.Load(path) can find it

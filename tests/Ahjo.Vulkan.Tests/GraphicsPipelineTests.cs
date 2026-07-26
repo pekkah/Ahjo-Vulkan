@@ -1,5 +1,6 @@
 using System.IO;
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -36,7 +37,7 @@ public sealed class GraphicsPipelineTests
     [Fact]
     public void Builder_MissingStages_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -47,9 +48,9 @@ public sealed class GraphicsPipelineTests
     [Fact]
     public void Builder_MissingDynamicRendering_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
-        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+        TestGate.RequireDriver();
+        TestGate.RequireSpirv(VertSpvPath);
+        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -66,9 +67,9 @@ public sealed class GraphicsPipelineTests
     [Fact]
     public void Builder_TrianglePipeline_RoundTrips()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
-        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+        TestGate.RequireDriver();
+        TestGate.RequireSpirv(VertSpvPath);
+        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -97,9 +98,9 @@ public sealed class GraphicsPipelineTests
     [Fact]
     public void Builder_AlphaBlend_Msaa4x_DynamicLineWidth_Builds()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
-        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+        TestGate.RequireDriver();
+        TestGate.RequireSpirv(VertSpvPath);
+        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -141,9 +142,9 @@ public sealed class GraphicsPipelineTests
     [Fact]
     public void Builder_BlendAttachmentCount_MismatchedColorFormats_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
-        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+        TestGate.RequireDriver();
+        TestGate.RequireSpirv(VertSpvPath);
+        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -185,9 +186,9 @@ public sealed class GraphicsPipelineTests
     [Fact]
     public void Builder_BlendAttachmentCount_FewerThanColorFormats_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
-        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+        TestGate.RequireDriver();
+        TestGate.RequireSpirv(VertSpvPath);
+        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -222,9 +223,9 @@ public sealed class GraphicsPipelineTests
     [Fact]
     public void Builder_TessellationStages_RequireBoth()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
-        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+        TestGate.RequireDriver();
+        TestGate.RequireSpirv(VertSpvPath);
+        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -265,9 +266,9 @@ public sealed class GraphicsPipelineTests
     [Fact]
     public void Builder_TessellationStages_WithoutPatchControlPoints_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
-        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+        TestGate.RequireDriver();
+        TestGate.RequireSpirv(VertSpvPath);
+        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -310,9 +311,9 @@ public sealed class GraphicsPipelineTests
     [Fact]
     public void Builder_WithDepthBias_BuildsDepthOnlyPipeline()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
-        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+        TestGate.RequireDriver();
+        TestGate.RequireSpirv(VertSpvPath);
+        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -346,9 +347,9 @@ public sealed class GraphicsPipelineTests
     [Fact]
     public void Builder_NoDepthBias_BuildsPipelineWithDefaultRasterizationState()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(File.Exists(VertSpvPath), $"triangle.vert.spv missing at {VertSpvPath}.");
-        Assert.SkipUnless(File.Exists(FragSpvPath), $"triangle.frag.spv missing at {FragSpvPath}.");
+        TestGate.RequireDriver();
+        TestGate.RequireSpirv(VertSpvPath);
+        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);

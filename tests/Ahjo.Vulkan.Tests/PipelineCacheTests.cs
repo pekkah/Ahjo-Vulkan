@@ -1,5 +1,6 @@
 using System.IO;
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -17,7 +18,7 @@ public sealed class PipelineCacheTests
     [Fact]
     public void CreatePipelineCache_Empty_HandleNonNull()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -35,7 +36,7 @@ public sealed class PipelineCacheTests
         // even with no pipelines compiled — the driver still emits the
         // VkPipelineCacheHeaderVersionOne prefix. That's enough to
         // catch a regression in WriteAtomic / Save buffer sizing.)
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -79,7 +80,7 @@ public sealed class PipelineCacheTests
         // returns ERROR_INITIALIZATION_FAILED rather than just an empty
         // cache). The wrapper's Console.Error log fires too — not asserted
         // here since it would race against test-runner stderr capture.
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -108,7 +109,7 @@ public sealed class PipelineCacheTests
     [Fact]
     public void LoadOrCreate_MissingFile_CreatesEmpty()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -123,7 +124,7 @@ public sealed class PipelineCacheTests
     [Fact]
     public void Merge_EmptySources_NoOp()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -136,7 +137,7 @@ public sealed class PipelineCacheTests
     [Fact]
     public void Merge_TwoEmptySources_Succeeds()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);

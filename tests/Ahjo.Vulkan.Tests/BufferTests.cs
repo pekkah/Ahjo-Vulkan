@@ -1,3 +1,4 @@
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -15,7 +16,7 @@ public sealed class BufferTests
     [Fact]
     public void CreateBuffer_HostVisible_ReportsMetadata()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device = CreateGraphicsDevice(instance, out _);
@@ -47,7 +48,7 @@ public sealed class BufferTests
     [Fact]
     public void Flush_Invalidate_RoundTripOnHostVisibleBuffer()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device = CreateGraphicsDevice(instance, out _);
@@ -83,7 +84,7 @@ public sealed class BufferTests
     [Fact]
     public void GetDeviceAddress_ReturnsNonZero_WhenShaderDeviceAddressUsageSet()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device = CreateGraphicsDevice(instance, out _);
@@ -104,7 +105,7 @@ public sealed class BufferTests
     [Fact]
     public void Dispose_FreesAllocator_NoLeakWarning()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device = CreateGraphicsDevice(instance, out _);

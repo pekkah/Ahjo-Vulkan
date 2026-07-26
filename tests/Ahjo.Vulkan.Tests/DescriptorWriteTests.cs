@@ -1,5 +1,6 @@
 using System.IO;
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -57,10 +58,10 @@ public sealed unsafe class DescriptorWriteTests
     [Fact]
     public void PushDescriptorSet_FillBuffer_NonTemplated_RoundTrips()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
-        Assert.SkipUnless(File.Exists(FillSpvPath), $"fill.comp.spv missing at {FillSpvPath}.");
+        TestGate.RequireSpirv(FillSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -155,8 +156,8 @@ public sealed unsafe class DescriptorWriteTests
     [Fact]
     public void DescriptorSet_Update_BindlessSingleElement_AtArrayElement5()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipUnless(VulkanDriverProbe.SupportsBindlessStorageBuffer,
+        TestGate.RequireDriver();
+        TestGate.RequireDeviceFeature(VulkanDriverProbe.SupportsBindlessStorageBuffer,
             "Device does not advertise descriptorBindingPartiallyBound + " +
             "descriptorBindingStorageBufferUpdateAfterBind; this bindless storage-buffer test requires both.");
 

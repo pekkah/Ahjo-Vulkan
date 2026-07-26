@@ -1,4 +1,5 @@
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -8,7 +9,7 @@ public sealed unsafe class PhysicalDeviceTests
     [Fact]
     public void Pick_AcceptAny_ReturnsFirstDevice()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
 
@@ -20,7 +21,7 @@ public sealed unsafe class PhysicalDeviceTests
     [Fact]
     public void Pick_NoMatch_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
 
@@ -33,7 +34,7 @@ public sealed unsafe class PhysicalDeviceTests
     [Fact]
     public void Pick_DriverVersion_NonZero()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
 
@@ -52,7 +53,7 @@ public sealed unsafe class PhysicalDeviceTests
     [Fact]
     public void Pick_NameSpan_RoundTripsToString()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
 
@@ -81,7 +82,7 @@ public sealed unsafe class PhysicalDeviceTests
     [Fact]
     public void Pick_QueueFamiliesNeverEmpty()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
 
@@ -101,7 +102,7 @@ public sealed unsafe class PhysicalDeviceTests
     [Fact]
     public void Pick_PicksDeviceWithGraphicsQueue()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
 
@@ -128,7 +129,7 @@ public sealed unsafe class PhysicalDeviceTests
     [Fact]
     public void Pick_ExtensionsContainsCommon()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
 
@@ -156,7 +157,7 @@ public sealed unsafe class PhysicalDeviceTests
     [Fact]
     public void Pick_Vulkan13Features_Readable()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
 
@@ -181,7 +182,7 @@ public sealed unsafe class PhysicalDeviceTests
     [Fact]
     public void Pick_PrefersDiscrete_OrFallsBack()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
 
@@ -210,7 +211,7 @@ public sealed unsafe class PhysicalDeviceTests
     [Fact]
     public void GetFormatProperties_Rgba8Unorm_OptimalTilingNonZero()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         var gpu = instance.PickPhysicalDevice(static (in PhysicalDeviceInfo _) => true);
@@ -228,7 +229,7 @@ public sealed unsafe class PhysicalDeviceTests
     [Fact]
     public void SupportsOptimalTilingFeature_LinearFilterableBlitSrc_Rgba8Unorm()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         var gpu = instance.PickPhysicalDevice(static (in PhysicalDeviceInfo _) => true);
@@ -248,7 +249,7 @@ public sealed unsafe class PhysicalDeviceTests
     [Fact]
     public void SupportsOptimalTilingFeature_Undefined_ReturnsFalse()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         var gpu = instance.PickPhysicalDevice(static (in PhysicalDeviceInfo _) => true);
@@ -262,7 +263,7 @@ public sealed unsafe class PhysicalDeviceTests
     [Fact]
     public void Pick_TwoCalls_ReturnSameInstance()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
 

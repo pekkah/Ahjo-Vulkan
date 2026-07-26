@@ -1,4 +1,5 @@
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -15,7 +16,7 @@ public sealed unsafe class DescriptorSetPoolTests
     [Fact]
     public void Pool_Acquire_AllocatesNewSet()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -38,7 +39,7 @@ public sealed unsafe class DescriptorSetPoolTests
     [Fact]
     public void Pool_Release_Acquire_RecyclesHandle()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -64,7 +65,7 @@ public sealed unsafe class DescriptorSetPoolTests
     [Fact]
     public void Pool_Reset_InvalidatesAndRebuilds()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -99,7 +100,7 @@ public sealed unsafe class DescriptorSetPoolTests
     [Fact]
     public void Pool_AcquireBeyondMaxSets_GrowsAndSucceeds()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -137,7 +138,7 @@ public sealed unsafe class DescriptorSetPoolTests
     [Fact]
     public void Pool_GrownChain_ResetThenReallocate_Succeeds()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -177,7 +178,7 @@ public sealed unsafe class DescriptorSetPoolTests
     [Fact]
     public void Pool_GrowDisabled_AcquireBeyondBudget_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -210,7 +211,7 @@ public sealed unsafe class DescriptorSetPoolTests
     [Fact]
     public void Pool_Ctor_ZeroMaxSets_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -228,7 +229,7 @@ public sealed unsafe class DescriptorSetPoolTests
     [Fact]
     public void Pool_Acquire_AfterDispose_Throws()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);

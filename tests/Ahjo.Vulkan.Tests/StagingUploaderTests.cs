@@ -1,4 +1,5 @@
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -13,8 +14,8 @@ public sealed unsafe class StagingUploaderTests
     [Fact]
     public void Upload_4KiB_Floats_RoundTrips_Through_DeviceLocal()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
 
         using var instance = Instance.Create(default);
@@ -76,7 +77,7 @@ public sealed unsafe class StagingUploaderTests
     [Fact]
     public void Reset_Rewinds_Heads_Without_Reallocating_Chunks()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out _);
@@ -106,7 +107,7 @@ public sealed unsafe class StagingUploaderTests
     [Fact]
     public void Grows_New_Chunk_When_Active_Is_Full()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out _);
@@ -126,7 +127,7 @@ public sealed unsafe class StagingUploaderTests
     [Fact]
     public void Oversize_Upload_Allocates_OneOff_Chunk()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out _);
@@ -145,7 +146,7 @@ public sealed unsafe class StagingUploaderTests
     [Fact]
     public void Empty_Upload_Returns_Empty_StagedUpload()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out _);
@@ -166,7 +167,7 @@ public sealed unsafe class StagingUploaderTests
     [Fact]
     public void Constructor_Rejects_Non_PowerOfTwo_Alignment()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
+        TestGate.RequireDriver();
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out _);
         Assert.Throws<ArgumentException>(() => new StagingUploader(device.Allocator, alignment: 12));

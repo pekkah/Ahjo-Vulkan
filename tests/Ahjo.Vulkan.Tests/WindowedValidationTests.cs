@@ -1,5 +1,6 @@
 using System.Threading;
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Testing;
 using Xunit;
 
 namespace Ahjo.Vulkan.Tests;
@@ -22,10 +23,10 @@ public sealed unsafe class WindowedValidationTests
     [Fact]
     public void TenFrames_FrameRingPlusSwapchain_NoValidationErrors()
     {
-        Assert.SkipUnless(VulkanDriverProbe.HasDriver, "No Vulkan driver on host.");
-        Assert.SkipWhen(VulkanDriverProbe.IsSoftwareDriver,
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
-        Assert.SkipUnless(SdlWindow.IsAvailable, "SDL3 video subsystem unavailable.");
+        TestGate.RequirePlatform(SdlWindow.IsAvailable, "SDL3 video subsystem unavailable.");
 
         // Counters live on the fixture rather than the callback so the
         // closure stays captureless. Validation messages may dispatch
