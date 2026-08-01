@@ -1,0 +1,10 @@
+namespace Ahjo.Vulkan.Slang.Native;
+
+[NativeTypeName("SlangCooperativeVectorMatrixLayoutIntegral")]
+public enum SlangCooperativeVectorMatrixLayout : uint
+{
+    SLANG_COOPERATIVE_VECTOR_MATRIX_LAYOUT_ROW_MAJOR = 0,
+    SLANG_COOPERATIVE_VECTOR_MATRIX_LAYOUT_COLUMN_MAJOR = 1,
+    SLANG_COOPERATIVE_VECTOR_MATRIX_LAYOUT_INFERENCING_OPTIMAL = 2,
+    SLANG_COOPERATIVE_VECTOR_MATRIX_LAYOUT_TRAINING_OPTIMAL = 3,
+}

@@ -1,6 +1,6 @@
 # Ahjo.Vulkan — Claude Project Memory
 
-.NET 10 / C# 14 Vulkan bindings + low-allocation wrapper, aimed at the [Logos game engine](https://github.com/pekkah/logos). Four publishable NuGet packages live in this repo; see `README.md` for the consumer-facing overview.
+.NET 10 / C# 14 Vulkan bindings + low-allocation wrapper, aimed at the [Logos game engine](https://github.com/pekkah/logos). Five publishable NuGet packages live in this repo; see `README.md` for the consumer-facing overview.
 
 Work is driven by GitHub issues. `/work-issue <number>` runs the standard flow: triage → architect (spec + plan) → approval → implementer → reviewers → PR.
 
@@ -11,7 +11,7 @@ Full details live in scoped CLAUDE.md files that load automatically when you wor
 1. **UTF-8 string literals** — Vulkan `const char*` takes `Utf8Name.FromLiteral("…"u8)`; never round-trip through `string` + `Encoding.UTF8.GetBytes`. → `src/Ahjo.Vulkan/CLAUDE.md`
 2. **Native AOT stays clean** — no reflection discovery, no dynamic codegen, nothing trim-unsafe reachable from the wrapper; CI publishes `samples/AotSmoke` with `PublishAot=true`. → `src/Ahjo.Vulkan/CLAUDE.md`, `docs/aot-notes.md`
 3. **Zero per-frame allocations** on `Recording/`, `Sync/`, `Pools/`, `Memory/` hot paths; setup-time allocation is fine. → `src/Ahjo.Vulkan/CLAUDE.md`
-4. **Generated code is generated** — never hand-edit `src/*/Generated/`, `native/downloaded/`, `native/ktx/downloaded/`; edit `tools/*.rsp` + regenerate (`/regen-bindings`). → per-project CLAUDE.md files
+4. **Generated code is generated** — never hand-edit `src/*/Generated/`, `native/downloaded/`, `native/ktx/downloaded/`, `native/slang/downloaded/`; edit `tools/*.rsp` + regenerate (`/regen-bindings`). → per-project CLAUDE.md files
 5. **`TreatWarningsAsErrors=true`** repo-wide with `AnalysisLevel=latest`. Fix the diagnostic; don't `#pragma`-suppress to get green.
 
 ## Project shape (quick reference)
@@ -22,6 +22,7 @@ src/
   Ahjo.Vulkan.Native/          ClangSharp P/Invokes against vulkan.h
   Ahjo.Vulkan.Vma.Native/      ClangSharp P/Invokes against vk_mem_alloc.h + prebuilt vma.{dll,so}
   Ahjo.Vulkan.Ktx.Native/      ClangSharp P/Invokes against Khronos ktx.h + prebuilt ktx.dll/libktx.so
+  Ahjo.Vulkan.Slang.Native/    ClangSharp P/Invokes against slang.h + pinned, checksum-verified slang binaries
   Ahjo.Vulkan.Utilities/       dep-free helpers for samples/tests (not published)
 
 native/                        pinned upstream sources, VMA translation unit, staged binaries
@@ -53,7 +54,9 @@ dotnet publish samples/AotSmoke/AotSmoke.csproj -c Release -r win-x64 -p:IlcUseE
 
 Wrapper tests run on `windows-latest` only — issue #32 closed Linux wrapper coverage (SwiftShader SIGSEGV; software rasterizers aren't honest coverage). Two narrow lanes (`vma-linux`, `ktx-native`) exist solely to prove shipped native binaries execute before they reach NuGet — they are **not** wrapper coverage; don't grow them. Full rationale and rules: `.github/CLAUDE.md`.
 
-Publishing: preview packages on `push:main`, stable on GitHub release; one `v0.x.y` tag ships all four packages.
+Publishing: preview packages on `push:main`, stable on GitHub release; one `v0.x.y` tag ships all five packages.
+
+The `slang-native` lane is the same shape as `ktx-native`, with one twist: nothing is compiled, so the checksum pinned in `Directory.Build.props` proves the bytes are upstream's and the smoke suite proves they run. Both are required.
 
 ## Roles: architect and implementer
 

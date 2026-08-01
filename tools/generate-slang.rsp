@@ -1,0 +1,96 @@
+--file
+native/slang/include/slang.h
+# slang.h:2379 #includes slang-deprecated.h, but ClangSharp only emits
+# declarations from files named here. Leave slang-deprecated.h off and the
+# entire flat spReflection_* surface (173 exports) silently disappears and
+# ShaderReflection / TypeLayoutReflection come out as empty structs.
+--traverse
+native/slang/include/slang.h
+native/slang/include/slang-deprecated.h
+native/slang/include/slang-image-format-defs.h
+--include-directory
+native/slang/stubs
+--include-directory
+native/stubs
+--include-directory
+native/slang/include
+--namespace
+Ahjo.Vulkan.Slang.Native
+# NOT "Slang": a type named Slang inside namespace Ahjo.Vulkan.Slang.Native is
+# unreachable from namespace Ahjo.Vulkan.Slang, because the identifier binds to
+# the enclosing namespace before any imported type.
+--methodClassName
+SlangApi
+--libraryPath
+slang
+--output
+src/Ahjo.Vulkan.Slang.Native/Generated
+--output-mode
+CSharp
+--language
+c++
+# Same reproducibility argument as tools/generate-ktx.rsp:30-38. slang.h:218-226
+# expands SLANG_MCALL to __stdcall only on the Microsoft family; both shipped
+# RIDs are x64, which has exactly one calling convention, so pinning the parse
+# to linux-gnu changes nothing at runtime and keeps the output host-independent.
+--additional
+--target=x86_64-unknown-linux-gnu
+--config
+latest-codegen
+implicit-vtbls
+generate-vtbl-index-attribute
+generate-native-inheritance-attribute
+generate-callconv-member-function
+generate-helper-types
+generate-file-scoped-namespaces
+generate-unmanaged-constants
+generate-disable-runtime-marshalling
+generate-aggressive-inlining
+exclude-enum-operators
+exclude-funcs-with-body
+strip-enum-member-type-name
+multi-file
+# slang::Attribute (slang.h:2402) shadows System.Attribute inside the generated
+# namespace, which makes every [NativeTypeName] a CS0616. 2032 errors from one
+# name collision.
+--remap
+Attribute=SlangUserAttributeInfo
+# ClangSharp propagates the enclosing member function's calling convention onto
+# nested C-callback parameter types, so the vtbl slot and the helper parameter
+# disagree ([MemberFunction] vs [Cdecl], CS1503). Remapping the four callback
+# typedefs to nint makes both sides agree. The slang:: qualification on the
+# last two is REQUIRED — the bare names are silently ignored.
+FileSystemContentsCallBack=nint
+SlangDiagnosticCallback=nint
+slang::VMExtFunction=nint
+slang::VMPrintFunc=nint
+# TypeReflection::Kind (slang.h:2446) and DeclReflection::Kind (slang.h:3857)
+# are nested `enum class`es emitted without an underlying type, while their
+# members come from uint-backed SlangTypeKind / SlangDeclKind: 29x CS0266.
+--with-type
+Kind=uint
+# Three declarations that would produce EntryPointNotFoundException or worse.
+# Same reasoning as tools/generate-ktx.rsp:61-68.
+#
+# spReflection_GetSession is declared at slang-deprecated.h:1070, OUTSIDE that
+# file's extern "C" block, so it has C++ linkage. It exists in the binary only
+# as _Z23spReflection_GetSessionP18SlangProgramLayout, which is the Itanium
+# mangling — the binding would resolve on Linux and throw on Windows.
+#
+# slang_getEmbeddedCoreModule (slang.h:5852) has the same problem.
+#
+# slang::VariableReflection::getDefaultValueBlob (slang.h:3228) is an exported
+# C++ member function; ClangSharp emits CallingConvention.MemberFunction on a
+# DllImport, which is not a member of System.Runtime.InteropServices.CallingConvention
+# (CS0117), plus a mangled EntryPoint.
+#
+# NONE of these is a virtual member. Never --exclude a virtual member name in
+# this file: ClangSharp removes the vtable slot and silently shifts every later
+# index. Verified — excluding ISlangFileSystemExt::enumeratePathContents moved
+# getOSPathKind from index 11 to 10 while its body still called lpVtbl[10].
+--exclude
+spReflection_GetSession
+slang_getEmbeddedCoreModule
+getDefaultValueBlob
+--with-access-specifier
+*=public

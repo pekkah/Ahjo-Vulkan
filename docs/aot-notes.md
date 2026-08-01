@@ -12,6 +12,16 @@ The wrapper's interop surface was designed AOT-first. The patterns that block AO
 - **No reflection-based serialization or DI.** The wrapper has no JSON, no `Activator.CreateInstance`, no `Type.GetType`, no `MakeGenericType`. The only `System.Reflection` references in the source tree are MSBuild-generated assembly attributes.
 - **Delegate `GCHandle.Alloc` + `GCHandle.ToIntPtr` for callback userdata.** `Instance.Create` pins a managed `Action<DebugMessage>` for the lifetime of the messenger so the unmanaged callback thunk can recover it. AOT supports `GCHandle` in full.
 
+## The Slang binding's C++ vtables are AOT-clean too
+
+`Ahjo.Vulkan.Slang.Native` is the first binding in the repo over a C++ interface hierarchy rather than a flat C API, so it is worth stating why that does not reopen the question.
+
+Interface methods dispatch through `delegate* unmanaged[MemberFunction]<…>` loaded out of a `void** lpVtbl` field — a raw function-pointer call the compiler emits directly. There is **no `ComWrappers`, no `[ComImport]`, no `Marshal`, and no runtime type lookup** anywhere in the generated tree; Slang explicitly does not require COM. `CallConvMemberFunction` is the CLR's own modelling of a C++ instance method, and on x64 (the only architecture either shipped RID has) it is ABI-identical to the platform default.
+
+The `[VtblIndex]` and `[NativeTypeName]` attributes ClangSharp emits are `[Conditional("DEBUG")]`, so they are not present in a Release build at all and nothing reads them at runtime — they are review aids for spotting slot drift in a regen diff, not metadata.
+
+`SlangExportDriftTests` deliberately resolves its symbol list through `NativeLibrary.Load` + `NativeLibrary.TryGetExport` against a literal `string[]`, rather than enumerating the binding's `DllImport`s with `Assembly.GetTypes()`. The reflective version would be shorter and would be exactly the pattern this document forbids.
+
 ## Local AOT publish
 
 ```pwsh

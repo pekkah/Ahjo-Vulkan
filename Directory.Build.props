@@ -26,6 +26,26 @@
          a regen run is required after a bump.
          See https://github.com/KhronosGroup/KTX-Software/releases. -->
     <KtxVersion>v4.4.2</KtxVersion>
+    <!-- Pinned Slang (shader-slang) release tag. Independent cadence from
+         the three above. Bump deliberately; the generated bindings are
+         committed and a regen run is required after a bump.
+         See https://github.com/shader-slang/slang/releases.
+
+         Unlike VMA and libktx, Slang is NOT built from source: its build
+         pulls LLVM and a full downstream-compiler tree, and the artifact we
+         would produce is the one Khronos/NVIDIA already publish and test.
+         We consume the prebuilt per-RID release archive instead (spec D3),
+         so the SHA-256 of each archive is pinned here and verified before
+         anything is extracted. A SlangVersion bump therefore requires
+         re-recording BOTH hashes and a regen run — the version pin alone
+         does not describe the input.
+
+         Asset URLs are derived from the tag:
+           https://github.com/shader-slang/slang/releases/download/$(SlangVersion)/slang-$(SlangVersion.TrimStart('v'))-windows-x86_64.zip
+           https://github.com/shader-slang/slang/releases/download/$(SlangVersion)/slang-$(SlangVersion.TrimStart('v'))-linux-x86_64.tar.gz -->
+    <SlangVersion>v2026.14.1</SlangVersion>
+    <SlangWinX64Sha256>5ed0a59d650a0af0aca45d5db4e083b3d8fb5cea05748747dd95dfbe9c580658</SlangWinX64Sha256>
+    <SlangLinuxX64Sha256>21f2d7847385a770e569fb61b1507a7794d742d97850bce0432bff0032ca005f</SlangLinuxX64Sha256>
     <!-- The libktx feature set, defined ONCE. The local host build
          (BuildKtxForHost) and every CI matrix job invoke that same target,
          so these flags cannot drift between a developer's binary and the
@@ -52,10 +72,13 @@
     Package metadata shared by all publishable projects.
 
     Defaults: nothing is packable unless the project explicitly opts in with
-    <IsPackable>true</IsPackable> + <PackageId>. Today the two publishable
-    projects are src/Ahjo.Vulkan (Ahjo.Vulkan) and src/Ahjo.Vulkan.Native
-    (Ahjo.Vulkan.Native). Samples, tests, and the Utilities helper library
-    stay unpublished.
+    <IsPackable>true</IsPackable> + <PackageId>. The publishable projects are
+    src/Ahjo.Vulkan (Ahjo.Vulkan), src/Ahjo.Vulkan.Native
+    (Ahjo.Vulkan.Native), src/Ahjo.Vulkan.Vma.Native
+    (Ahjo.Vulkan.Vma.Native), src/Ahjo.Vulkan.Ktx.Native
+    (Ahjo.Vulkan.Ktx.Native) and src/Ahjo.Vulkan.Slang.Native
+    (Ahjo.Vulkan.Slang.Native). Samples, tests, and the Utilities helper
+    library stay unpublished.
 
     Version: the publish workflow (.github/workflows/publish.yml) overrides
     MinVer's tag-derived version via `MinVerVersionOverride` when needed.

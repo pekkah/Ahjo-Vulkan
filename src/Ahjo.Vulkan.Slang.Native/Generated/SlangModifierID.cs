@@ -1,0 +1,17 @@
+namespace Ahjo.Vulkan.Slang.Native;
+
+[NativeTypeName("SlangModifierIDIntegral")]
+public enum SlangModifierID : uint
+{
+    SLANG_MODIFIER_SHARED = 0,
+    SLANG_MODIFIER_NO_DIFF = 1,
+    SLANG_MODIFIER_STATIC = 2,
+    SLANG_MODIFIER_CONST = 3,
+    SLANG_MODIFIER_EXPORT = 4,
+    SLANG_MODIFIER_EXTERN = 5,
+    SLANG_MODIFIER_DIFFERENTIABLE = 6,
+    SLANG_MODIFIER_MUTATING = 7,
+    SLANG_MODIFIER_IN = 8,
+    SLANG_MODIFIER_OUT = 9,
+    SLANG_MODIFIER_INOUT = 10,
+}

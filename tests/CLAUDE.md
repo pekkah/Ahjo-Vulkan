@@ -6,6 +6,7 @@
 | `Ahjo.Vulkan.Native.Tests/` | smoke suite over the raw `vulkan.h` bindings |
 | `Ahjo.Vulkan.Vma.Native.Tests/` | VMA binding + native-binary checks (allocation-only on Linux/lavapipe) |
 | `Ahjo.Vulkan.Ktx.Native.Tests/` | libktx binding checks — must pass with **no** Vulkan loader/ICD installed |
+| `Ahjo.Vulkan.Slang.Native.Tests/` | Slang binding checks — must pass with **no** Vulkan loader/ICD installed |
 | `Ahjo.Vulkan.Benchmarks/` | BenchmarkDotNet — the zero-allocation regression canary |
 
 ## Rules
@@ -16,3 +17,4 @@
 - **If your feature's only oracle is the validation layer**, run `AHJO_VULKAN_TIER=validation dotnet test tests/Ahjo.Vulkan.Tests` and quote the contract test's `declared=… observed=…` line. "N passed locally" without a tier is indistinguishable from N skips.
 - **Driver-dependent tests skip, not fail, without a device.** Don't convert skips into mocks — issue #32 established that software-rasterizer coverage isn't honest coverage.
 - Ktx tests must not acquire a Vulkan device — the package contract ships with both uploaders off (`src/Ahjo.Vulkan.Ktx.Native/CLAUDE.md`).
+- Slang tests must not acquire a Vulkan device either — Slang compiles shader text to bytes and has no Vulkan surface at all, so the suite references only `Ahjo.Vulkan.Slang.Native`. `SlangExportDriftTests` is the guard on the deprecated reflection header: don't trim its list to make a version bump green, decide what replaces the missing symbol (`src/Ahjo.Vulkan.Slang.Native/CLAUDE.md`).
