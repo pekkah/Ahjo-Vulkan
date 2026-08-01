@@ -1,5 +1,6 @@
 using Ahjo.Vulkan;
 using Ahjo.Vulkan.Native;
+using Ahjo.Vulkan.Slang;
 using Ahjo.Vulkan.Utilities;
 
 namespace Ahjo.Vulkan.Samples.AotSmoke;
@@ -12,10 +13,15 @@ namespace Ahjo.Vulkan.Samples.AotSmoke;
 /// time as a trim warning or ILC error.
 /// </summary>
 /// <remarks>
-/// Diverges from HeadlessTriangle only in shape: hard-coded output
+/// <para>Diverges from HeadlessTriangle only in shape: hard-coded output
 /// path, no argv parsing (AOT trimming on a 1-line argv hookup adds no
 /// signal). The single drawn frame is enough to exercise every wrapper
-/// path the package's downstream consumers will hit at startup.
+/// path the package's downstream consumers will hit at startup.</para>
+/// <para>Issue 166 added the second half: the triangle's SPIR-V is produced
+/// at run time by <c>Ahjo.Vulkan.Slang</c> rather than read off disk, so ILC
+/// covers the Slang binding too. That compile runs <em>before</em> the ICD
+/// probe on purpose — compiling shader text to bytes needs no GPU, so it is
+/// the one part of this smoke run a driverless host can still execute.</para>
 /// </remarks>
 internal static unsafe class Program
 {
@@ -26,6 +32,52 @@ internal static unsafe class Program
     {
         Console.WriteLine($"Ahjo.Vulkan AOT smoke — native AOT? {!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported}");
 
+        string slangPath = Path.Combine(AppContext.BaseDirectory, "Shaders", "triangle.slang");
+
+        using var compiler = SlangCompiler.Create();
+        Console.WriteLine($"Slang {compiler.BuildTag} loaded.");
+
+        using SlangSession slangSession = compiler.CreateSession(default);
+        SlangProgram? program;
+
+        try
+        {
+            program = slangSession.Compile(new SlangCompileRequest { Path = slangPath });
+        }
+        catch (SlangCompilationException ex)
+        {
+            // 2 stays "no usable shader bytes"; it just gets them from Slang
+            // now instead of from a .spv glslc may or may not have written.
+            Console.Error.WriteLine($"Slang failed to compile {slangPath}:\n{ex.Diagnostics}");
+            return 2;
+        }
+
+        using (program)
+        {
+            Console.WriteLine(
+                $"Compiled {program.EntryPointCount} entry points: " +
+                $"{program.EntryPoint(0).Name} ({program.EntryPoint(0).Stage}), " +
+                $"{program.EntryPoint(1).Name} ({program.EntryPoint(1).Stage}).");
+
+            // Reflection is the other half of issue 166 and has to be rooted
+            // here for ILC to see it at all — an unreferenced type is trimmed,
+            // and a trimmed type proves nothing about trimming. Both stage
+            // attribution modes are exercised: PerEntryPointUsage takes a
+            // different native path (getEntryPointMetadata) from the default.
+            SlangReflection reflection = program.GetReflection(SlangStageAttribution.PerEntryPointUsage);
+
+            Console.WriteLine(
+                $"Reflected {reflection.DescriptorSetCount} descriptor set(s), " +
+                $"{reflection.SetLayoutSlotCount} layout slot(s), " +
+                $"{reflection.PushConstantRanges.Length} push-constant range(s), " +
+                $"{program.Reflection.VertexAttributes(0).Length} vertex attribute(s).");
+
+            return Render(program);
+        }
+    }
+
+    private static int Render(SlangProgram program)
+    {
         // Probe for a working Vulkan ICD before doing any other work.
         // AOT publishing the wrapper is meaningful regression coverage on its
         // own, so a host with no usable ICD still exits 0 — but only when
@@ -57,24 +109,17 @@ internal static unsafe class Program
             return 0;
         }
 
-        string outPath    = Path.Combine(AppContext.BaseDirectory, "aot-smoke.png");
-        string shadersDir = Path.Combine(AppContext.BaseDirectory, "Shaders");
-        string vertSpv    = Path.Combine(shadersDir, "triangle.vert.spv");
-        string fragSpv    = Path.Combine(shadersDir, "triangle.frag.spv");
-        if (!File.Exists(vertSpv) || !File.Exists(fragSpv))
-        {
-            Console.Error.WriteLine($"Missing compiled shaders. Expected:\n  {vertSpv}\n  {fragSpv}");
-            return 2;
-        }
+        string outPath = Path.Combine(AppContext.BaseDirectory, "aot-smoke.png");
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
 
-        using var vertBlob = SpirvBlob.Load(vertSpv);
-        using var fragBlob = SpirvBlob.Load(fragSpv);
-        using var vMod     = device.CreateShaderModule(vertBlob.Words);
-        using var fMod     = device.CreateShaderModule(fragBlob.Words);
-        using var layout   = device.CreatePipelineLayout(default);
+        // No new API on Device: SlangProgram.Spirv hands back the same
+        // ReadOnlySpan<uint> shape SpirvBlob.Words does, and it is valid for
+        // exactly as long — until the program is disposed.
+        using var vMod   = device.CreateShaderModule(program.Spirv(0));
+        using var fMod   = device.CreateShaderModule(program.Spirv(1));
+        using var layout = device.CreatePipelineLayout(default);
 
         ReadOnlySpan<VkFormat> colorFormats = [VkFormat.VK_FORMAT_R8G8B8A8_UNORM];
         using var pipeline = device.BuildGraphicsPipeline()

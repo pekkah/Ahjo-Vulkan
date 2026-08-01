@@ -125,6 +125,19 @@ jobs:
       - name: Restore dotnet tools
         run: dotnet tool restore
 
+      # Unlike libktx, the Slang binary IS loaded by this job:
+      # Ahjo.Vulkan.Slang.Tests is wrapper coverage and belongs here, not in
+      # the slang-native lane, which is a build-artifact check and must not
+      # grow into wrapper coverage (.github/CLAUDE.md). So the ~77 MB release
+      # archive is fetched here too — but keyed on exactly what determines its
+      # content, so it is downloaded once per pin and restored thereafter.
+      # Same path and key shape as build-slang-native.yml's cache.
+      - name: Cache staged Slang binaries
+        uses: actions/cache@v4
+        with:
+          path: native/slang/staged/win-x64
+          key: slang-win-x64-${{ hashFiles('Directory.Build.props', 'src/Ahjo.Vulkan.Slang.Native/Ahjo.Vulkan.Slang.Native.csproj', '.github/workflows/build-slang-native.yml') }}
+
       # SkipKtxNativeBuild keeps libktx's cmake build off this job's
       # critical path — it is built, cached, smoke-tested and shipped per
       # RID by the ktx-native workflow, which is also what proves it.
@@ -144,6 +157,14 @@ jobs:
       - name: Test — Ahjo.Vulkan.Tests
         id: wrapper-tests
         run: dotnet test tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj -c Release --no-build --nologo -l "console;verbosity=detailed" --logger "trx;LogFileName=wrapper.trx" --blame --blame-crash --results-directory TestResults
+
+      # Slang wrapper coverage. Compiling shader text to bytes needs no ICD,
+      # so all but one test here runs regardless of what the SwiftShader
+      # provisioning above managed; the one that feeds Slang's SPIR-V to
+      # Device.CreateShaderModule gates on TestGate.RequireDriver like every
+      # other device-dependent test.
+      - name: Test — Ahjo.Vulkan.Slang.Tests
+        run: dotnet test tests/Ahjo.Vulkan.Slang.Tests/Ahjo.Vulkan.Slang.Tests.csproj -c Release --no-build --nologo -l "console;verbosity=detailed"
 
       # Turns the run's skips into the headline verdict instead of a number
       # nobody reads out of the log (issue 158). Two conditions fail this step:
@@ -399,3 +420,22 @@ jobs:
   ktx-native:
     name: KTX native
     uses: ./.github/workflows/build-ktx-native.yml
+
+  # Ahjo.Vulkan.Slang.Native ships a native binary per RID for the same
+  # reason, with one difference: nothing is built from source. The binary is
+  # upstream's own release artifact, pinned by tag AND by SHA-256, so what
+  # this lane proves is not "we can compile it" but "this exact archive
+  # contains a library that loads on this RID and compiles a shader with it".
+  # A checksum tells you the bytes did not change; only running them tells
+  # you they work.
+  #
+  # Like ktx-native it provisions no Vulkan loader and no ICD, on purpose:
+  # Slang produces bytes and the package does not even reference
+  # Ahjo.Vulkan.Native.
+  #
+  # The definition lives in build-slang-native.yml because publish.yml calls
+  # the same workflow for its artifacts: one place decides how the binary
+  # is staged, and CI and the release path cannot disagree about it.
+  slang-native:
+    name: Slang native
+    uses: ./.github/workflows/build-slang-native.yml

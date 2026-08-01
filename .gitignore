@@ -269,6 +269,17 @@ native/ktx/build/
 # which is also why this directory is not called lib.
 native/ktx/staged/
 
+# Downloaded Slang release archives and their extraction scratch — refetched
+# by the Regenerate target and checksum-verified against Directory.Build.props.
+# Headers staged at native/slang/include/ are the generator input of record
+# and native/slang/stubs/ holds the parse-time shims; both are committed.
+native/slang/downloaded/
+
+# Per-RID Slang binaries: extracted locally by StageSlangBinaries, downloaded
+# from the CI matrix before pack. Never committed — same reasoning as
+# native/ktx/staged/.
+native/slang/staged/
+
 # Verify snapshot workflow produces .received.* files on mismatch; they're
 # intentionally transient. .verified.* files are committed and ARE tracked.
 *.received.*

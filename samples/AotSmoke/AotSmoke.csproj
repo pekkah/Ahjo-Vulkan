@@ -27,12 +27,36 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Ahjo.Vulkan\Ahjo.Vulkan.csproj" />
     <ProjectReference Include="..\..\src\Ahjo.Vulkan.Utilities\Ahjo.Vulkan.Utilities.csproj" />
+
+    <!--
+      Issue 166. This is the reference that makes the ILC run cover the
+      Slang binding: the smoke exe compiles its own shader at startup, so
+      any reflection or dynamic codegen on that path fails the publish
+      instead of failing a downstream consumer who adopted AOT.
+    -->
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan.Slang\Ahjo.Vulkan.Slang.csproj" />
   </ItemGroup>
 
   <!--
-    Reuse HeadlessTriangle's shader sources via a link so we don't
-    duplicate the GLSL. The CompileShaders target produces .spv next to
-    this exe under ./Shaders/, matching what Program.cs expects.
+    The shader Program.cs actually renders with, compiled at run time by
+    Ahjo.Vulkan.Slang. CopyToPublishDirectory is explicit because the
+    publish pass does not inherit CopyToOutputDirectory for None items,
+    and an AOT exe that cannot find its shader proves nothing.
+  -->
+  <ItemGroup>
+    <None Include="Shaders\triangle.slang"
+          Link="Shaders\triangle.slang"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    HeadlessTriangle's GLSL sources, still linked and still compiled by the
+    CompileShaders target below. Program.cs no longer reads the .spv it
+    produces — deleting the glslc invocation is the follow-up issue's job
+    (an MSBuild task hosting SlangCompiler), not this one's, and until then
+    keeping the target here keeps this sample honest about what the repo
+    still depends on.
   -->
   <ItemGroup>
     <_ShaderSource Include="..\HeadlessTriangle\Shaders\triangle.vert" Link="Shaders\triangle.vert" />

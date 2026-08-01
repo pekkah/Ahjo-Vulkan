@@ -46,6 +46,11 @@ on:
         required: false
         type: boolean
         default: true
+      include_slang:
+        description: "Pack Ahjo.Vulkan.Slang.Native + Ahjo.Vulkan.Slang (runs the 2-RID native matrix + its smoke suite). Defaults to true since all packages ship together; flip to false for a fast core-only dry-run."
+        required: false
+        type: boolean
+        default: true
       release:
         description: "Push to NuGet.org. Default: pack only (artifact upload, no push)."
         required: false
@@ -85,16 +90,26 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.include_ktx == true
     uses: ./.github/workflows/build-ktx-native.yml
 
+  # Same reusable workflow ci.yml runs. The binaries attached to a release
+  # are therefore produced by the same definition CI proves, and each one has
+  # already compiled a shader in the job that staged it — a checksum proves
+  # the bytes are upstream's, not that they run.
+  build-slang:
+    name: Build Slang native (matrix)
+    if: github.event_name != 'workflow_dispatch' || inputs.include_slang == true
+    uses: ./.github/workflows/build-slang-native.yml
+
   publish:
     name: Pack & Publish
     runs-on: ubuntu-latest
-    needs: [build-vma, build-ktx]
-    # Both native jobs are conditional; allow publish to proceed when either
-    # was skipped.
+    needs: [build-vma, build-ktx, build-slang]
+    # All native jobs are conditional; allow publish to proceed when any
+    # were skipped.
     if: >-
       always()
       && (needs.build-vma.result == 'success' || needs.build-vma.result == 'skipped')
       && (needs.build-ktx.result == 'success' || needs.build-ktx.result == 'skipped')
+      && (needs.build-slang.result == 'success' || needs.build-slang.result == 'skipped')
     permissions:
       contents: write
     steps:
@@ -156,6 +171,29 @@ jobs:
             src_dir="${{ github.workspace }}/ktx-artifacts/ktx-native-${rid}"
             if [ -d "$src_dir" ]; then
               cp -v "$src_dir"/* "native/ktx/staged/${rid}/"
+            fi
+          done
+
+      # ---- Slang native artifact aggregation (when shipping Slang) ----
+      # Same shape as KTX above, staged at native/slang/staged/<rid>/, which
+      # is where Ahjo.Vulkan.Slang.Native.csproj's PackSlangRuntimes target
+      # looks. win-x64 carries two files (the forwarder and the compiler), so
+      # the whole directory is copied rather than a named binary.
+      - name: Download Slang native artifacts
+        if: needs.build-slang.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: slang-native-*
+          path: ${{ github.workspace }}/slang-artifacts
+
+      - name: Stage Slang binaries for pack
+        if: needs.build-slang.result == 'success'
+        run: |
+          for rid in win-x64 linux-x64; do
+            mkdir -p "native/slang/staged/${rid}"
+            src_dir="${{ github.workspace }}/slang-artifacts/slang-native-${rid}"
+            if [ -d "$src_dir" ]; then
+              cp -v "$src_dir"/* "native/slang/staged/${rid}/"
             fi
           done
 
@@ -221,6 +259,40 @@ jobs:
           dotnet pack src/Ahjo.Vulkan.Ktx.Native/Ahjo.Vulkan.Ktx.Native.csproj \
             -c Release \
             -p:SkipKtxNativeBuild=true \
+            -o "${{ github.workspace }}/artifacts"
+
+      # ---- Slang native package (skipped when include_slang=false) ----
+      # SkipSlangNativeFetch=true for the same reason KTX passes its flag:
+      # the per-RID binaries were downloaded above, and this runner must not
+      # re-download the ~77 MB release archive to stage the host one. Like
+      # Ktx.Native this project has no ProjectReference to anything, so it is
+      # restored and built here rather than riding in on the core build.
+      - name: Pack (Slang native)
+        if: needs.build-slang.result == 'success'
+        env:
+          MinVerVersionOverride: ${{ inputs.version }}
+        run: |
+          dotnet pack src/Ahjo.Vulkan.Slang.Native/Ahjo.Vulkan.Slang.Native.csproj \
+            -c Release \
+            -p:SkipSlangNativeFetch=true \
+            -o "${{ github.workspace }}/artifacts"
+
+      # ---- Slang wrapper package (skipped when include_slang=false) ----
+      # Ahjo.Vulkan.Slang references BOTH Ahjo.Vulkan and
+      # Ahjo.Vulkan.Slang.Native, so it is packed after the two of them and
+      # carries both flags: SkipVmaNativeBuild so the transitive VMA project
+      # does not invoke cmake, and SkipSlangNativeFetch so the transitive
+      # Slang.Native project does not re-download the release archive whose
+      # binaries were downloaded above. It ships no native files of its own.
+      - name: Pack (Slang wrapper)
+        if: needs.build-slang.result == 'success'
+        env:
+          MinVerVersionOverride: ${{ inputs.version }}
+        run: |
+          dotnet pack src/Ahjo.Vulkan.Slang/Ahjo.Vulkan.Slang.csproj \
+            -c Release \
+            -p:SkipVmaNativeBuild=true \
+            -p:SkipSlangNativeFetch=true \
             -o "${{ github.workspace }}/artifacts"
 
       - name: List artifacts

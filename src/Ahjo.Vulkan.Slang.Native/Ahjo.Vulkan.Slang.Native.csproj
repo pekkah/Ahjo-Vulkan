@@ -1,0 +1,378 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ahjo.Vulkan.Slang.Native</RootNamespace>
+    <AssemblyName>Ahjo.Vulkan.Slang.Native</AssemblyName>
+    <GeneratedDir>$(MSBuildProjectDirectory)\Generated\</GeneratedDir>
+    <GeneratorResponseFile>$(ToolsDir)generate-slang.rsp</GeneratorResponseFile>
+  </PropertyGroup>
+
+  <!--
+    Published as "Ahjo.Vulkan.Slang.Native" on NuGet.
+
+    Raw P/Invokes over the Slang shader compiler's C/C++ API (compile to
+    SPIR-V + the flat spReflection_* reflection surface). Like
+    Ahjo.Vulkan.Ktx.Native and unlike Ahjo.Vulkan.Vma.Native, this project
+    has NO ProjectReference at all — not to Ahjo.Vulkan.Native and not to
+    Ahjo.Vulkan. Slang has no Vulkan surface: it takes shader text and
+    produces bytes. Contrast VMA, whose generated bindings remap 30 Vulkan
+    types because VMA genuinely is a Vulkan consumer.
+  -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Ahjo.Vulkan.Slang.Native</PackageId>
+    <Title>Ahjo.Vulkan.Slang.Native</Title>
+    <Description>Raw P/Invoke bindings for the Slang shader compiler ($(SlangVersion)) — compile Slang/HLSL to SPIR-V plus shader reflection. Ships native runtime binaries for Windows and Linux (x64).</Description>
+    <PackageTags>slang;shader;spirv;hlsl;compiler;reflection;gpu;interop;native;pinvoke;bindings</PackageTags>
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+  </PropertyGroup>
+
+  <!--
+    Host-RID detection. Only the RIDs this package actually ships are
+    listed. Slang publishes windows-aarch64, linux-aarch64, macos-x86_64
+    and macos-aarch64 release assets too, and all four stay unshipped:
+    no lane has ever loaded one of them and compiled a shader with it, and
+    a RID nobody has executed is a RID nobody has proven. Add the lane
+    first, then the RID — here, in _SlangPackFile below, in
+    .github/workflows/build-slang-native.yml, and in the package README's
+    support table.
+  -->
+  <PropertyGroup>
+    <_SlangRid Condition="$([MSBuild]::IsOSPlatform('Windows')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">win-x64</_SlangRid>
+    <_SlangRid Condition="$([MSBuild]::IsOSPlatform('Linux')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">linux-x64</_SlangRid>
+
+    <!-- Release assets are named without the tag's leading 'v'. -->
+    <_SlangVersionNumber>$(SlangVersion.TrimStart('v'))</_SlangVersionNumber>
+
+    <_SlangSrcDir>$(NativeDir)slang\</_SlangSrcDir>
+    <_SlangDownloadDir>$(_SlangSrcDir)downloaded\</_SlangDownloadDir>
+
+    <!-- Stable header staging path (version-independent) so
+         tools/generate-slang.rsp doesn't have to embed the Slang tag.
+         Same trick as _KtxStagedHeaderDir. These three headers are
+         committed: they are the generator input of record. -->
+    <_SlangIncludeDir>$(_SlangSrcDir)include\</_SlangIncludeDir>
+
+    <!-- Extraction scratch (throwaway, gitignored) vs. staged output (the
+         artifact). Splitting them is what lets one path be the CI cache
+         key, the consumer's copy source, the artifact upload and the pack
+         input at once — and on Linux it is also what turns a symlink into
+         a real file, which is the only form a nupkg can carry. -->
+    <_SlangExtractDir>$(_SlangDownloadDir)$(_SlangRid)\</_SlangExtractDir>
+    <_SlangStagedRootDir>$(_SlangSrcDir)staged\</_SlangStagedRootDir>
+    <_SlangStagedDir>$(_SlangStagedRootDir)$(_SlangRid)\</_SlangStagedDir>
+
+    <_SlangArchiveName Condition="'$(_SlangRid)' == 'win-x64'">slang-$(_SlangVersionNumber)-windows-x86_64.zip</_SlangArchiveName>
+    <_SlangArchiveName Condition="'$(_SlangRid)' == 'linux-x64'">slang-$(_SlangVersionNumber)-linux-x86_64.tar.gz</_SlangArchiveName>
+    <_SlangArchiveFile>$(_SlangDownloadDir)$(_SlangArchiveName)</_SlangArchiveFile>
+    <_SlangArchiveUrl>https://github.com/shader-slang/slang/releases/download/$(SlangVersion)/$(_SlangArchiveName)</_SlangArchiveUrl>
+
+    <!-- Pinned in Directory.Build.props next to SlangVersion. We consume a
+         prebuilt archive rather than building from source, so the version
+         tag alone does not describe the input — the hash does. -->
+    <_SlangArchiveSha256 Condition="'$(_SlangRid)' == 'win-x64'">$(SlangWinX64Sha256)</_SlangArchiveSha256>
+    <_SlangArchiveSha256 Condition="'$(_SlangRid)' == 'linux-x64'">$(SlangLinuxX64Sha256)</_SlangArchiveSha256>
+
+    <!-- Existence of these files IS the cache: nothing is downloaded,
+         verified or extracted once they are staged. Both are checked, not
+         just the primary — a staged tree left over from before
+         slang-glslang joined the shipped set would otherwise satisfy a
+         one-file check and ship a package whose Optimization setting is a
+         silent no-op, which is the exact defect issue #166's OPEN-1 was
+         opened for. -->
+    <_SlangPrimaryFile Condition="'$(_SlangRid)' == 'win-x64'">slang.dll</_SlangPrimaryFile>
+    <_SlangPrimaryFile Condition="'$(_SlangRid)' == 'linux-x64'">libslang.so</_SlangPrimaryFile>
+    <_SlangStagedPrimary>$(_SlangStagedDir)$(_SlangPrimaryFile)</_SlangStagedPrimary>
+
+    <!-- Windows names this file without a version; Linux embeds the version
+         in it AND dlopen's it by that exact name, so the Linux one must be
+         staged, copied and packed UNRENAMED. Verified against the
+         v2026.14.1 archives: bin/slang-glslang.dll and
+         lib/libslang-glslang-2026.14.1.so. -->
+    <_SlangGlslangFile Condition="'$(_SlangRid)' == 'win-x64'">slang-glslang.dll</_SlangGlslangFile>
+    <_SlangGlslangFile Condition="'$(_SlangRid)' == 'linux-x64'">libslang-glslang-$(_SlangVersionNumber).so</_SlangGlslangFile>
+    <_SlangStagedGlslang>$(_SlangStagedDir)$(_SlangGlslangFile)</_SlangStagedGlslang>
+
+    <_SlangStageNeeded Condition="'$(_SlangRid)' != '' and (!Exists('$(_SlangStagedPrimary)') or !Exists('$(_SlangStagedGlslang)'))">true</_SlangStageNeeded>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <!--
+    Stage the host's Slang binaries into every downstream project's output.
+    Same Content+Link trick Ahjo.Vulkan.Ktx.Native uses: the files
+    propagate through ProjectReference automatically.
+
+    win-x64 ships THREE files. bin/slang.dll is a ~158 KB forwarder that
+    imports nothing but KERNEL32 and loads bin/slang-compiler.dll at
+    runtime; ship only one of them and the first call is a
+    DllNotFoundException. bin/slang-glslang.dll carries spirv-opt — see
+    StageSlangBinaries below for why it ships.
+  -->
+  <ItemGroup Condition="'$(_SlangRid)' == 'win-x64' and '$(SkipSlangNativeFetch)' != 'true'">
+    <None Include="$(_SlangStagedDir)slang.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false"
+          Pack="false"
+          Link="slang.dll" />
+    <None Include="$(_SlangStagedDir)slang-compiler.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false"
+          Pack="false"
+          Link="slang-compiler.dll" />
+    <None Include="$(_SlangStagedDir)slang-glslang.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false"
+          Pack="false"
+          Link="slang-glslang.dll" />
+  </ItemGroup>
+
+  <!--
+    linux-x64 ships TWO files. libslang.so is a copy of
+    lib/libslang-compiler.so.0.<version> under a new name: in the archive
+    libslang.so is a symlink to that file, and a nupkg cannot carry
+    symlinks (Ahjo.Vulkan.Ktx.Native.csproj:55-61 documents the same
+    constraint for libktx's SOVERSION chain). A plain rename was verified
+    to load and run the full compile path.
+
+    libslang-glslang-<version>.so, by contrast, keeps its name exactly:
+    libslang.so dlopen's it as 'slang-glslang-<version>' and a rename
+    turns it back into the missing library it was before.
+  -->
+  <ItemGroup Condition="'$(_SlangRid)' == 'linux-x64' and '$(SkipSlangNativeFetch)' != 'true'">
+    <None Include="$(_SlangStagedDir)libslang.so"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false"
+          Pack="false"
+          Link="libslang.so" />
+    <None Include="$(_SlangStagedDir)libslang-glslang-$(_SlangVersionNumber).so"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false"
+          Pack="false"
+          Link="libslang-glslang-$(_SlangVersionNumber).so" />
+  </ItemGroup>
+
+  <!--
+    Regenerate target: fetches the pinned Slang release, stages the
+    headers, then runs ClangSharpPInvokeGenerator. Not wired into Build —
+    regeneration is deliberate; generated C# is committed.
+
+    Usage: dotnet build src/Ahjo.Vulkan.Slang.Native -t:Regenerate
+  -->
+  <Target Name="Regenerate" DependsOnTargets="FetchSlang;RunClangSharpSlangGenerator" />
+
+  <!--
+    Acquire the pinned release archive for the host RID, verify it, and
+    split it into the two committed/staged outputs: the three headers the
+    .rsp parses, and the runtime binaries the package ships.
+
+    Decomposed into guarded sub-targets rather than one body because
+    MSBuild runs a target's DependsOnTargets even when the target's own
+    Condition is false — so each step has to carry its own guard.
+  -->
+  <Target Name="FetchSlang"
+          BeforeTargets="AssignTargetPaths"
+          DependsOnTargets="ValidateSlangHost;DownloadSlangArchive;ExtractSlangArchive;StageSlangBinaries;StageSlangHeaders" />
+
+  <Target Name="ValidateSlangHost" Condition="'$(SkipSlangNativeFetch)' != 'true'">
+    <Error Condition="'$(_SlangRid)' == ''"
+           Text="Unsupported host for the Slang native fetch: OS='$([System.Runtime.InteropServices.RuntimeInformation]::OSDescription)' Arch='$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)'. Only win-x64 and linux-x64 are shipped; pass -p:SkipSlangNativeFetch=true to skip." />
+  </Target>
+
+  <!--
+    Download + checksum. The SHA-256 comes from Directory.Build.props and
+    is checked BEFORE anything is extracted: this project consumes a
+    binary someone else built, so the hash is the only thing standing
+    between a compromised or truncated download and a native library that
+    gets loaded into every consumer's process.
+  -->
+  <Target Name="DownloadSlangArchive"
+          DependsOnTargets="ValidateSlangHost"
+          Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangStageNeeded)' == 'true'">
+    <MakeDir Directories="$(_SlangDownloadDir)" />
+
+    <DownloadFile SourceUrl="$(_SlangArchiveUrl)"
+                  DestinationFolder="$(_SlangDownloadDir)"
+                  DestinationFileName="$(_SlangArchiveName)"
+                  SkipUnchangedFiles="true"
+                  Retries="3" />
+
+    <GetFileHash Files="$(_SlangArchiveFile)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Hash" PropertyName="_SlangActualSha256" />
+    </GetFileHash>
+
+    <Error Condition="'$(_SlangActualSha256.ToLowerInvariant())' != '$(_SlangArchiveSha256.ToLowerInvariant())'"
+           Text="SHA-256 mismatch for $(_SlangArchiveName).%0A  expected: $(_SlangArchiveSha256)%0A  actual:   $(_SlangActualSha256)%0AThe pinned hash lives in Directory.Build.props as Slang*Sha256. Either the download is corrupt (delete $(_SlangArchiveFile) and retry) or SlangVersion was bumped without re-recording both hashes." />
+  </Target>
+
+  <Target Name="ExtractSlangArchive"
+          DependsOnTargets="DownloadSlangArchive"
+          Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangStageNeeded)' == 'true'">
+    <MakeDir Directories="$(_SlangExtractDir)" />
+
+    <Unzip Condition="'$(_SlangRid)' == 'win-x64'"
+           SourceFiles="$(_SlangArchiveFile)"
+           DestinationFolder="$(_SlangExtractDir)"
+           OverwriteReadOnlyFiles="true" />
+
+    <!-- No built-in MSBuild task reads .tar.gz. tar is present on every
+         Linux runner and on the ubuntu-latest image. -->
+    <Exec Condition="'$(_SlangRid)' == 'linux-x64'"
+          Command="tar -xzf &quot;$([MSBuild]::NormalizePath('$(_SlangArchiveFile)'))&quot; -C &quot;$([MSBuild]::NormalizeDirectory('$(_SlangExtractDir)'))&quot;"
+          WorkingDirectory="$(RepositoryRoot)" />
+  </Target>
+
+  <!--
+    Copy the shipped subset into native/slang/staged/<rid>/.
+
+    SHIPPED, and why:
+      - slang.dll + slang-compiler.dll (win) / libslang.so (linux) — the
+        compiler itself.
+      - libslang-glslang-<ver>.so / slang-glslang.dll — provides the
+        'spirv-opt' downstream compiler. WITHOUT it, every
+        SlangOptimizationLevel above None still returns SLANG_OK and valid
+        SPIR-V, but puts "error[E00100]: failed to load downstream compiler
+        'spirv-opt'" in the diagnostics blob and emits byte-identical
+        output at all four levels: the Optimization setting is a silent
+        no-op. Measured on v2026.14.1, and it is why issue #166's OPEN-1
+        resolved to "ship it". Cost: 6 173 184 bytes raw / ~2.4 MB
+        compressed on win-x64, 10 055 776 raw / 3 736 269 compressed in the
+        produced nupkg on linux-x64.
+        The Linux file name embeds the version and libslang dlopen's it by
+        that exact name, so it ships UNRENAMED — unlike libslang.so, which
+        is a rename by necessity.
+
+    NOT shipped, deliberately:
+      - libslang-llvm.so / slang-llvm.dll  (152 MB / 84 MB) — CPU and
+        host-callable targets only; this package's contract ends at SPIR-V.
+      - libslang-glsl-module-<ver>.so — GLSL *input* only. We compile
+        Slang/HLSL source.
+      - libgfx.so, libslang-rt.so — Slang's own graphics abstraction layer
+        and its CPU runtime. Both are for running shaders, not emitting
+        them, and libgfx would drag a second graphics API surface into a
+        package whose whole point is not having one.
+      - lib/slang-standard-module-<ver>/ (~6 MB) — the core module is
+        EMBEDDED in the compiler binary; a full compile was verified with
+        none of this tree present.
+      - bin/, share/doc/, lib/cmake/, lib/pkgconfig/ — the CLI tools and
+        their docs. We call the library, not slangc.
+  -->
+  <Target Name="StageSlangBinaries"
+          DependsOnTargets="ExtractSlangArchive"
+          Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangStageNeeded)' == 'true'">
+    <ItemGroup Condition="'$(_SlangRid)' == 'win-x64'">
+      <_SlangShippedFile Include="$(_SlangExtractDir)bin\slang.dll" />
+      <_SlangShippedFile Include="$(_SlangExtractDir)bin\slang-compiler.dll" />
+      <_SlangShippedFile Include="$(_SlangExtractDir)bin\slang-glslang.dll" />
+    </ItemGroup>
+
+    <Copy Condition="'$(_SlangRid)' == 'win-x64'"
+          SourceFiles="@(_SlangShippedFile)"
+          DestinationFolder="$(_SlangStagedDir)"
+          SkipUnchangedFiles="true" />
+
+    <!-- Rename, not symlink. Copy dereferences; the destination name is
+         what the .rsp's libraryPath of 'slang' resolves to via
+         NativeLibrary's lib<name>.so probe. -->
+    <Copy Condition="'$(_SlangRid)' == 'linux-x64'"
+          SourceFiles="$(_SlangExtractDir)lib\libslang-compiler.so.0.$(_SlangVersionNumber)"
+          DestinationFiles="$(_SlangStagedDir)libslang.so"
+          SkipUnchangedFiles="true" />
+
+    <!-- Name preserved: dlopen'd as 'slang-glslang-<ver>' by libslang. -->
+    <Copy Condition="'$(_SlangRid)' == 'linux-x64'"
+          SourceFiles="$(_SlangExtractDir)lib\$(_SlangGlslangFile)"
+          DestinationFolder="$(_SlangStagedDir)"
+          SkipUnchangedFiles="true" />
+
+    <Error Condition="!Exists('$(_SlangStagedPrimary)')"
+           Text="The $(SlangVersion) archive extracted, but $(_SlangStagedPrimary) was not produced. The release layout may have changed; re-check the file list in StageSlangBinaries against the archive." />
+
+    <Error Condition="!Exists('$(_SlangStagedGlslang)')"
+           Text="The $(SlangVersion) archive extracted, but $(_SlangStagedGlslang) was not produced. Without it every SlangOptimizationLevel above None is a silent no-op, so this is an error and not a warning; re-check the file list in StageSlangBinaries against the archive." />
+
+    <!-- Apache-2.0 WITH LLVM-exception. Packed at the nupkg root next to
+         our own MIT LICENSE, because the nupkg carries someone else's
+         binary. -->
+    <Copy SourceFiles="$(_SlangExtractDir)LICENSE"
+          DestinationFiles="$(_SlangSrcDir)SLANG-LICENSE.txt"
+          SkipUnchangedFiles="true" />
+
+    <Message Importance="high" Text="Staged Slang $(SlangVersion) for $(_SlangRid): $(_SlangStagedDir)" />
+  </Target>
+
+  <!--
+    The three headers tools/generate-slang.rsp parses. Committed under
+    native/slang/include/ so a regen does not depend on a download, and so
+    a `git diff` after a SlangVersion bump shows what actually changed in
+    the API before the generated output is re-derived from it.
+  -->
+  <Target Name="StageSlangHeaders"
+          DependsOnTargets="ExtractSlangArchive"
+          Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangRid)' != '' and !Exists('$(_SlangIncludeDir)slang.h')">
+    <ItemGroup>
+      <_SlangHeader Include="$(_SlangExtractDir)include\slang.h" />
+      <_SlangHeader Include="$(_SlangExtractDir)include\slang-deprecated.h" />
+      <_SlangHeader Include="$(_SlangExtractDir)include\slang-image-format-defs.h" />
+      <_SlangHeaderFound Include="@(_SlangHeader)" Condition="Exists('%(_SlangHeader.Identity)')" />
+    </ItemGroup>
+
+    <Error Condition="@(_SlangHeader->Count()) != @(_SlangHeaderFound->Count())"
+           Text="Expected slang.h, slang-deprecated.h and slang-image-format-defs.h under $(_SlangExtractDir)include after extracting $(SlangVersion); found only @(_SlangHeaderFound->'%(Filename)%(Extension)', ', ')." />
+
+    <Copy SourceFiles="@(_SlangHeaderFound)" DestinationFolder="$(_SlangIncludeDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="RunClangSharpSlangGenerator" DependsOnTargets="FetchSlang">
+    <MakeDir Directories="$(GeneratedDir)" />
+    <Exec Command="dotnet tool run ClangSharpPInvokeGenerator @&quot;$(GeneratorResponseFile)&quot;"
+          WorkingDirectory="$(RepositoryRoot)" />
+    <Message Importance="high" Text="Generated Slang bindings written to $(GeneratedDir)" />
+  </Target>
+
+  <!--
+    Multi-RID pack. Expects per-RID binaries to exist under
+    native/slang/staged/<rid>/ by the time pack runs. CI does this by
+    downloading build-slang-native.yml's upload-artifact outputs into those
+    directories before invoking dotnet pack.
+
+    Local pack only includes the host's RID — that's intentional. Producing
+    a fully cross-RID nupkg requires the CI matrix.
+  -->
+  <Target Name="PackSlangRuntimes" BeforeTargets="_GetPackageFiles;GenerateNuspec" Condition="'$(IsPackable)' == 'true'">
+    <ItemGroup>
+      <_SlangPackFile Include="slang.dll">          <Rid>win-x64</Rid>   </_SlangPackFile>
+      <_SlangPackFile Include="slang-compiler.dll"> <Rid>win-x64</Rid>   </_SlangPackFile>
+      <_SlangPackFile Include="slang-glslang.dll">  <Rid>win-x64</Rid>   </_SlangPackFile>
+      <_SlangPackFile Include="libslang.so">        <Rid>linux-x64</Rid> </_SlangPackFile>
+
+      <!-- Version-embedded on purpose: libslang dlopen's this by its exact
+           file name, so it packs unrenamed. -->
+      <_SlangPackFile Include="libslang-glslang-$(_SlangVersionNumber).so"> <Rid>linux-x64</Rid> </_SlangPackFile>
+    </ItemGroup>
+
+    <ItemGroup>
+      <None Include="$(_SlangStagedRootDir)%(_SlangPackFile.Rid)\%(_SlangPackFile.Identity)"
+            Condition="Exists('$(_SlangStagedRootDir)%(_SlangPackFile.Rid)\%(_SlangPackFile.Identity)')">
+        <Pack>true</Pack>
+        <PackagePath>runtimes\%(_SlangPackFile.Rid)\native\%(_SlangPackFile.Identity)</PackagePath>
+        <Visible>false</Visible>
+      </None>
+
+      <None Include="$(_SlangSrcDir)SLANG-LICENSE.txt"
+            Condition="Exists('$(_SlangSrcDir)SLANG-LICENSE.txt')">
+        <Pack>true</Pack>
+        <PackagePath>\</PackagePath>
+        <Visible>false</Visible>
+      </None>
+    </ItemGroup>
+
+    <Message Importance="high" Text="Slang pack: included RIDs from $(_SlangStagedRootDir)" />
+  </Target>
+
+</Project>

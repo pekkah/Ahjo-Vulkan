@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ahjo.Vulkan.Slang</RootNamespace>
+    <AssemblyName>Ahjo.Vulkan.Slang</AssemblyName>
+  </PropertyGroup>
+
+  <!--
+    Published as "Ahjo.Vulkan.Slang" on NuGet.
+
+    The idiomatic layer over Ahjo.Vulkan.Slang.Native: compile Slang/HLSL
+    source to SPIR-V and hand the words straight to
+    Device.CreateShaderModule(ReadOnlySpan<uint>).
+
+    This package references Ahjo.Vulkan — not because it calls Vulkan
+    (it does not; Slang produces bytes) but because it speaks the
+    wrapper's vocabulary: ShaderStages today, and the Pipelines/
+    description types once reflection lands. Ahjo.Vulkan itself gains
+    NO dependency in the other direction, so a consumer shipping
+    precompiled SPIR-V never pulls ~25 MB of compiler (spec D1).
+  -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Ahjo.Vulkan.Slang</PackageId>
+    <Title>Ahjo.Vulkan.Slang</Title>
+    <Description>Compile Slang/HLSL shader source to SPIR-V at runtime with the pinned Slang compiler ($(SlangVersion)), with the compiler's own diagnostics surfaced as exceptions. Feeds Ahjo.Vulkan's Device.CreateShaderModule directly.</Description>
+    <PackageTags>slang;shader;spirv;hlsl;compiler;vulkan;graphics;gpu</PackageTags>
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ahjo.Vulkan\Ahjo.Vulkan.csproj" />
+    <ProjectReference Include="..\Ahjo.Vulkan.Slang.Native\Ahjo.Vulkan.Slang.Native.csproj" />
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Ahjo.Vulkan.Slang.Tests" />
+  </ItemGroup>
+
+</Project>

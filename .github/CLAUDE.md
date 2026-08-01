@@ -28,6 +28,18 @@ win-x64 + linux-x64, defined ONCE in `build-ktx-native.yml`, called by both `ci.
 
 It provisions no ICD and no loader on purpose: libktx ships with both uploaders off, so needing one would mean something got linked in that the package's contract says isn't there. The staged binary under `native/ktx/staged/<rid>/` is both the cache key and the artifact; a cache hit skips the clone and cmake but still runs the tests.
 
+## `slang-native` lane — a checksum proves the bytes, not that they run
+
+win-x64 + linux-x64, defined ONCE in `build-slang-native.yml`, called by both `ci.yml` and `publish.yml` — so the binary a release attaches comes from the definition CI proves. Each job stages the pinned Slang release archive for its RID **and runs `Ahjo.Vulkan.Slang.Native.Tests` against it before uploading the artifact**, same as `ktx-native`.
+
+The difference from the other native lanes is that nothing is compiled here: the binary is upstream's own release artifact, pinned by tag *and* by SHA-256 in `Directory.Build.props`. The checksum tells you the bytes are the ones we pinned; only the smoke suite tells you they load and compile a shader on this runner. That is why the tests are not optional and why they run on a cache hit too.
+
+It provisions no ICD and no loader on purpose, and `AHJO_VULKAN_TIER` stays unset: Slang compiles shader text to SPIR-V bytes and the package does not even reference `Ahjo.Vulkan.Native`. If a test in this suite ever needs a Vulkan device, something got linked in that the package's contract says isn't there. The staged binaries under `native/slang/staged/<rid>/` are both the cache key and the artifact.
+
+It is a build-artifact check, not wrapper coverage. **Don't grow it** — wrapper-level Slang tests belong in the Windows `build-test` job with the rest of the wrapper suite.
+
+`*-arm64` and `osx-*` stay unshipped even though upstream publishes assets for them at every tag. Add the lane first, then the RID.
+
 ## Publishing
 
-`publish.yml` ships preview packages on `push:main` (MinVer-derived pre-release version) and stable packages on `release:published` events. Tag with `v0.x.y` → create a GitHub release → all four packages publish under that single tag. The publish workflow can override MinVer via `MinVerVersionOverride`.
+`publish.yml` ships preview packages on `push:main` (MinVer-derived pre-release version) and stable packages on `release:published` events. Tag with `v0.x.y` → create a GitHub release → all six packages publish under that single tag. The publish workflow can override MinVer via `MinVerVersionOverride`.
