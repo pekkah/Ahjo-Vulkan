@@ -132,6 +132,124 @@ Reproduced 3/3 on `v2026.14.1`. `AddTypeConformance` is the route that works for
 that shape, and an API whose failure mode is a process crash cannot ship behind
 a `try`.
 
+## Reflection-driven layouts
+
+A linked program knows its own binding surface, and `SlangReflection` hands it
+back as the description types `Ahjo.Vulkan` already takes — there is no parallel
+`Slang*` type set to convert from.
+
+```csharp
+SlangReflection reflection = program.Reflection;
+
+for (int i = 0; i < reflection.DescriptorSetCount; i++)
+{
+    uint set = reflection.SetIndex(i);            // the Vulkan set number
+    using var layout = device.CreateDescriptorSetLayout(
+        new DescriptorSetLayoutDescription { Bindings = reflection.Bindings(i) });
+}
+
+using var pipelineLayout = device.CreatePipelineLayout(new PipelineLayoutDescription
+{
+    SetLayouts         = layouts,
+    PushConstantRanges = reflection.PushConstantRanges,
+});
+```
+
+Reflection is only ever taken from a **linked** program, and that is enforced by
+the type system rather than by documentation. Both alternatives are silently
+wrong rather than loudly wrong: a module reflected on its own reports different
+sets and binding numbers than the same module inside a composite, and an
+unspecialized generic parameter block reports a descriptor set with *zero*
+bindings where the compiled shader has five.
+
+`ParameterBlock<T>` is fully supported and is the point: each block is its own
+descriptor space, nesting accumulates, and a block whose element carries
+ordinary data gets the implicit uniform buffer Slang puts at binding 0 of its
+space but never lists as a descriptor range.
+
+### Set indices are set numbers, not positions
+
+**A program's descriptor set indices need not start at 0 and need not be
+contiguous.** `[[vk::binding(7, 2)]]` puts a sampler in set 2 whether or not set
+1 exists, and a material system that reserves a space does the same.
+`PipelineLayoutDescription.SetLayouts` is positional, so:
+
+- `SetLayoutSlotCount` is the length that span must have — the highest declared
+  set index plus one, not the number of populated sets;
+- `TryGetSet(i, out bindings)` returns `false` for an index the program declares
+  nothing in.
+
+The reflected set numbers are baked into the emitted SPIR-V. Renumbering them to
+be dense produces a pipeline layout that builds and then binds to the wrong
+slots at draw time.
+
+> **Open gap.** Vulkan fills a hole in a pipeline layout with a descriptor set
+> layout that has zero bindings, but `Device.CreateDescriptorSetLayout` rejects
+> an empty `Bindings` span, so there is currently no way to obtain one through
+> this API. A reflected program that leaves a set index unused therefore cannot
+> be turned into a complete `PipelineLayout` yet. Closing that is a decision in
+> `Ahjo.Vulkan` itself; this package deliberately does not work around it with
+> an invented binding.
+
+### Stage flags: two modes, and one of them compiles
+
+```csharp
+SlangReflection precise = program.GetReflection(SlangStageAttribution.PerEntryPointUsage);
+```
+
+Slang's *reflection* API cannot say which stages use a binding —
+`spReflectionVariableLayout_getStage` returns "none" for every global descriptor
+parameter, and the JSON dump lists the whole global scope under every entry
+point. The question is only answerable from the compiled artifact, through
+`IComponentType::getEntryPointMetadata`.
+
+| Mode | What `DescriptorBinding.Stages` gets | Cost |
+|---|---|---|
+| `ProgramStageUnion` (default, `program.Reflection`) | the union of the program's entry-point stages | none; cannot throw |
+| `PerEntryPointUsage` | only the stages that actually read the binding | one code generation per entry point; can throw `SlangCompilationException` |
+
+A superset of stages is always legal Vulkan, which is why precision is opt-in
+rather than default. Under `PerEntryPointUsage`, a binding no entry point reads
+falls back to the union — usage is reported post-optimization, and
+`stageFlags = 0` is not a descriptor any stage could access.
+
+**Push-constant ranges keep the union in both modes.**
+`isParameterLocationUsed` reports a push constant as unused even for a stage
+whose SPIR-V provably contains a `PushConstant` variable reading it, under every
+parameter category and space swept, so there is no narrowing to be had.
+
+### Vertex attributes, and the half this cannot fill in
+
+`reflection.VertexAttributes(entryPointIndex)` gives `Location` and `Format` for
+each real varying input of a vertex entry point, struct-typed inputs recursed
+one level with locations accumulating. System values (`SV_VertexID`,
+`SV_InstanceID`, `SV_IsFrontFace`, `SV_Position`) are excluded — without that
+filter an `SV_InstanceID` emits a phantom attribute at location 0 that collides
+with the real `POSITION`.
+
+**`Binding` and `Offset` are left at their defaults and the caller must fill
+them.** A shader states its input locations and formats but never how the
+application packs its vertex buffers, so those two fields and every field of
+`VertexBindingDescription` are information reflection does not have. There is
+deliberately no `VertexInputDescription` factory here, and composition does not
+change that.
+
+### Two things reflection refuses rather than guesses
+
+- **More than one `[[vk::push_constant]]` block.** Two of them compose and link,
+  and reflection reports two push-constant ranges — but the only offset it
+  exposes is a push-constant *buffer index* (0, 1), not the byte offset
+  `VkPushConstantRange.Offset` needs. `NotSupportedException`, naming both
+  blocks.
+- **A matrix-typed vertex input.** It occupies several consecutive locations and
+  SPIR-V decorates it at the base one, but the per-location component count
+  depends on the session's default matrix layout mode and only column-major has
+  been verified against the emitted SPIR-V. `NotSupportedException`, naming the
+  field.
+
+Both are cases where a plausible guess produces a pipeline that builds and then
+mis-binds, which is exactly the class of bug reflection exists to remove.
+
 ## Lifetimes
 
 `SlangProgram.Spirv(i)` is a view over Slang-owned native memory the program
@@ -155,12 +273,14 @@ any reflection or dynamic-codegen creep on the compile path fails the publish.
 
 ## What this package does not do yet
 
-Shader **reflection** — turning a linked program's descriptor sets, push
-constants and vertex inputs into `DescriptorBinding`,
-`PushConstantRange` and `VertexAttributeDescription` — is the remaining phase of
-[issue #166](https://github.com/pekkah/Ahjo-Vulkan/issues/166). So is the
-MSBuild task that would replace the `glslc` invocations still scattered across
-this repository's samples.
+The MSBuild task that would replace the `glslc` invocations still scattered
+across this repository's samples — a follow-up to
+[issue #166](https://github.com/pekkah/Ahjo-Vulkan/issues/166), and what finally
+lets the CI coverage summary stop printing "NOT PROVEN" for SPIR-V gates.
+
+There is also no permutation or variant-cache API, and no `Specialize` — see
+"Specializing an interface-typed `ParameterBlock`" above for why the latter is a
+decision rather than an omission.
 
 ## Licensing
 

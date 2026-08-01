@@ -1,10 +1,10 @@
 # Ahjo.Vulkan.Slang — the compiler wrapper
 
 The idiomatic layer over `Ahjo.Vulkan.Slang.Native`: `SlangCompiler` →
-`SlangSession` → `SlangModule` / `SlangEntryPoint` → `SlangProgram`. It
-references `Ahjo.Vulkan` for its vocabulary (`ShaderStages` today, the
-`Pipelines/` description types when reflection lands) and nothing in
-`src/Ahjo.Vulkan/` references it back.
+`SlangSession` → `SlangModule` / `SlangEntryPoint` → `SlangProgram` →
+`SlangReflection`. It references `Ahjo.Vulkan` for its vocabulary —
+`ShaderStages`, and the `Pipelines/` description types reflection produces —
+and nothing in `src/Ahjo.Vulkan/` references it back.
 
 Design record: `docs/design/specs/2026-08-01-issue-166-slang-support-design.md`
 and its paired plan.
@@ -115,3 +115,60 @@ null-terminated.
      `SLANG_TYPE_KIND_INTERFACE` node — and not the bare call.
 
   Measured on `v2026.14.1` / linux-x64 only; `win-x64` has no equivalent probe.
+
+## Reflection — four rules Slang does not hand you
+
+Every one of these was measured against `OpDecorate DescriptorSet` / `Binding`
+in the SPIR-V Slang emitted, not read off a header, and every one of them looks
+like a simplification opportunity to someone who has only read the header. The
+tests in `tests/Ahjo.Vulkan.Slang.Tests/SlangReflectionTests.cs` assert against
+the emitted SPIR-V for exactly that reason — reflection agreeing with itself
+proves nothing.
+
+1. **The set index is an accumulated offset, not a lookup.**
+   `setOf(block) = setOf(enclosing scope) + GetOffset(blockVarLayout, SUB_ELEMENT_REGISTER_SPACE)`,
+   with `setOf(global scope) = 0`.
+   `spReflectionTypeLayout_getSubObjectRangeSpaceOffset` is **the wrong
+   function** — it returns `0` for every sub-object range, including blocks that
+   demonstrably land in spaces 1 and 2. Do not "fix" the walk back onto it; the
+   call site carries a comment saying so.
+2. **The global scope does not necessarily own set 0.** A program whose global
+   scope declares only `ParameterBlock`s — the natural shape once a material
+   system has put everything in a block — puts its first block at set 0. A
+   hardcoded "globals own 0, blocks start at 1" is off by one everywhere.
+3. **A `ParameterBlock` whose element carries ordinary data silently owns
+   binding 0.** Slang allocates an implicit uniform buffer there, shifts every
+   listed range up by one, and reports no descriptor range for it. Derived from
+   `GetSize(elementTypeLayout, UNIFORM) > 0`. **The global scope does not share
+   this asymmetry** — its implicit constant buffer *is* listed, so applying the
+   rule there double-counts binding 0. Getting this wrong shifts every binding
+   in every material.
+4. **Set indices can be sparse, and the loop index is not the set number.**
+   `[[vk::binding(7, 2)]]` is reported at loop index 1 for set 2; the number is
+   `getDescriptorSetSpaceOffset`.
+
+Two further constraints, both about refusing rather than guessing: more than one
+`[[vk::push_constant]]` block throws (reflection exposes a buffer *index*, not
+the byte offset `VkPushConstantRange.Offset` needs), and a matrix-typed vertex
+input throws (per-location component count depends on the session's matrix
+layout mode, and only column-major was probed). Do not replace either throw with
+a plausible value — both produce a pipeline that builds and then mis-binds.
+
+Stage attribution is opt-in (`SlangStageAttribution.PerEntryPointUsage`) because
+it costs a codegen per entry point. Push-constant stages stay the program union
+in **both** modes: `isParameterLocationUsed` reports a push constant as unused
+even for a stage whose SPIR-V provably reads it.
+
+### Known gap: no zero-binding descriptor set layout
+
+A reflected program may leave a set index unused (rule 4). Vulkan fills such a
+hole with a descriptor set layout that has zero bindings, but
+`Device.CreateDescriptorSetLayout` rejects an empty `Bindings` span
+(`src/Ahjo.Vulkan/Lifecycle/Device.cs`), so a sparse program cannot currently be
+turned into a complete `PipelineLayout` through this API.
+
+`SlangReflection.SetLayoutSlotCount` and `TryGetSet` make the hole visible and
+the XML doc names it. **Do not paper over it here** — synthesizing a stand-in
+binding would put a descriptor in a layout the shader never declared. Closing it
+is a decision about `Ahjo.Vulkan`'s own validity guard, not an edit this project
+gets to make.

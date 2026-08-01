@@ -6,8 +6,8 @@ using Ahjo.Vulkan.Slang.Native;
 namespace Ahjo.Vulkan.Slang;
 
 /// <summary>
-/// A linked Slang program: the one object that can produce SPIR-V, and — from
-/// Phase 3b on — the layout that SPIR-V was compiled against.
+/// A linked Slang program: the one object that can produce SPIR-V, and the
+/// layout that SPIR-V was compiled against.
 /// </summary>
 /// <remarks>
 /// <para>There is deliberately no way to construct one of these from anything
@@ -25,6 +25,8 @@ public sealed unsafe class SlangProgram : IDisposable
     private readonly nint[] _codeBlobs;
     private IComponentType* _linked;
     private string? _warnings;
+    private SlangReflection? _programStageUnionReflection;
+    private SlangReflection? _perEntryPointUsageReflection;
 
     internal SlangProgram(IComponentType* linked, string? warnings)
     {
@@ -60,8 +62,53 @@ public sealed unsafe class SlangProgram : IDisposable
     /// </remarks>
     public string? Warnings => _warnings;
 
+    /// <summary>
+    /// This program's binding surface, with every
+    /// <c>DescriptorBinding.Stages</c> set to the union of the program's
+    /// entry-point stages.
+    /// </summary>
+    /// <remarks>
+    /// Shorthand for
+    /// <see cref="GetReflection"/><c>(SlangStageAttribution.ProgramStageUnion)</c>.
+    /// Built once and cached; the reflection is a view of this program and does
+    /// not outlive it.
+    /// </remarks>
+    public SlangReflection Reflection => GetReflection(SlangStageAttribution.ProgramStageUnion);
+
     internal IComponentType* LinkedComponent
         => _linked != null ? _linked : throw new ObjectDisposedException(nameof(SlangProgram));
+
+    /// <summary>
+    /// This program's binding surface as <c>DescriptorBinding</c>,
+    /// <c>PushConstantRange</c> and <c>VertexAttributeDescription</c> values.
+    /// </summary>
+    /// <remarks>
+    /// <para>The layout is read from the same linked component
+    /// <see cref="Spirv"/> generates from, so the pipeline layout a caller
+    /// builds and the SPIR-V a caller loads cannot disagree.</para>
+    /// <para>Each mode is built once and cached. See
+    /// <see cref="SlangStageAttribution"/> for what
+    /// <see cref="SlangStageAttribution.PerEntryPointUsage"/> costs — it
+    /// compiles every entry point and can therefore throw.</para>
+    /// </remarks>
+    /// <exception cref="SlangCompilationException">
+    /// Slang refused to produce the program layout, or — in
+    /// <see cref="SlangStageAttribution.PerEntryPointUsage"/> mode — refused to
+    /// generate metadata for an entry point.
+    /// </exception>
+    public SlangReflection GetReflection(SlangStageAttribution attribution)
+    {
+        _ = LinkedComponent;
+
+        return attribution switch
+        {
+            SlangStageAttribution.ProgramStageUnion
+                => _programStageUnionReflection ??= new SlangReflection(this, attribution),
+            SlangStageAttribution.PerEntryPointUsage
+                => _perEntryPointUsageReflection ??= new SlangReflection(this, attribution),
+            _ => throw new ArgumentOutOfRangeException(nameof(attribution), attribution, "Not a SlangStageAttribution value."),
+        };
+    }
 
     /// <summary>
     /// The <paramref name="index"/>-th entry point's name and stage.

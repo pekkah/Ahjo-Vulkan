@@ -70,6 +70,27 @@ public sealed class SlangExportDriftTests
         "spReflectionTypeLayout_getDescriptorSetDescriptorRangeCategory",
         "spReflectionTypeLayout_GetType",
 
+        // The ParameterBlock walk. A block is a descriptor *space*, so the
+        // reflection walk recurses into it rather than mapping it, and the set
+        // index it recurses with is the enclosing set plus the sub-object
+        // range's SUB_ELEMENT_REGISTER_SPACE offset.
+        //
+        // spReflectionTypeLayout_getSubObjectRangeSpaceOffset is deliberately
+        // NOT in this list. It is the wrong function for that offset — it
+        // returns 0 for every sub-object range, including blocks the emitted
+        // SPIR-V puts in spaces 1 and 2 — so nothing here calls it and nothing
+        // here should start.
+        "spReflectionTypeLayout_getSubObjectRangeCount",
+        "spReflectionTypeLayout_getSubObjectRangeBindingRangeIndex",
+        "spReflectionTypeLayout_getSubObjectRangeOffset",
+        "spReflectionTypeLayout_getBindingRangeType",
+        "spReflectionTypeLayout_getBindingRangeLeafTypeLayout",
+
+        // Struct-typed vertex inputs: one level of recursion, locations
+        // accumulating parent offset + field offset.
+        "spReflectionTypeLayout_GetFieldCount",
+        "spReflectionTypeLayout_GetFieldByIndex",
+
         // Types: what a vertex attribute's VkFormat is derived from.
         "spReflectionType_GetKind",
         "spReflectionType_GetElementCount",

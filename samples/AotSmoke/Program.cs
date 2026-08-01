@@ -59,6 +59,19 @@ internal static unsafe class Program
                 $"{program.EntryPoint(0).Name} ({program.EntryPoint(0).Stage}), " +
                 $"{program.EntryPoint(1).Name} ({program.EntryPoint(1).Stage}).");
 
+            // Reflection is the other half of issue 166 and has to be rooted
+            // here for ILC to see it at all — an unreferenced type is trimmed,
+            // and a trimmed type proves nothing about trimming. Both stage
+            // attribution modes are exercised: PerEntryPointUsage takes a
+            // different native path (getEntryPointMetadata) from the default.
+            SlangReflection reflection = program.GetReflection(SlangStageAttribution.PerEntryPointUsage);
+
+            Console.WriteLine(
+                $"Reflected {reflection.DescriptorSetCount} descriptor set(s), " +
+                $"{reflection.SetLayoutSlotCount} layout slot(s), " +
+                $"{reflection.PushConstantRanges.Length} push-constant range(s), " +
+                $"{program.Reflection.VertexAttributes(0).Length} vertex attribute(s).");
+
             return Render(program);
         }
     }

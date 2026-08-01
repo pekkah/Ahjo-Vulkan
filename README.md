@@ -45,11 +45,16 @@ NuGet as six packages:
 - [**Ahjo.Vulkan.Slang**](https://www.nuget.org/packages/Ahjo.Vulkan.Slang)
   — the idiomatic wrapper over the Slang compiler: compile Slang/HLSL source
   to SPIR-V at run time and hand the words straight to
-  `Device.CreateShaderModule`. Compiler diagnostics come back as exceptions
-  carrying Slang's own text — there is no path that returns an empty blob on
-  failure. **Standalone**: `Ahjo.Vulkan` does not pull it in, so a consumer
-  shipping precompiled SPIR-V never pays for it. Reference it directly if you
-  want to compile shaders at run time.
+  `Device.CreateShaderModule`, compose a program from N modules and N entry
+  points, and **reflect the linked result into `DescriptorBinding`,
+  `PushConstantRange` and `VertexAttributeDescription`** — the same description
+  types `Device.CreateDescriptorSetLayout` and `Device.CreatePipelineLayout`
+  already take, so a shader's declared layout stops being restated by hand.
+  Compiler diagnostics come back as exceptions carrying Slang's own text —
+  there is no path that returns an empty blob on failure. **Standalone**:
+  `Ahjo.Vulkan` does not pull it in, so a consumer shipping precompiled SPIR-V
+  never pays for it. Reference it directly if you want to compile shaders at
+  run time.
 
 Project folders, csproj filenames, `AssemblyName`, `RootNamespace`, and
 NuGet `PackageId` all use the dotted `Ahjo.Vulkan*` form — one canonical
@@ -100,7 +105,7 @@ Other specs and plans live under [`docs/design/specs/`](docs/design/specs/) and 
 - `src/Ahjo.Vulkan.Vma.Native` — ClangSharp-generated P/Invokes against `vk_mem_alloc.h`. Builds + ships `vma.{dll,so}` for every RID. Ships as `Ahjo.Vulkan.Vma.Native`.
 - `src/Ahjo.Vulkan.Ktx.Native` — ClangSharp-generated P/Invokes against Khronos `ktx.h`. Builds + ships `ktx.dll` / `libktx.so` for `win-x64` + `linux-x64`. Ships as `Ahjo.Vulkan.Ktx.Native`.
 - `src/Ahjo.Vulkan.Slang.Native` — ClangSharp-generated P/Invokes against the Slang compiler's `slang.h`. Stages + ships `slang.dll` + `slang-compiler.dll` / `libslang.so` for `win-x64` + `linux-x64` from the pinned, checksum-verified upstream release. Ships as `Ahjo.Vulkan.Slang.Native`.
-- `src/Ahjo.Vulkan.Slang` — idiomatic wrapper over the Slang compiler: `SlangCompiler`/`SlangSession`/`SlangModule`/`SlangProgram`, diagnostics as exceptions, SPIR-V as a `ReadOnlySpan<uint>`. Ships as `Ahjo.Vulkan.Slang`.
+- `src/Ahjo.Vulkan.Slang` — idiomatic wrapper over the Slang compiler: `SlangCompiler`/`SlangSession`/`SlangModule`/`SlangProgram`/`SlangProgramBuilder`, diagnostics as exceptions, SPIR-V as a `ReadOnlySpan<uint>`, and `SlangReflection` mapping a linked program's descriptor sets, push constants and vertex inputs onto the existing `Pipelines/` description types. Ships as `Ahjo.Vulkan.Slang`.
 - `src/Ahjo.Vulkan` — idiomatic wrapper covering both Vulkan and VMA (`Memory/Allocator.cs`, `Memory/AllocatedBuffer.cs`, …). Ships as `Ahjo.Vulkan`.
 - `src/Ahjo.Vulkan.Utilities` — dep-free helpers usable from samples and tests. Not published.
 - `native/vma/` — VMA impl translation unit (`src/vma.cpp`) + `CMakeLists.txt`. Source for the SHARED library packaged in `Ahjo.Vulkan.Vma.Native`.
@@ -110,7 +115,7 @@ Other specs and plans live under [`docs/design/specs/`](docs/design/specs/) and 
 - `tests/Ahjo.Vulkan.Tests` — xUnit integration tests over the wrapper.
 - `tests/Ahjo.Vulkan.Ktx.Native.Tests` — xUnit smoke suite that loads the packaged libktx and transcodes a pinned KTX2 fixture. Runs per RID in the job that builds the binary.
 - `tests/Ahjo.Vulkan.Slang.Native.Tests` — xUnit smoke suite that loads the packaged Slang compiler, compiles a shader to SPIR-V, walks its reflection, and checks that every deprecated reflection export the stack depends on is still present in the binary. Runs per RID in the job that stages the binary.
-- `tests/Ahjo.Vulkan.Slang.Tests` — xUnit suite over the Slang wrapper: compile from source and from file, diagnostics-as-exceptions, warnings on success, every optimization level, compiler lifetime, and one driver-gated test that feeds the result to `Device.CreateShaderModule`.
+- `tests/Ahjo.Vulkan.Slang.Tests` — xUnit suite over the Slang wrapper: compile from source and from file, diagnostics-as-exceptions, warnings on success, every optimization level, compiler lifetime, multi-module composition and type conformance, and reflection over the linked result — the reflection cases assert against `OpDecorate DescriptorSet`/`Binding`/`Location` read out of the emitted SPIR-V rather than against reflection's own numbers. One driver-gated test builds a `PipelineLayout` from a reflected composed program.
 - `tests/Shared` — the declared Vulkan capability tier (`AHJO_VULKAN_TIER`) shared by the Vulkan-touching suites. Most of the wrapper suite needs a device, so what a green run actually covered depends on the tier the lane declared: see [`docs/ci-coverage.md`](docs/ci-coverage.md).
 
 ## Design principles
