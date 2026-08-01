@@ -1,6 +1,6 @@
 # Ahjo.Vulkan — Claude Project Memory
 
-.NET 10 / C# 14 Vulkan bindings + low-allocation wrapper, aimed at the [Logos game engine](https://github.com/pekkah/logos). Five publishable NuGet packages live in this repo; see `README.md` for the consumer-facing overview.
+.NET 10 / C# 14 Vulkan bindings + low-allocation wrapper, aimed at the [Logos game engine](https://github.com/pekkah/logos). Six publishable NuGet packages live in this repo; see `README.md` for the consumer-facing overview.
 
 Work is driven by GitHub issues. `/work-issue <number>` runs the standard flow: triage → architect (spec + plan) → approval → implementer → reviewers → PR.
 
@@ -23,6 +23,7 @@ src/
   Ahjo.Vulkan.Vma.Native/      ClangSharp P/Invokes against vk_mem_alloc.h + prebuilt vma.{dll,so}
   Ahjo.Vulkan.Ktx.Native/      ClangSharp P/Invokes against Khronos ktx.h + prebuilt ktx.dll/libktx.so
   Ahjo.Vulkan.Slang.Native/    ClangSharp P/Invokes against slang.h + pinned, checksum-verified slang binaries
+  Ahjo.Vulkan.Slang/           compile Slang/HLSL -> SPIR-V; diagnostics as exceptions (setup-time, not a hot path)
   Ahjo.Vulkan.Utilities/       dep-free helpers for samples/tests (not published)
 
 native/                        pinned upstream sources, VMA translation unit, staged binaries

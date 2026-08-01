@@ -47,7 +47,7 @@ on:
         type: boolean
         default: true
       include_slang:
-        description: "Pack Ahjo.Vulkan.Slang.Native (runs the 2-RID native matrix + its smoke suite). Defaults to true since all packages ship together; flip to false for a fast core-only dry-run."
+        description: "Pack Ahjo.Vulkan.Slang.Native + Ahjo.Vulkan.Slang (runs the 2-RID native matrix + its smoke suite). Defaults to true since all packages ship together; flip to false for a fast core-only dry-run."
         required: false
         type: boolean
         default: true
@@ -274,6 +274,24 @@ jobs:
         run: |
           dotnet pack src/Ahjo.Vulkan.Slang.Native/Ahjo.Vulkan.Slang.Native.csproj \
             -c Release \
+            -p:SkipSlangNativeFetch=true \
+            -o "${{ github.workspace }}/artifacts"
+
+      # ---- Slang wrapper package (skipped when include_slang=false) ----
+      # Ahjo.Vulkan.Slang references BOTH Ahjo.Vulkan and
+      # Ahjo.Vulkan.Slang.Native, so it is packed after the two of them and
+      # carries both flags: SkipVmaNativeBuild so the transitive VMA project
+      # does not invoke cmake, and SkipSlangNativeFetch so the transitive
+      # Slang.Native project does not re-download the release archive whose
+      # binaries were downloaded above. It ships no native files of its own.
+      - name: Pack (Slang wrapper)
+        if: needs.build-slang.result == 'success'
+        env:
+          MinVerVersionOverride: ${{ inputs.version }}
+        run: |
+          dotnet pack src/Ahjo.Vulkan.Slang/Ahjo.Vulkan.Slang.csproj \
+            -c Release \
+            -p:SkipVmaNativeBuild=true \
             -p:SkipSlangNativeFetch=true \
             -o "${{ github.workspace }}/artifacts"
 

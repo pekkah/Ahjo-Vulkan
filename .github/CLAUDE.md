@@ -42,4 +42,4 @@ It is a build-artifact check, not wrapper coverage. **Don't grow it** — wrappe
 
 ## Publishing
 
-`publish.yml` ships preview packages on `push:main` (MinVer-derived pre-release version) and stable packages on `release:published` events. Tag with `v0.x.y` → create a GitHub release → all five packages publish under that single tag. The publish workflow can override MinVer via `MinVerVersionOverride`.
+`publish.yml` ships preview packages on `push:main` (MinVer-derived pre-release version) and stable packages on `release:published` events. Tag with `v0.x.y` → create a GitHub release → all six packages publish under that single tag. The publish workflow can override MinVer via `MinVerVersionOverride`.

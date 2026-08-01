@@ -2,6 +2,8 @@
 
 Tracked under issue 28. The wrapper publishes cleanly under `PublishAot=true` and the smoke binary at `samples/AotSmoke/` runs the full HeadlessTriangle workload (allocator + image + buffer + pipeline + cmd recorder + fence wait + PNG dump) when a Vulkan driver is present.
 
+Since issue 166 the smoke binary also **compiles its own shader at startup** with `Ahjo.Vulkan.Slang`, so the ILC run covers the Slang compiler wrapper and its C++ vtable binding rather than only the Vulkan surface. That part needs no ICD, so it executes on a driverless host too — verified on linux-x64: `dotnet publish -c Release -r linux-x64` reports zero trim/AOT warnings, and the published native binary loads `libslang.so`, compiles `Shaders/triangle.slang` and reports both entry points before the driver probe.
+
 ## Why the wrapper is AOT-safe today
 
 The wrapper's interop surface was designed AOT-first. The patterns that block AOT — runtime codegen, marshaller-by-attribute, reflection-driven dispatch — are absent or replaced.
@@ -19,6 +21,8 @@ The wrapper's interop surface was designed AOT-first. The patterns that block AO
 Interface methods dispatch through `delegate* unmanaged[MemberFunction]<…>` loaded out of a `void** lpVtbl` field — a raw function-pointer call the compiler emits directly. There is **no `ComWrappers`, no `[ComImport]`, no `Marshal`, and no runtime type lookup** anywhere in the generated tree; Slang explicitly does not require COM. `CallConvMemberFunction` is the CLR's own modelling of a C++ instance method, and on x64 (the only architecture either shipped RID has) it is ABI-identical to the platform default.
 
 The `[VtblIndex]` and `[NativeTypeName]` attributes ClangSharp emits are `[Conditional("DEBUG")]`, so they are not present in a Release build at all and nothing reads them at runtime — they are review aids for spotting slot drift in a regen diff, not metadata.
+
+`Ahjo.Vulkan.Slang`, the wrapper on top, adds nothing AOT-hostile either: no reflection, no dynamic codegen, no generic instantiation over a runtime `Type`. Its interop is `stackalloc`/`ArrayPool` buffers pinned with `fixed` for the duration of a call, one `NativeMemory` block for the session's search-path array, and `Marshal.PtrToStringUTF8` on the way back — all AOT-supported outright.
 
 `SlangExportDriftTests` deliberately resolves its symbol list through `NativeLibrary.Load` + `NativeLibrary.TryGetExport` against a literal `string[]`, rather than enumerating the binding's `DllImport`s with `Assembly.GetTypes()`. The reflective version would be shorter and would be exactly the pattern this document forbids.
 

@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ahjo.Vulkan.Slang.Tests</RootNamespace>
+    <AssemblyName>Ahjo.Vulkan.Slang.Tests</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan.Slang\Ahjo.Vulkan.Slang.csproj" />
+  </ItemGroup>
+
+  <!--
+    Compiling and reflecting needs no Vulkan device, but ONE test in this
+    suite feeds a Slang blob to Device.CreateShaderModule. That makes this a
+    suite that touches Vulkan, so it carries the declared-tier contract like
+    the other three that do (issue #158, docs/ci-coverage.md) — and its one
+    device test gates on TestGate.RequireDriver rather than a bare
+    Assert.Skip.
+  -->
+  <ItemGroup>
+    <Compile Include="..\Shared\*.cs" LinkBase="Shared" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Shaders\*.slang" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    Same one-const generator Ahjo.Vulkan.Slang.Native.Tests uses: the pinned
+    SlangVersion has to reach managed code somehow, and the alternative — an
+    [AssemblyMetadata] attribute read back with Assembly.GetCustomAttributes —
+    is reflection in a test whose subject is an AOT-clean binding.
+  -->
+  <Target Name="WritePinnedSlangVersion" BeforeTargets="BeforeCompile;CoreCompile">
+    <PropertyGroup>
+      <_PinnedSlangVersionFile>$(IntermediateOutputPath)SlangPinnedVersion.g.cs</_PinnedSlangVersionFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <_PinnedSlangVersionLine Include="// &lt;auto-generated /&gt; Written by the WritePinnedSlangVersion target." />
+      <_PinnedSlangVersionLine Include="namespace Ahjo.Vulkan.Slang.Tests%3B" />
+      <_PinnedSlangVersionLine Include="internal static class SlangPinnedVersion" />
+      <_PinnedSlangVersionLine Include="{" />
+      <_PinnedSlangVersionLine Include="    public const string Tag = &quot;$(SlangVersion)&quot;%3B" />
+      <_PinnedSlangVersionLine Include="    public const string WithoutLeadingV = &quot;$(SlangVersion.TrimStart('v'))&quot;%3B" />
+      <_PinnedSlangVersionLine Include="}" />
+    </ItemGroup>
+
+    <WriteLinesToFile File="$(_PinnedSlangVersionFile)"
+                      Lines="@(_PinnedSlangVersionLine)"
+                      Overwrite="true"
+                      WriteOnlyWhenDifferent="true" />
+
+    <ItemGroup>
+      <Compile Include="$(_PinnedSlangVersionFile)" />
+      <FileWrites Include="$(_PinnedSlangVersionFile)" />
+    </ItemGroup>
+  </Target>
+
+</Project>
