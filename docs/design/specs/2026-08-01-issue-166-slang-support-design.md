@@ -1423,12 +1423,34 @@ to rest on a false premise:
 Whichever is chosen should be applied to the sample-migration follow-up (#172)
 as a rule, not just to this one file.
 
-**Out of scope, deliberately:** adding `shaderDrawParameters` to the *wrapper's*
-default feature set. That set is pushed unconditionally and this feature is
-**optional** even in 1.4, so it would be the first optional member and would
-need a `vkGetPhysicalDeviceFeatures2` gate — the lesson the `f14` comment at
-`PhysicalDevice.cs:228-237` already records. It is an `Ahjo.Vulkan` contract
-decision, and `src/Ahjo.Vulkan.Slang/CLAUDE.md` says this side does not make it.
+**DECIDED 2026-08-01 by a human: the wrapper does not enable
+`shaderDrawParameters` by default. Consumers enable it themselves, and the
+package README says so.**
+
+The proposal was to enable it by default on a Vulkan 1.4 target, mirroring the
+`f14` / `pushDescriptor` gate at `PhysicalDevice.cs:238-246`. **That gate does
+not transfer, and checking why is what settled this.** `pushDescriptor` is
+*mandatory* in 1.4, so there `apiVersion >= V1_4` genuinely implies support.
+`shaderDrawParameters` is an **optional Vulkan 1.1 feature and remains optional
+in 1.4** — core 1.4's "Additional Feature Support" list does not include it; the
+Roadmap 2024 *profile* requires it, and lists it under "Vulkan 1.1 Optional
+Features", which is itself the confirmation. So a conformant 1.4 device may
+report `false`, and an unconditional push would turn `vkCreateDevice` into
+`VK_ERROR_FEATURE_NOT_PRESENT` on a device that works today — trading a
+validation diagnostic for a hard failure.
+
+A support-gated default (`vkGetPhysicalDeviceFeatures2` → copy the bit, the
+pattern the `f2` block at `PhysicalDevice.cs:204-212` already uses) would have
+been safe. It was rejected anyway: it makes the wrapper's contract
+device-dependent, where the 1.2/1.3 pushes are a uniform "these are required,
+fail loudly otherwise". Documentation is the cheaper answer for a one-line
+opt-in.
+
+Recorded for consumers in `src/Ahjo.Vulkan.Slang/README.md` under
+"`SV_VertexID` needs `shaderDrawParameters` enabled on the device", with the
+`chain.Push<VkPhysicalDeviceVulkan11Features>()` snippet and the VUID text to
+search for. Revisit only if the same `ConfigureFeatures` block starts repeating
+across #172.
 
 ---
 

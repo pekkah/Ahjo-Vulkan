@@ -167,6 +167,59 @@ descriptor space, nesting accumulates, and a block whose element carries
 ordinary data gets the implicit uniform buffer Slang puts at binding 0 of its
 space but never lists as a descriptor range.
 
+### `SV_VertexID` needs `shaderDrawParameters` enabled on the device
+
+**If any vertex entry point takes `SV_VertexID`, enable
+`shaderDrawParameters` when you create the device.** Slang emits the SPIR-V
+`DrawParameters` capability for it — HLSL's `SV_VertexID` excludes the base
+vertex where Vulkan's `VertexIndex` includes it, so the module computes
+`VertexIndex - BaseVertex`, and `BaseVertex` requires that capability. The
+same GLSL written with `gl_VertexIndex` requires nothing.
+
+This is deliberately **not** enabled by default. `shaderDrawParameters` is an
+*optional* Vulkan 1.1 feature and is still optional in 1.4, so switching it on
+unconditionally would make `vkCreateDevice` fail with
+`VK_ERROR_FEATURE_NOT_PRESENT` on a conformant device that does not advertise
+it — a worse outcome than the diagnostic below. Enable it yourself:
+
+```csharp
+using var device = gpu.CreateDevice(new DeviceDescription
+{
+    Queues = [new QueueRequest(family, count: 1, priority: 1.0f)],
+
+    ConfigureFeatures = static (
+        ref ChainBuilder<VkDeviceCreateInfo> chain,
+        ref VkPhysicalDeviceFeatures2        _,
+        ref VkPhysicalDeviceVulkan12Features _,
+        ref VkPhysicalDeviceVulkan13Features _,
+        ref VkPhysicalDeviceVulkan14Features _) =>
+    {
+        ref var f11 = ref chain.Push<VkPhysicalDeviceVulkan11Features>();
+        f11.shaderDrawParameters = 1;
+    },
+});
+```
+
+`VkPhysicalDeviceVulkan11Features` is not one of the four structs the
+configurer hands out by `ref`, but it is `IChainable<VkDeviceCreateInfo>`, so
+`chain.Push<T>()` reaches it. The wrapper never pushes that struct itself, so
+there is no duplicate-`sType` conflict.
+
+**Forget it and nothing obviously breaks**, which is the reason this section
+exists: `vkCreateShaderModule` still returns a usable handle and the shader
+runs. Only the validation layer says anything, once:
+
+```
+vkCreateShaderModule(): SPIR-V Capability DrawParameters was declared, but one of
+the following requirements is required
+(VkPhysicalDeviceVulkan11Features::shaderDrawParameters OR VK_KHR_shader_draw_parameters).
+VUID-VkShaderModuleCreateInfo-pCode-08740
+```
+
+Check support first with `vkGetPhysicalDeviceFeatures2` if you target hardware
+that might lack it; on desktop it is effectively universal (the Vulkan Roadmap
+2024 profile requires it).
+
 ### Set indices are set numbers, not positions
 
 **A program's descriptor set indices need not start at 0 and need not be
