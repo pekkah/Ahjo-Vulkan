@@ -33,6 +33,10 @@ Everything else in the ~77 MB archive is left out on purpose, and `StageSlangBin
 
 A staged tree is only reused when **both** the primary binary and `slang-glslang` are present (`_SlangStageNeeded` in the csproj). A one-file check would let a staged directory from before this change ship a package whose `Optimization` does nothing.
 
+**Reproducing the "it can still fail" check on Windows needs the Vulkan SDK off `PATH`.** The win-x64 measurement matches linux-x64 exactly — 317 / 313 / 245 / 245 words for `None` / `Default` / `High` / `Maximal`, no diagnostic — and deleting `slang-glslang.dll` from the test output directory puts all four back to 317 and fails 4 of the 5 `Optimization` tests, exactly as on Linux. But only once `C:\VulkanSDK\<ver>\Bin` is not on `PATH`: the SDK ships its *own*, differently-built `slang-glslang.dll` (9 840 568 bytes at SDK 1.4.341.1, against our 6 173 184), Windows' `LoadLibrary` search reaches `PATH` after the application directory, and it is loaded instead. The tests then pass with our file deleted — the guard silently stops guarding.
+
+This costs nothing at run time for a consumer, because the nupkg puts our copy in the application directory and that comes first. It matters when *verifying*: on any developer box with the Vulkan SDK installed, "the Optimization tests are green" does not prove `slang-glslang` was staged. Strip the SDK from `PATH` for that one run, or check the staged set directly.
+
 `native/slang/include/` (the three parsed headers) and `native/slang/stubs/` (parse-time shims for `<inttypes.h>` and `<features.h>`) are committed: they are the generator input of record. `native/slang/downloaded/` and `native/slang/staged/` are not.
 
 ## The lane

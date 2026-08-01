@@ -114,7 +114,14 @@ null-terminated.
      any global parameter's type-layout tree contains a
      `SLANG_TYPE_KIND_INTERFACE` node — and not the bare call.
 
-  Measured on `v2026.14.1` / linux-x64 only; `win-x64` has no equivalent probe.
+  **The crash is `linux-x64` only.** Probed 3/3 on `v2026.14.1` / win-x64 with
+  the identical sequence: `specialize`, `link`, `getEntryPointCode` and
+  `getTargetCode` all return `SLANG_OK` with empty diagnostics and the entry
+  point emits 1 460 bytes of SPIR-V. That does **not** make `Specialize`
+  shippable — this package ships both RIDs, and an API that SIGSEGVs on one of
+  them cannot have a per-platform contract — but it is what a future upstream
+  bug report should say, and it means point 4's guard is required rather than
+  conditional. Spec OPEN-4(b).
 
 ## Reflection — four rules Slang does not hand you
 

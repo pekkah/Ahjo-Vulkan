@@ -18,6 +18,15 @@ E6 and D3 now carry the measurement instead of the projection, including the
 part this spec predicted wrongly. OPEN-3 is resolved in the plan's direction;
 OPEN-4 is decided except for one sub-question. No other decision changed, and
 nothing in D5/D8/D9/D10 or the reflection evidence is affected.
+**Revised:** 2026-08-01 (win-x64 verification) — every result above had been
+measured on a driverless linux-x64 host. **OPEN-4(b) is now answered: the
+`specialize()` crash is linux-x64 only and does not reproduce on win-x64**
+(3/3). E6's optimizer measurement reproduces on win-x64 with identical word
+counts, with one environment caveat now recorded there. New evidence **E19**:
+Slang's `SV_VertexID` makes the emitted module declare the SPIR-V
+`DrawParameters` capability, which the GLSL it replaces does not — the first
+thing found by putting reflection output in front of a real driver and the
+validation layer.
 
 ---
 
@@ -704,6 +713,59 @@ Related: `slang-deprecated.h:685-696` wraps a further six
 `spReflectionTypeLayout_getSubObjectRangeDescriptorRange*` declarations in
 `#if 0`. They are not available and any design that wants them is blocked.
 
+### E19. `SV_VertexID` costs a device feature that the GLSL it replaces does not
+
+Measured on win-x64 against an RTX 4070 Ti with `VK_LAYER_KHRONOS_validation`
+enabled — the first time anything in this spec was put in front of a driver.
+
+Building a `PipelineLayout` out of reflected descriptions is accepted with
+**zero validation errors**: the composed fixture's three sets
+(`0:0 STORAGE_BUFFER`, `1:0 UNIFORM_BUFFER`, `2:0 UNIFORM_BUFFER`, all
+`Vertex | Fragment`) and its empty push-constant range list all pass. That is
+D5's acceptance criterion, and it holds.
+
+The one error the layers did report is not about reflection at all:
+
+```
+vkCreateShaderModule(): SPIR-V Capability DrawParameters was declared, but one
+of the following requirements is required
+(VkPhysicalDeviceVulkan11Features::shaderDrawParameters
+ OR VK_KHR_shader_draw_parameters).
+VUID-VkShaderModuleCreateInfo-pCode-08740
+```
+
+The cause is a semantic mismatch Slang has to bridge: HLSL's `SV_VertexID`
+excludes the base vertex, Vulkan's `VertexIndex` includes it, so Slang emits
+`VertexIndex - BaseVertex` — and `BaseVertex` requires `DrawParameters`.
+Disassembling both halves of the *same* hard-coded triangle makes the cost
+explicit:
+
+| source | entry point | capabilities |
+|---|---|---|
+| `samples/HeadlessTriangle/Shaders/triangle.vert` (GLSL, `gl_VertexIndex`) | `main` | `Shader` |
+| `samples/AotSmoke/Shaders/triangle.slang` (Slang, `SV_VertexID`) | `vertexMain` | `Shader`, **`DrawParameters`** |
+
+Three consequences, in descending order of how easy they are to miss:
+
+1. **`vkCreateShaderModule` still returns a usable, non-null handle**, and the
+   NVIDIA driver renders the triangle correctly. Only the validation layer says
+   anything. A test that asserts non-null handles cannot see this — which is why
+   `Reflection_BuildsAWorkingPipelineLayout` now creates its instance with
+   `EnableValidation` and asserts zero errors, and enables
+   `shaderDrawParameters` through `ConfigureFeatures`.
+2. **It is not specific to the test fixture.** Any Slang vertex entry point
+   taking `SV_VertexID` emits it, including `samples/AotSmoke` — whose device is
+   created with no `ConfigureFeatures` and which therefore currently creates a
+   shader module it has not enabled the capability for. Benign on this driver,
+   still a spec violation; see the OPEN entry.
+3. **It prices the "migrate the sample shaders to Slang" follow-up.** That
+   migration is not source-for-source: it adds a Vulkan 1.1 feature requirement
+   to every sample whose vertex shader indexes by vertex ID, which is all of
+   them. `VkPhysicalDeviceVulkan11Features` is not one of the four structs
+   `DeviceFeatureChainConfigurer` hands out by ref, but it is
+   `IChainable<VkDeviceCreateInfo>`, so `chain.Push<…>()` reaches it without any
+   change to `Ahjo.Vulkan`.
+
 ---
 
 ## Decision
@@ -1297,11 +1359,23 @@ with a stack trace, on `v2026.14.1` linux-x64.
   `Specialize`, and carries the reasoning in its XML doc so the omission reads
   as a decision. Filing the repro upstream stays a follow-up (see below), not a
   gate.
-- **(b) Still genuinely open: does the crash reproduce on `win-x64`?** It was
-  measured on Linux only and the Windows lane has no equivalent probe. Nothing
-  in the shipped code depends on the answer — `Specialize` is not exposed on
-  either RID — but D9 rule 3's pre-flight guard cannot be sized without it, so
-  anyone proposing a `Specialize` API must answer this first.
+- **(b) ANSWERED 2026-08-01 — the crash is `linux-x64` only. It does *not*
+  reproduce on `win-x64`.** Probed 3/3 on `v2026.14.1` / win-x64 with the same
+  sequence that dies on Linux — load module → composite(module + entry point) →
+  `spReflection_FindTypeByName("Glossy")` → `specialize` → `link` →
+  `getEntryPointCode`. Every call returned `SLANG_OK` with an empty diagnostics
+  blob and the entry point emitted **1 460 bytes of SPIR-V**, deterministically,
+  three runs out of three; `getTargetCode` afterwards also succeeded. So the
+  defect is platform-divergent in upstream Slang, not universal.
+
+  **This does not reopen (a).** A cross-RID package cannot expose an API that
+  SIGSEGVs on one of its two shipped RIDs, so `SlangProgramBuilder` still ships
+  `AddTypeConformance` and no `Specialize`. What the answer *does* settle is the
+  size of D9 rule 3's pre-flight guard: the guard is required on `linux-x64` and
+  cannot be conditioned away on `win-x64` without making the API's contract
+  differ per platform — which is a worse outcome than the guard. Filing the
+  repro upstream should now say "linux-x64 only", because that is a much more
+  actionable bug report than the original.
 
 **OPEN-5 — more than one push-constant block (E17).** Two modules each declaring
 `[[vk::push_constant]]` compose and link, and reflection reports two
@@ -1318,6 +1392,25 @@ locations carries depends on `SessionDesc.defaultMatrixLayoutMode`, and only
 column-major was probed. Phase 3b throws `NotSupportedException` naming the
 field. Settling it means probing both layout modes and reading the SPIR-V type
 of each per-location input variable.
+
+**OPEN-7 — `samples/AotSmoke` declares `DrawParameters` without enabling it
+(E19).** `Shaders/triangle.slang` uses `SV_VertexID`, so the emitted module
+declares the capability, and `AotSmoke`'s device is created with no
+`ConfigureFeatures` — a `VUID-VkShaderModuleCreateInfo-pCode-08740` violation
+that the NVIDIA driver renders straight through and that the sample, which
+enables no validation, never surfaces. Not fixed here because the two fixes
+differ in what they claim:
+
+- **Enable `shaderDrawParameters`** via `chain.Push<VkPhysicalDeviceVulkan11Features>()`
+  — one line, and says "a Slang sample needs Vulkan 1.1". It also raises the
+  sample's implicit device floor, which is the AOT smoke lane's floor too.
+- **Keep the sample on capabilities the GLSL original needed** by indexing from
+  something other than `SV_VertexID` — keeps the floor, costs the property that
+  `triangle.slang` is a faithful translation of `triangle.vert`, which is the
+  comment at the top of the file and the reason the PNGs match.
+
+Whichever is chosen should be applied to the sample-migration follow-up as a
+rule, not just to this one file.
 
 ---
 

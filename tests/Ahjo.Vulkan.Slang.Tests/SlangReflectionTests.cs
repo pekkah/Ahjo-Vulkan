@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Numerics;
 
 using Ahjo.Vulkan.Native;
@@ -554,11 +555,27 @@ public sealed class SlangReflectionTests
     /// descriptions that build a working <c>PipelineLayout</c>.
     /// </summary>
     /// <remarks>
-    /// The composed fixture's sets are 0, 1, 2 with no gap, which is what lets
-    /// this run at all — a program that left a set index unused could not be
-    /// completed, because <c>Device.CreateDescriptorSetLayout</c> rejects an
+    /// <para>The composed fixture's sets are 0, 1, 2 with no gap, which is what
+    /// lets this run at all — a program that left a set index unused could not
+    /// be completed, because <c>Device.CreateDescriptorSetLayout</c> rejects an
     /// empty <c>Bindings</c> span and there is no other way to obtain the
-    /// zero-binding layout Vulkan wants in a hole.
+    /// zero-binding layout Vulkan wants in a hole.</para>
+    /// <para><b>Validation is the oracle here, not the non-null handles.</b>
+    /// Every value fed to <c>CreateDescriptorSetLayout</c> and
+    /// <c>CreatePipelineLayout</c> below came out of reflection, and a wrong
+    /// set, slot, type, count or stage mask produces handles that are still
+    /// non-null — the layers are the only thing that says the descriptions were
+    /// right. Measured on an RTX 4070 Ti, <c>v2026.14.1</c>: the reflected
+    /// layout is accepted with zero validation errors.</para>
+    /// <para><c>shaderDrawParameters</c> is enabled because it is a property of
+    /// what Slang emits, not a choice: <c>vertexMain</c> takes
+    /// <c>SV_VertexID</c>, and mapping that HLSL semantic onto Vulkan's
+    /// <c>VertexIndex</c> requires subtracting <c>BaseVertex</c>, so the module
+    /// declares the SPIR-V <c>DrawParameters</c> capability. Without the
+    /// feature, <c>vkCreateShaderModule</c> still returns a usable handle while
+    /// validation reports
+    /// <c>VUID-VkShaderModuleCreateInfo-pCode-08740</c> — which is precisely
+    /// the kind of silence this test exists to break.</para>
     /// </remarks>
     [Fact]
     public void Reflection_BuildsAWorkingPipelineLayout()
@@ -574,7 +591,24 @@ public sealed class SlangReflectionTests
 
         Assert.Equal(3u, reflection.SetLayoutSlotCount);
 
-        using var instance = Instance.Create(default);
+        int errorCount = 0;
+        var errors = new ConcurrentQueue<string>();
+        Action<DebugMessage> sink = msg =>
+        {
+            if ((msg.Severity & VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0)
+            {
+                Interlocked.Increment(ref errorCount);
+                errors.Enqueue(msg.Message);
+            }
+        };
+
+        bool validating = VulkanEnvironment.HasValidationLayer;
+
+        using var instance = Instance.Create(new InstanceDescription
+        {
+            EnableValidation = validating,
+            DebugCallback = validating ? sink : null,
+        });
 
         uint family = uint.MaxValue;
         var gpu = instance.PickPhysicalDevice((in PhysicalDeviceInfo info) =>
@@ -595,6 +629,21 @@ public sealed class SlangReflectionTests
         using Device device = gpu.CreateDevice(new DeviceDescription
         {
             Queues = [new QueueRequest(family, count: 1, priority: 1.0f)],
+
+            // Not optional decoration — see the DrawParameters note in the
+            // remarks. VkPhysicalDeviceVulkan11Features is not one of the four
+            // structs the configurer hands out by ref, but it is
+            // IChainable<VkDeviceCreateInfo>, so it goes on through the chain.
+            ConfigureFeatures = static (
+                ref ChainBuilder<VkDeviceCreateInfo> chain,
+                ref VkPhysicalDeviceFeatures2        _,
+                ref VkPhysicalDeviceVulkan12Features _,
+                ref VkPhysicalDeviceVulkan13Features _,
+                ref VkPhysicalDeviceVulkan14Features _) =>
+            {
+                ref VkPhysicalDeviceVulkan11Features f11 = ref chain.Push<VkPhysicalDeviceVulkan11Features>();
+                f11.shaderDrawParameters = 1;
+            },
         });
 
         var layouts = new DescriptorSetLayout[(int)reflection.SetLayoutSlotCount];
@@ -630,6 +679,14 @@ public sealed class SlangReflectionTests
             {
                 layout.Dispose();
             }
+        }
+
+        if (validating)
+        {
+            Assert.True(
+                Volatile.Read(ref errorCount) == 0,
+                $"The layers rejected descriptions derived from reflection:{Environment.NewLine}" +
+                string.Join(Environment.NewLine, errors));
         }
     }
 
