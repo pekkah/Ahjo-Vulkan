@@ -57,7 +57,7 @@ descriptor set.** A Substrate-style material system assembles a program at
 runtime out of a shared "common" module, a geometry module, and a per-material
 module, plus the entry points it wants — `ISession::createCompositeComponentType`
 over N components, then `IComponentType::link`, then `getLayout` on the *composed*
-program (`slang.h:5341-5386`). It gives each material its own descriptor set via
+program (`slang.h:5341-5344`, `:5378-5386`). It gives each material its own descriptor set via
 `ParameterBlock<T>`. A reflection API that only reflects a single `IModule` and
 only enumerates descriptor space 0 does not serve that consumer at all: it
 reports the wrong bindings (E12) and throws on the one parameter that matters
@@ -308,7 +308,7 @@ the identifier `Slang` walks outward and binds the **namespace**
 packages (`Vk`, `Vma`, `Ktx`) never hit this because no namespace shares their
 method-class name.
 
-### Method note for E10-E17
+### Method note for E10-E18
 
 Everything below was produced by extending the E2/E3 probe: the same
 ClangSharp-generated binding, the same renamed `libslang.so`, on linux-x64.
@@ -506,7 +506,7 @@ Three caveats, all measured:
   found no category that reports the push constant as used. Push-constant stage
   attribution stays a union.
 - **It costs a codegen.** `getEntryPointMetadata` carries the same preconditions
-  as `getEntryPointCode` (`slang.h:5532-5535`: "Has the same requirements … as
+  as `getEntryPointCode` (`slang.h:5533-5534`: "Has the same requirements … as
   `getEntryPointCode()`"), i.e. fully specialized and fully linked, and it can
   fail with diagnostics. Computing precise stages therefore makes reflection a
   compiling operation that can throw.
