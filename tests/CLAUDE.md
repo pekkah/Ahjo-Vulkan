@@ -7,7 +7,7 @@
 | `Ahjo.Vulkan.Vma.Native.Tests/` | VMA binding + native-binary checks (allocation-only on Linux/lavapipe) |
 | `Ahjo.Vulkan.Ktx.Native.Tests/` | libktx binding checks — must pass with **no** Vulkan loader/ICD installed |
 | `Ahjo.Vulkan.Slang.Native.Tests/` | Slang binding checks — must pass with **no** Vulkan loader/ICD installed |
-| `Ahjo.Vulkan.Slang.Tests/` | Slang **wrapper** checks — compile to SPIR-V, diagnostics as exceptions; one driver-gated test feeds the result to `Device.CreateShaderModule` |
+| `Ahjo.Vulkan.Slang.Tests/` | Slang **wrapper** checks — compile to SPIR-V, compose + link a multi-module program, diagnostics as exceptions; one driver-gated test feeds the result to `Device.CreateShaderModule` |
 | `Ahjo.Vulkan.Benchmarks/` | BenchmarkDotNet — the zero-allocation regression canary |
 
 ## Rules

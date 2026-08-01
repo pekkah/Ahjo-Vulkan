@@ -74,11 +74,27 @@
     <_SlangArchiveSha256 Condition="'$(_SlangRid)' == 'win-x64'">$(SlangWinX64Sha256)</_SlangArchiveSha256>
     <_SlangArchiveSha256 Condition="'$(_SlangRid)' == 'linux-x64'">$(SlangLinuxX64Sha256)</_SlangArchiveSha256>
 
-    <!-- Existence of this file IS the cache: nothing is downloaded,
-         verified or extracted once it is staged. -->
+    <!-- Existence of these files IS the cache: nothing is downloaded,
+         verified or extracted once they are staged. Both are checked, not
+         just the primary — a staged tree left over from before
+         slang-glslang joined the shipped set would otherwise satisfy a
+         one-file check and ship a package whose Optimization setting is a
+         silent no-op, which is the exact defect issue #166's OPEN-1 was
+         opened for. -->
     <_SlangPrimaryFile Condition="'$(_SlangRid)' == 'win-x64'">slang.dll</_SlangPrimaryFile>
     <_SlangPrimaryFile Condition="'$(_SlangRid)' == 'linux-x64'">libslang.so</_SlangPrimaryFile>
     <_SlangStagedPrimary>$(_SlangStagedDir)$(_SlangPrimaryFile)</_SlangStagedPrimary>
+
+    <!-- Windows names this file without a version; Linux embeds the version
+         in it AND dlopen's it by that exact name, so the Linux one must be
+         staged, copied and packed UNRENAMED. Verified against the
+         v2026.14.1 archives: bin/slang-glslang.dll and
+         lib/libslang-glslang-2026.14.1.so. -->
+    <_SlangGlslangFile Condition="'$(_SlangRid)' == 'win-x64'">slang-glslang.dll</_SlangGlslangFile>
+    <_SlangGlslangFile Condition="'$(_SlangRid)' == 'linux-x64'">libslang-glslang-$(_SlangVersionNumber).so</_SlangGlslangFile>
+    <_SlangStagedGlslang>$(_SlangStagedDir)$(_SlangGlslangFile)</_SlangStagedGlslang>
+
+    <_SlangStageNeeded Condition="'$(_SlangRid)' != '' and (!Exists('$(_SlangStagedPrimary)') or !Exists('$(_SlangStagedGlslang)'))">true</_SlangStageNeeded>
   </PropertyGroup>
 
   <ItemGroup>
@@ -92,10 +108,11 @@
     Same Content+Link trick Ahjo.Vulkan.Ktx.Native uses: the files
     propagate through ProjectReference automatically.
 
-    win-x64 ships TWO files. bin/slang.dll is a ~158 KB forwarder that
+    win-x64 ships THREE files. bin/slang.dll is a ~158 KB forwarder that
     imports nothing but KERNEL32 and loads bin/slang-compiler.dll at
     runtime; ship only one of them and the first call is a
-    DllNotFoundException.
+    DllNotFoundException. bin/slang-glslang.dll carries spirv-opt — see
+    StageSlangBinaries below for why it ships.
   -->
   <ItemGroup Condition="'$(_SlangRid)' == 'win-x64' and '$(SkipSlangNativeFetch)' != 'true'">
     <None Include="$(_SlangStagedDir)slang.dll"
@@ -108,15 +125,24 @@
           Visible="false"
           Pack="false"
           Link="slang-compiler.dll" />
+    <None Include="$(_SlangStagedDir)slang-glslang.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false"
+          Pack="false"
+          Link="slang-glslang.dll" />
   </ItemGroup>
 
   <!--
-    linux-x64 ships ONE file: libslang.so, a copy of
-    lib/libslang-compiler.so.0.<version> under a new name. In the archive
+    linux-x64 ships TWO files. libslang.so is a copy of
+    lib/libslang-compiler.so.0.<version> under a new name: in the archive
     libslang.so is a symlink to that file, and a nupkg cannot carry
     symlinks (Ahjo.Vulkan.Ktx.Native.csproj:55-61 documents the same
     constraint for libktx's SOVERSION chain). A plain rename was verified
     to load and run the full compile path.
+
+    libslang-glslang-<version>.so, by contrast, keeps its name exactly:
+    libslang.so dlopen's it as 'slang-glslang-<version>' and a rename
+    turns it back into the missing library it was before.
   -->
   <ItemGroup Condition="'$(_SlangRid)' == 'linux-x64' and '$(SkipSlangNativeFetch)' != 'true'">
     <None Include="$(_SlangStagedDir)libslang.so"
@@ -124,6 +150,11 @@
           Visible="false"
           Pack="false"
           Link="libslang.so" />
+    <None Include="$(_SlangStagedDir)libslang-glslang-$(_SlangVersionNumber).so"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false"
+          Pack="false"
+          Link="libslang-glslang-$(_SlangVersionNumber).so" />
   </ItemGroup>
 
   <!--
@@ -162,7 +193,7 @@
   -->
   <Target Name="DownloadSlangArchive"
           DependsOnTargets="ValidateSlangHost"
-          Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangRid)' != '' and !Exists('$(_SlangStagedPrimary)')">
+          Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangStageNeeded)' == 'true'">
     <MakeDir Directories="$(_SlangDownloadDir)" />
 
     <DownloadFile SourceUrl="$(_SlangArchiveUrl)"
@@ -181,7 +212,7 @@
 
   <Target Name="ExtractSlangArchive"
           DependsOnTargets="DownloadSlangArchive"
-          Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangRid)' != '' and !Exists('$(_SlangStagedPrimary)')">
+          Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangStageNeeded)' == 'true'">
     <MakeDir Directories="$(_SlangExtractDir)" />
 
     <Unzip Condition="'$(_SlangRid)' == 'win-x64'"
@@ -199,6 +230,23 @@
   <!--
     Copy the shipped subset into native/slang/staged/<rid>/.
 
+    SHIPPED, and why:
+      - slang.dll + slang-compiler.dll (win) / libslang.so (linux) — the
+        compiler itself.
+      - libslang-glslang-<ver>.so / slang-glslang.dll — provides the
+        'spirv-opt' downstream compiler. WITHOUT it, every
+        SlangOptimizationLevel above None still returns SLANG_OK and valid
+        SPIR-V, but puts "error[E00100]: failed to load downstream compiler
+        'spirv-opt'" in the diagnostics blob and emits byte-identical
+        output at all four levels: the Optimization setting is a silent
+        no-op. Measured on v2026.14.1, and it is why issue #166's OPEN-1
+        resolved to "ship it". Cost: 6 173 184 bytes raw / ~2.4 MB
+        compressed on win-x64, 10 055 776 raw / 3 736 269 compressed in the
+        produced nupkg on linux-x64.
+        The Linux file name embeds the version and libslang dlopen's it by
+        that exact name, so it ships UNRENAMED — unlike libslang.so, which
+        is a rename by necessity.
+
     NOT shipped, deliberately:
       - libslang-llvm.so / slang-llvm.dll  (152 MB / 84 MB) — CPU and
         host-callable targets only; this package's contract ends at SPIR-V.
@@ -213,20 +261,14 @@
         none of this tree present.
       - bin/, share/doc/, lib/cmake/, lib/pkgconfig/ — the CLI tools and
         their docs. We call the library, not slangc.
-      - libslang-glslang-<ver>.so / slang-glslang.dll — provides
-        'spirv-opt'. slangc's default pipeline wants it; the API path this
-        package exists for did not require it in any probed configuration.
-        Deferred, not rejected: see OPEN-1 in
-        docs/design/specs/2026-08-01-issue-166-slang-support-design.md.
-        The Linux file name embeds the version and is dlopen'd by that
-        exact name, so if it ever ships it must ship UNRENAMED.
   -->
   <Target Name="StageSlangBinaries"
           DependsOnTargets="ExtractSlangArchive"
-          Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangRid)' != '' and !Exists('$(_SlangStagedPrimary)')">
+          Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangStageNeeded)' == 'true'">
     <ItemGroup Condition="'$(_SlangRid)' == 'win-x64'">
       <_SlangShippedFile Include="$(_SlangExtractDir)bin\slang.dll" />
       <_SlangShippedFile Include="$(_SlangExtractDir)bin\slang-compiler.dll" />
+      <_SlangShippedFile Include="$(_SlangExtractDir)bin\slang-glslang.dll" />
     </ItemGroup>
 
     <Copy Condition="'$(_SlangRid)' == 'win-x64'"
@@ -242,8 +284,17 @@
           DestinationFiles="$(_SlangStagedDir)libslang.so"
           SkipUnchangedFiles="true" />
 
+    <!-- Name preserved: dlopen'd as 'slang-glslang-<ver>' by libslang. -->
+    <Copy Condition="'$(_SlangRid)' == 'linux-x64'"
+          SourceFiles="$(_SlangExtractDir)lib\$(_SlangGlslangFile)"
+          DestinationFolder="$(_SlangStagedDir)"
+          SkipUnchangedFiles="true" />
+
     <Error Condition="!Exists('$(_SlangStagedPrimary)')"
            Text="The $(SlangVersion) archive extracted, but $(_SlangStagedPrimary) was not produced. The release layout may have changed; re-check the file list in StageSlangBinaries against the archive." />
+
+    <Error Condition="!Exists('$(_SlangStagedGlslang)')"
+           Text="The $(SlangVersion) archive extracted, but $(_SlangStagedGlslang) was not produced. Without it every SlangOptimizationLevel above None is a silent no-op, so this is an error and not a warning; re-check the file list in StageSlangBinaries against the archive." />
 
     <!-- Apache-2.0 WITH LLVM-exception. Packed at the nupkg root next to
          our own MIT LICENSE, because the nupkg carries someone else's
@@ -297,7 +348,12 @@
     <ItemGroup>
       <_SlangPackFile Include="slang.dll">          <Rid>win-x64</Rid>   </_SlangPackFile>
       <_SlangPackFile Include="slang-compiler.dll"> <Rid>win-x64</Rid>   </_SlangPackFile>
+      <_SlangPackFile Include="slang-glslang.dll">  <Rid>win-x64</Rid>   </_SlangPackFile>
       <_SlangPackFile Include="libslang.so">        <Rid>linux-x64</Rid> </_SlangPackFile>
+
+      <!-- Version-embedded on purpose: libslang dlopen's this by its exact
+           file name, so it packs unrenamed. -->
+      <_SlangPackFile Include="libslang-glslang-$(_SlangVersionNumber).so"> <Rid>linux-x64</Rid> </_SlangPackFile>
     </ItemGroup>
 
     <ItemGroup>

@@ -34,11 +34,12 @@ NuGet as six packages:
 - [**Ahjo.Vulkan.Slang.Native**](https://www.nuget.org/packages/Ahjo.Vulkan.Slang.Native)
   — raw P/Invoke bindings against the [Slang](https://github.com/shader-slang/slang)
   shader compiler's `slang.h` (compile Slang/HLSL to SPIR-V, plus shader
-  reflection), plus prebuilt `slang.dll` + `slang-compiler.dll` /
-  `libslang.so` for `win-x64` and `linux-x64` under
+  reflection), plus prebuilt `slang.dll` + `slang-compiler.dll` +
+  `slang-glslang.dll` / `libslang.so` + `libslang-glslang-<version>.so`
+  for `win-x64` and `linux-x64` under
   `runtimes/<rid>/native/`. **Standalone**: it is not pulled in by
   `Ahjo.Vulkan` and has no Vulkan dependency of its own — a consumer
-  shipping precompiled SPIR-V never pulls ~25 MB of compiler. The binaries
+  shipping precompiled SPIR-V never pulls ~31 MB of compiler. The binaries
   are upstream's own release artifacts, pinned by tag *and* by SHA-256.
   Reference it directly if you need it.
 - [**Ahjo.Vulkan.Slang**](https://www.nuget.org/packages/Ahjo.Vulkan.Slang)
@@ -145,7 +146,8 @@ neither the clone nor cmake runs again until the pinned version changes.
 The Slang `.Native` project builds nothing, but its first build downloads the
 ~77 MB upstream release archive for the host RID and verifies its SHA-256
 against `SlangWinX64Sha256` / `SlangLinuxX64Sha256` before extracting the two
-or three files that actually ship. `-p:SkipSlangNativeFetch=true` is the escape
+or three files that actually ship (the compiler, plus `slang-glslang` for
+`spirv-opt`). `-p:SkipSlangNativeFetch=true` is the escape
 hatch. `native/slang/staged/<rid>/` is the cache, same as KTX's.
 
 ## Release tagging

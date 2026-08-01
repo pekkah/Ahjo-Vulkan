@@ -69,35 +69,63 @@ public sealed class SlangModuleTests
     }
 
     /// <summary>
-    /// <b>Deviation from the plan's §2.5 case 12, recorded rather than
-    /// hidden.</b> The plan expected asking for a <c>[shader("fragment")]</c>
-    /// entry point as <see cref="ShaderStages.Vertex"/> to throw with compiler
-    /// text. It does not: measured on <c>v2026.14.1</c>,
-    /// <c>IModule::findAndCheckEntryPoint</c> returns <c>SLANG_OK</c>, hands
-    /// back the fragment entry point, and produces an <em>empty</em>
-    /// diagnostics blob for every wrong stage tried (Compute and Vertex both).
-    /// Slang uses the stage to <em>find</em> an unattributed function, not to
-    /// validate an attributed one.
+    /// Asking for a <c>[shader("fragment")]</c> entry point as
+    /// <see cref="ShaderStages.Vertex"/> throws, naming both stages.
     /// </summary>
     /// <remarks>
-    /// This test pins the measured behaviour so the wrapper's documented
-    /// contract — <see cref="SlangEntryPoint.Stage"/> is the stage the caller
-    /// asked for, not one Slang verified — cannot rot silently. If a future
-    /// Slang starts rejecting the mismatch, this test goes red and the
-    /// contract gets revisited on purpose.
+    /// <para>Slang does not reject this. Measured on <c>v2026.14.1</c>,
+    /// <c>IModule::findAndCheckEntryPoint("fragmentMain",
+    /// SLANG_STAGE_VERTEX)</c> returns <c>SLANG_OK</c> with an <em>empty</em>
+    /// diagnostics blob and hands back the fragment entry point labelled
+    /// <c>Vertex</c> — a mislabelled component that composes and links, and
+    /// only surfaces as a pipeline-creation failure much later. The stage
+    /// parameter is how Slang <em>finds</em> a function with no attribute; it
+    /// is not a check on one that has an attribute.</para>
+    /// <para>The wrapper closes that by reading the declared stage back first.
+    /// The narrowness is deliberate: see
+    /// <see cref="FindEntryPoint_UndeclaredStage_UsesTheRequestedStage"/> for
+    /// the case that must keep working.</para>
     /// </remarks>
     [Fact]
-    public void FindEntryPoint_WrongStage_IsNotRejectedBySlang()
+    public void FindEntryPoint_DeclaredStageDisagrees_Throws()
     {
         using var compiler = SlangCompiler.Create();
         using SlangSession session = compiler.CreateSession(default);
         using SlangModule module = session.LoadModuleFromSource(
             "wrongStage", "wrongStage.slang", ShaderFixtures.VertexAndFragment);
 
-        using SlangEntryPoint mislabelled = module.FindEntryPoint("fragmentMain", ShaderStages.Vertex);
+        var ex = Assert.Throws<SlangCompilationException>(
+            () => module.FindEntryPoint("fragmentMain", ShaderStages.Vertex));
 
-        Assert.Equal("fragmentMain", mislabelled.Name);
-        Assert.Equal(ShaderStages.Vertex, mislabelled.Stage);
+        Assert.Contains("fragmentMain", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Fragment", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Vertex", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A function with no <c>[shader("…")]</c> attribute has no declared stage
+    /// to disagree with, so the requested stage stays authoritative and the
+    /// lookup succeeds — the behaviour
+    /// <see cref="FindEntryPoint_DeclaredStageDisagrees_Throws"/> must not
+    /// break.
+    /// </summary>
+    [Fact]
+    public void FindEntryPoint_UndeclaredStage_UsesTheRequestedStage()
+    {
+        using var compiler = SlangCompiler.Create();
+        using SlangSession session = compiler.CreateSession(default);
+        using SlangModule module = session.LoadModuleFromSource(
+            "unattributed", "unattributed.slang", ShaderFixtures.UnattributedVertex);
+
+        // No attribute anywhere in the source: nothing is a "defined" entry
+        // point, and the stage argument is the only thing that makes this
+        // function findable at all.
+        Assert.Equal(0, module.DefinedEntryPointCount);
+
+        using SlangEntryPoint entryPoint = module.FindEntryPoint("unattributedMain", ShaderStages.Vertex);
+
+        Assert.Equal("unattributedMain", entryPoint.Name);
+        Assert.Equal(ShaderStages.Vertex, entryPoint.Stage);
     }
 
     [Fact]

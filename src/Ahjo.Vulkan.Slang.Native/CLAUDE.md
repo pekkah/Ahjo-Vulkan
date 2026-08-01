@@ -24,10 +24,14 @@ Related: `--traverse` must name `slang-deprecated.h`, not just `--file slang.h`.
 
 | RID | Files |
 | --- | --- |
-| `win-x64` | `slang.dll` (a ~158 KB forwarder) **and** `slang-compiler.dll` — ship only one and the first call is a `DllNotFoundException` |
-| `linux-x64` | `libslang.so`, a **renamed copy** of `lib/libslang-compiler.so.0.<version>`; in the archive that name is a symlink, and a nupkg cannot carry symlinks |
+| `win-x64` | `slang.dll` (a ~158 KB forwarder) **and** `slang-compiler.dll` — ship only one and the first call is a `DllNotFoundException` — **and** `slang-glslang.dll` |
+| `linux-x64` | `libslang.so`, a **renamed copy** of `lib/libslang-compiler.so.0.<version>` (in the archive that name is a symlink, and a nupkg cannot carry symlinks), **and** `libslang-glslang-<version>.so`, which ships **unrenamed** |
 
-Everything else in the ~77 MB archive is left out on purpose, and `StageSlangBinaries` in the csproj records why per file: `slang-llvm` (152 MB, CPU targets only), `slang-glsl-module` (GLSL *input* only), `libgfx` / `libslang-rt` (running shaders, not emitting them), the `slang-standard-module-*` tree (the core module is embedded — a full compile was verified with none of it present), and `bin/` + `share/doc/`. `slang-glslang` (which provides `spirv-opt`) is **deferred, not rejected** — see OPEN-1 in `docs/design/specs/2026-08-01-issue-166-slang-support-design.md`. If it ever ships, the Linux file name embeds the version and is `dlopen`ed by that exact name, so it must ship **unrenamed**.
+**`slang-glslang` ships, and the two file names are not the same shape.** It provides the `spirv-opt` downstream compiler. Without it, every `SlangOptimizationLevel` above `None` still returns `SLANG_OK` and valid SPIR-V while putting `error[E00100]: failed to load downstream compiler 'spirv-opt'` in the diagnostics blob, and all four levels emit byte-identical output — the setting is a silent no-op. That is what OPEN-1 in `docs/design/specs/2026-08-01-issue-166-slang-support-design.md` was about, and it resolved to "ship it": ~2.4 MB compressed on `win-x64` (6 173 184 raw), 3 736 269 in the produced nupkg on `linux-x64` (10 055 776 raw). Windows names the file `slang-glslang.dll`; Linux embeds the version and `libslang` `dlopen`s it by that exact name, so the Linux one is copied, staged and packed **unrenamed** — renaming it is indistinguishable from not shipping it. `Optimization_ChangesTheEmittedSpirv` in `Ahjo.Vulkan.Slang.Tests` is the guard: it compiles a deliberately redundant shader at `None` and `Maximal` and requires the second to be smaller.
+
+Everything else in the ~77 MB archive is left out on purpose, and `StageSlangBinaries` in the csproj records why per file: `slang-llvm` (152 MB, CPU targets only), `slang-glsl-module` (GLSL *input* only), `libgfx` / `libslang-rt` (running shaders, not emitting them), the `slang-standard-module-*` tree (the core module is embedded — a full compile was verified with none of it present), and `bin/` + `share/doc/`.
+
+A staged tree is only reused when **both** the primary binary and `slang-glslang` are present (`_SlangStageNeeded` in the csproj). A one-file check would let a staged directory from before this change ship a package whose `Optimization` does nothing.
 
 `native/slang/include/` (the three parsed headers) and `native/slang/stubs/` (parse-time shims for `<inttypes.h>` and `<features.h>`) are committed: they are the generator input of record. `native/slang/downloaded/` and `native/slang/staged/` are not.
 

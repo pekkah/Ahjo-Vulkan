@@ -37,10 +37,13 @@ Two Slang behaviours make this less obvious than it sounds, both measured on
 - `loadModule*` signals failure by returning `nullptr`, with no result code on
   the call at all. Check the pointer, not just an `rc`.
 - `getEntryPointCode` can return `SLANG_OK` *and* an `error[…]` line in the
-  diagnostics blob. It does exactly that for every optimization level above
-  `None`, because `spirv-opt` lives in `slang-glslang`, which the native package
-  does not ship (issue #166, OPEN-1). The text reaches `SlangProgram.Warnings`;
-  the SPIR-V is valid but unoptimized.
+  diagnostics blob. That is not hypothetical: with `slang-glslang` absent it did
+  exactly that for every optimization level above `None`
+  (`failed to load downstream compiler 'spirv-opt'`) while handing back valid,
+  completely unoptimized SPIR-V. `Ahjo.Vulkan.Slang.Native` ships that library
+  now (issue #166, OPEN-1, resolved), so the diagnostic should no longer appear
+  — `OptimizationLevels_ReachTheDownstreamCompiler` asserts it does not. Keep
+  reading the blob regardless: a result code is not the whole answer here.
 
 **2. `IModule*` is borrowed, `IEntryPoint*` is owned.** `ISession::loadModule*`
 hands back a pointer the *session* owns — releasing it without an `addRef` first
@@ -85,3 +88,30 @@ null-terminated.
   the stack trace). Interface conformance goes through
   `createTypeConformanceComponentType` instead. An API whose failure mode is
   SIGSEGV cannot ship behind a `try`.
+
+  **This is a decision, not a deferral.** `SlangProgramBuilder` ships
+  `AddTypeConformance` and no `Specialize`, and the omission is load-bearing
+  rather than an oversight — the reasoning, in full:
+
+  1. `specialize()` and the following `link()` both return **success** on the
+     crashing shape. The process dies later, in `getTargetCode` /
+     `getEntryPointCode` for the entry point that consumes the block, inside
+     `Slang::legalizeTypes`. There is no result code to check and no exception
+     to catch, so no amount of wrapper discipline turns it into a diagnostic.
+  2. `createTypeConformanceComponentType` was verified on the *same* shader to
+     compose, link and emit valid SPIR-V — `Compose_TypeConformance_Links` is
+     that test. So the capability is not missing; only the crashing route to it
+     is.
+  3. The interface-typed `ParameterBlock` case is
+     specialization-**invariant** by design (spec E14): its reflected layout is
+     byte-identical before and after, because what the block binds is one
+     existential value buffer. `specialize()` would buy nothing here even if it
+     worked.
+  4. `specialize()` *does* work for the `type_param` form, which is a different
+     Slang mechanism and genuinely does change the layout. If a later phase
+     wants it, it needs spec D9 rule 3's pre-flight guard — walk the
+     unspecialized composite's layout and throw `NotSupportedException` when
+     any global parameter's type-layout tree contains a
+     `SLANG_TYPE_KIND_INTERFACE` node — and not the bare call.
+
+  Measured on `v2026.14.1` / linux-x64 only; `win-x64` has no equivalent probe.

@@ -32,8 +32,9 @@ public sealed unsafe class SlangEntryPoint : IDisposable
     /// <see cref="SlangModule.DefinedEntryPoint(int)"/> this is the stage the
     /// shader's <c>[shader("…")]</c> attribute declares; for one obtained from
     /// <see cref="SlangModule.FindEntryPoint(string, ShaderStages)"/> it is
-    /// the stage the caller asked for, because Slang does not check the two
-    /// against each other.
+    /// the stage the caller asked for — which that method has already checked
+    /// against the declared stage, if the function declares one. Slang itself
+    /// does not check the two against each other.
     /// </summary>
     public ShaderStages Stage { get; }
 

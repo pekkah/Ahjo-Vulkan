@@ -43,12 +43,20 @@ reflection mapped onto `DescriptorBinding` / `PushConstantRange` /
 
 The shipped binaries are extracted from the official release archive for the
 pinned tag, after its SHA-256 is verified against a value pinned in this
-repository. Only the compiler itself ships:
+repository. Only the compiler and its SPIR-V optimizer ship:
 
-| RID | Files |
-| --- | --- |
-| `win-x64` | `slang.dll` + `slang-compiler.dll` (the first is a small forwarder that loads the second; both are required) |
-| `linux-x64` | `libslang.so` |
+| RID | Files | Compressed |
+| --- | --- | --- |
+| `win-x64` | `slang.dll` + `slang-compiler.dll` (the first is a small forwarder that loads the second; both are required) + `slang-glslang.dll` | ~14 MB |
+| `linux-x64` | `libslang.so` + `libslang-glslang-<version>.so` | ~17 MB |
+
+`slang-glslang` provides the `spirv-opt` downstream compiler. Without it the
+compiler still emits valid SPIR-V — `SLANG_TARGET_FLAG_GENERATE_SPIRV_DIRECTLY`
+is Slang's own default — but every optimization level above "none" quietly
+reports `error[E00100]: failed to load downstream compiler 'spirv-opt'` and
+produces identical output, so the setting does nothing. It ships for that
+reason. The Linux file name embeds the version and is loaded by that exact name,
+so it is not renamed.
 
 Left out deliberately: `slang-llvm` (152 MB, for CPU and host-callable targets),
 `slang-glsl-module` (GLSL *input* only), `libgfx` and `libslang-rt` (Slang's own
@@ -56,12 +64,6 @@ graphics layer and CPU runtime — for *running* shaders, not emitting them), th
 `slang-standard-module-*` tree (the core module is embedded in the compiler
 binary), and the `slangc` / `slangd` command-line tools. The compile-to-SPIR-V
 path was verified end to end with only the files above present.
-
-`slang-glslang`, which provides the `spirv-opt` downstream compiler, is also not
-shipped. The API path this package exists for emits SPIR-V directly —
-`SLANG_TARGET_FLAG_GENERATE_SPIRV_DIRECTLY` is Slang's own default — and did not
-require `spirv-opt` in any configuration probed. `slangc`'s default pipeline
-does, so a workflow that shells out to the CLI is out of scope here.
 
 ## Platform support
 

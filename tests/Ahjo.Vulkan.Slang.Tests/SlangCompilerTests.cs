@@ -169,40 +169,38 @@ public sealed class SlangCompilerTests
     }
 
     /// <summary>
-    /// Issue #166, <b>OPEN-1</b>. Every optimization level must produce valid
-    /// SPIR-V with the binary subset <c>Ahjo.Vulkan.Slang.Native</c> ships.
+    /// Issue #166, <b>OPEN-1</b>, resolved to "ship <c>slang-glslang</c>".
+    /// Every optimization level must produce valid SPIR-V <em>and</em> reach
+    /// the <c>spirv-opt</c> downstream compiler.
     /// </summary>
     /// <remarks>
-    /// <para>Measured on <c>v2026.14.1</c> / linux-x64, one process per level,
-    /// so a cached load failure cannot mask a later level: <b>every level
-    /// succeeds</b> — <c>SLANG_OK</c>, a valid SPIR-V module, byte-identical
-    /// output at all four levels. But levels above
-    /// <see cref="SlangOptimizationLevel.None"/> put this in the diagnostics
-    /// blob of the first <c>getEntryPointCode</c> call:</para>
+    /// <para>The diagnostic assertion is the whole point. Before
+    /// <c>slang-glslang</c> joined the shipped set, every level above
+    /// <see cref="SlangOptimizationLevel.None"/> returned <c>SLANG_OK</c> and
+    /// a well-formed module while quietly reporting</para>
     /// <code>
     /// error[E00100]: failed to load downstream compiler 'spirv-opt'
     /// note[E99996]: failed to load dynamic library 'slang-glslang-2026.14.1'
     /// </code>
-    /// <para>It reaches the caller as <see cref="SlangProgram.Warnings"/>
-    /// rather than being swallowed, and the identical blob sizes are the
-    /// measurement that says the level is a no-op without that library.
-    /// Whether to ship <c>slang-glslang</c> is a human decision; this test
-    /// does not encode either answer, because the diagnostic text is the part
-    /// that would change and it has not been verified on <c>win-x64</c>.</para>
+    /// <para>into <see cref="SlangProgram.Warnings"/> — so a "valid SPIR-V at
+    /// every level" assertion passed for a whole phase over an
+    /// <c>Optimization</c> setting that did nothing. Losing the library again
+    /// (a staging regression, a trimmed pack list) has to fail loudly, and
+    /// this is where.</para>
     /// </remarks>
     [Theory]
     [InlineData(SlangOptimizationLevel.None)]
     [InlineData(SlangOptimizationLevel.Default)]
     [InlineData(SlangOptimizationLevel.High)]
     [InlineData(SlangOptimizationLevel.Maximal)]
-    public void OptimizationLevels_AllSucceed(SlangOptimizationLevel level)
+    public void OptimizationLevels_ReachTheDownstreamCompiler(SlangOptimizationLevel level)
     {
         using var compiler = SlangCompiler.Create();
         using SlangSession session = compiler.CreateSession(new SlangSessionDescription { Optimization = level });
         using SlangProgram program = session.Compile(new SlangCompileRequest
         {
             ModuleName = "opt" + level,
-            Source = ShaderFixtures.VertexAndFragment,
+            Source = ShaderFixtures.RedundantVertex,
         });
 
         for (int i = 0; i < program.EntryPointCount; i++)
@@ -212,13 +210,65 @@ public sealed class SlangCompilerTests
             Assert.False(spirv.IsEmpty, $"Optimization level {level} produced an empty blob for entry point {i}.");
             Assert.Equal(ShaderFixtures.SpirvMagic, spirv[0]);
 
-            // Printed even on a pass: this is the OPEN-1 evidence a human
-            // quotes when deciding whether slang-glslang ships. Word counts
-            // that are identical across levels mean the level is a no-op.
             _output.WriteLine($"level={level} entryPoint={i} words={spirv.Length}");
         }
 
+        string warnings = program.Warnings ?? string.Empty;
+
         _output.WriteLine($"level={level} warnings={program.Warnings ?? "<none>"}");
+
+        Assert.DoesNotContain("spirv-opt", warnings, StringComparison.Ordinal);
+        Assert.DoesNotContain("failed to load downstream compiler", warnings, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <see cref="SlangSessionDescription.Optimization"/> must actually change
+    /// the emitted SPIR-V — the assertion that "the level was accepted" cannot
+    /// make.
+    /// </summary>
+    /// <remarks>
+    /// <para>Compiles <see cref="ShaderFixtures.RedundantVertex"/> — a
+    /// fixed-trip loop that folds, a dead local chain and two arithmetic
+    /// identities — at <see cref="SlangOptimizationLevel.None"/> and at
+    /// <see cref="SlangOptimizationLevel.Maximal"/> and requires the second to
+    /// be strictly smaller. A trivial shader is not usable here: it gives the
+    /// optimizer nothing to remove and emits identical words at every level
+    /// whether <c>spirv-opt</c> loaded or not, which is precisely how the
+    /// no-op went unnoticed.</para>
+    /// <para>Measured on <c>v2026.14.1</c> / linux-x64: 317 words at
+    /// <c>None</c>, 245 at <c>Maximal</c>. Withholding
+    /// <c>libslang-glslang-2026.14.1.so</c> from the output directory puts
+    /// both back to 317 and fails this test — which is the evidence that
+    /// shipping it is what makes the level mean anything. Only the direction
+    /// is asserted; the exact counts are a property of upstream's optimizer,
+    /// not of this wrapper.</para>
+    /// </remarks>
+    [Fact]
+    public void Optimization_ChangesTheEmittedSpirv()
+    {
+        int unoptimized = CompileRedundantVertexWordCount(SlangOptimizationLevel.None);
+        int optimized = CompileRedundantVertexWordCount(SlangOptimizationLevel.Maximal);
+
+        _output.WriteLine($"None={unoptimized} words, Maximal={optimized} words");
+
+        Assert.True(
+            optimized < unoptimized,
+            $"Optimization had no effect: None emitted {unoptimized} words and Maximal emitted {optimized}. " +
+            "That is what an absent slang-glslang (no spirv-opt) looks like — check the shipped set in " +
+            "src/Ahjo.Vulkan.Slang.Native/Ahjo.Vulkan.Slang.Native.csproj before touching this assertion.");
+    }
+
+    private static int CompileRedundantVertexWordCount(SlangOptimizationLevel level)
+    {
+        using var compiler = SlangCompiler.Create();
+        using SlangSession session = compiler.CreateSession(new SlangSessionDescription { Optimization = level });
+        using SlangProgram program = session.Compile(new SlangCompileRequest
+        {
+            ModuleName = "redundant" + level,
+            Source = ShaderFixtures.RedundantVertex,
+        });
+
+        return program.Spirv(0).Length;
     }
 
     /// <summary>

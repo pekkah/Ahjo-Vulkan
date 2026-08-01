@@ -49,6 +49,11 @@ public sealed class SlangExportDriftTests
         "spReflection_getEntryPointByIndex",
         "spReflection_getGlobalParamsTypeLayout",
 
+        // Composition: SlangProgramBuilder.AddTypeConformance resolves both of
+        // its type names against the composite's layout before it can call
+        // createTypeConformanceComponentType.
+        "spReflection_FindTypeByName",
+
         // Type layouts: sizes, element types, and the descriptor-set walk that
         // produces DescriptorBinding / PushConstantRange.
         "spReflectionTypeLayout_getKind",

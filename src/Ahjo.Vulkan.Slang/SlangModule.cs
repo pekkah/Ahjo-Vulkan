@@ -99,21 +99,29 @@ public sealed unsafe class SlangModule : IDisposable
     /// even when the function carries no <c>[shader("…")]</c> attribute.
     /// </summary>
     /// <remarks>
-    /// <para><b>Slang does not validate <paramref name="stage"/> against a
-    /// <c>[shader("…")]</c> attribute.</b> Measured on <c>v2026.14.1</c>:
-    /// asking for a <c>[shader("fragment")]</c> function as
-    /// <see cref="ShaderStages.Compute"/> returns <c>SLANG_OK</c> and the
-    /// fragment entry point, with an empty diagnostics blob. The
-    /// <see cref="SlangEntryPoint.Stage"/> reported back is therefore the
-    /// stage <em>you asked for</em>; use
-    /// <see cref="DefinedEntryPoint(int)"/> when you want the stage the
-    /// shader declares.</para>
+    /// <para><paramref name="stage"/> is what Slang uses to <em>find</em> a
+    /// function that declares no stage of its own. That is the legitimate use
+    /// of this call and it succeeds: the requested stage is authoritative and
+    /// is what <see cref="SlangEntryPoint.Stage"/> reports.</para>
+    /// <para><b>Slang does not use it to validate a function that
+    /// <em>does</em> declare one.</b> Measured on <c>v2026.14.1</c>: asking
+    /// for a <c>[shader("fragment")]</c> function as
+    /// <see cref="ShaderStages.Vertex"/> returns <c>SLANG_OK</c> and hands
+    /// back the fragment entry point labelled <c>Vertex</c>, with an empty
+    /// diagnostics blob — a mislabelled entry point that only surfaces as a
+    /// pipeline-creation failure much later. This wrapper therefore reads the
+    /// declared stage back out of the module's <c>[shader("…")]</c> entry
+    /// points first and throws
+    /// <see cref="SlangCompilationException"/> on a disagreement.</para>
     /// </remarks>
     /// <exception cref="NotSupportedException">
     /// <paramref name="stage"/> is not a single stage Slang can look an entry
     /// point up at.
     /// </exception>
-    /// <exception cref="SlangCompilationException">No such entry point.</exception>
+    /// <exception cref="SlangCompilationException">
+    /// No such entry point, or the entry point declares a
+    /// <c>[shader("…")]</c> stage that is not <paramref name="stage"/>.
+    /// </exception>
     public SlangEntryPoint FindEntryPoint(string name, ShaderStages stage)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
@@ -121,6 +129,17 @@ public sealed unsafe class SlangModule : IDisposable
         // Total switch: an unmapped stage throws rather than degrading to
         // SLANG_STAGE_NONE, which Slang would accept and then miss on.
         SlangStage slangStage = SlangStages.ToSlangStage(stage);
+
+        // Slang will not do this for us — see the remarks. An entry point that
+        // declares no stage has none to disagree with, so it falls through and
+        // the caller's stage stands.
+        if (TryGetDeclaredStage(name, out ShaderStages declared) && declared != stage)
+        {
+            throw new SlangCompilationException(
+                $"Slang compilation failed: entry point '{name}' in module '{Name}' declares [shader(\"…\")] stage {declared}, but was requested as {stage}. Slang accepts this and hands back the entry point labelled with the stage you asked for; ask for {declared}, or drop the attribute if the function is meant to serve several stages.",
+                string.Empty,
+                innerException: null);
+        }
 
         IModule* module = Handle;
         IEntryPoint* entryPoint = null;
@@ -144,6 +163,39 @@ public sealed unsafe class SlangModule : IDisposable
         }
 
         return SlangEntryPoint.FromRequestedStage(entryPoint, name, stage);
+    }
+
+    /// <summary>
+    /// Reads the stage a function's <c>[shader("…")]</c> attribute declares,
+    /// if it declares one.
+    /// </summary>
+    /// <remarks>
+    /// Same mechanism <c>SlangSession.Compile</c> uses to learn the stage of a
+    /// named entry point: enumerate the module's declared entry points and
+    /// match by name. A function with no attribute is not among them, which is
+    /// what makes <see langword="false"/> mean "undeclared" rather than
+    /// "absent" — an unknown name is left for
+    /// <c>findAndCheckEntryPoint</c> to report in the compiler's own words.
+    /// </remarks>
+    private bool TryGetDeclaredStage(string name, out ShaderStages declared)
+    {
+        int count = DefinedEntryPointCount;
+
+        for (int i = 0; i < count; i++)
+        {
+            using SlangEntryPoint defined = DefinedEntryPoint(i);
+
+            if (string.Equals(defined.Name, name, StringComparison.Ordinal))
+            {
+                declared = defined.Stage;
+
+                return true;
+            }
+        }
+
+        declared = default;
+
+        return false;
     }
 
     /// <summary>Drops this wrapper's reference to the module.</summary>

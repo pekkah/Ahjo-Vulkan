@@ -27,7 +27,7 @@ for (int i = 0; i < program.EntryPointCount; i++)
 ```
 
 `Ahjo.Vulkan` itself takes no dependency on this package, so a consumer shipping
-precompiled SPIR-V never pulls ~25 MB of compiler.
+precompiled SPIR-V never pulls ~31 MB of compiler.
 
 ## Diagnostics are not optional
 
@@ -66,21 +66,71 @@ using var material = session.LoadModuleFromSource("material", "material.slang", 
 using var entryPoint = material.FindEntryPoint("fragmentMain", ShaderStages.Fragment);
 ```
 
-Composing those components into one linked program — where the *order* of the
-component list is part of the layout contract — is
-`SlangProgramBuilder`, which lands with reflection. Until then, `Compile`
-handles the single-module case.
-
 Two things worth knowing about `FindEntryPoint`:
 
 - Slang does **not** validate the stage you ask for against the function's
   `[shader("…")]` attribute. Measured on `v2026.14.1`: asking for a fragment
-  entry point as `ShaderStages.Vertex` succeeds silently. The `Stage` you get
-  back is the one you passed. Use `DefinedEntryPoint(i)` when you want the
-  stage the shader declares.
+  entry point as `ShaderStages.Vertex` returns success and hands back the
+  fragment entry point labelled `Vertex`. This wrapper reads the declared stage
+  back and throws `SlangCompilationException` on a disagreement. A function
+  with *no* attribute has no declared stage, so the stage you pass is what
+  finds it and what it reports — that is the case the parameter exists for.
 - An unmapped `ShaderStages` value (a mask like `AllGraphics`, or a ray-tracing
   stage the wrapper has no member for) throws `NotSupportedException` rather
   than degrading to "no stage".
+
+### The component list is ordered, and the order is the layout
+
+**The order components are added is the order Slang assigns descriptor
+bindings, descriptor spaces and entry-point indices. Adding the same components
+in a different order produces a different, equally valid, incompatible layout.**
+That is a measurement: the same five components composed as
+`[common, geometry, material, vs, fs]` and as
+`[material, common, geometry, fs, vs]` give every parameter different set and
+binding numbers and swap the entry-point indices, and the emitted SPIR-V is
+decorated to match whichever one you asked for. Composing only the entry points
+also links — an entry point carries its module as a requirement — and produces a
+third assignment again. So the list is explicit:
+
+```csharp
+using var program = session.CreateProgram()
+    .Add(common)            // modules first, in the order you want their
+    .Add(geometry)          // parameters laid out
+    .Add(material)
+    .Add(vertexEntryPoint)  // entry-point order is Spirv(i) / EntryPoint(i) order
+    .Add(fragmentEntryPoint)
+    .Link();
+```
+
+`Link()` may be called more than once and returns independent programs; the
+builder keeps no linked state.
+
+### Specializing an interface-typed `ParameterBlock`
+
+A `ParameterBlock<ISomeInterface>` cannot generate code until at least one
+implementation is in the linkage — Slang refuses with
+`error[E50100]: no type conformances found` at `Spirv(...)`, not at `Link()`.
+Declare the implementation with `AddTypeConformance`:
+
+```csharp
+using var program = session.CreateProgram()
+    .Add(module)
+    .Add(entryPoint)
+    .AddTypeConformance("Glossy", "ISurface")
+    .Link();
+```
+
+Type names are resolved when `Link()` runs, not when `AddTypeConformance` is
+called — resolving a name needs a composite to resolve it against — so an
+unknown type name throws `ArgumentException` from `Link()`.
+
+There is deliberately **no `Specialize` method**. `IComponentType::specialize`
+on a component whose global scope holds an interface-typed `ParameterBlock`
+segfaults inside Slang's own type-legalization pass: `specialize` and `link`
+both return success and the crash lands in the subsequent code-generation call.
+Reproduced 3/3 on `v2026.14.1`. `AddTypeConformance` is the route that works for
+that shape, and an API whose failure mode is a process crash cannot ship behind
+a `try`.
 
 ## Lifetimes
 
@@ -107,7 +157,7 @@ any reflection or dynamic-codegen creep on the compile path fails the publish.
 
 Shader **reflection** — turning a linked program's descriptor sets, push
 constants and vertex inputs into `DescriptorBinding`,
-`PushConstantRange` and `VertexAttributeDescription` — is the next phase of
+`PushConstantRange` and `VertexAttributeDescription` — is the remaining phase of
 [issue #166](https://github.com/pekkah/Ahjo-Vulkan/issues/166). So is the
 MSBuild task that would replace the `glslc` invocations still scattered across
 this repository's samples.

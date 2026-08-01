@@ -106,6 +106,23 @@ public sealed unsafe class SlangSession : IDisposable
     }
 
     /// <summary>
+    /// Starts an explicitly composed program: N modules and N entry points, in
+    /// the order the caller adds them.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Compile"/> is the one-module convenience path. Reach for
+    /// this one when the program is assembled at run time out of several
+    /// modules, because the component list and its order are part of the
+    /// resulting layout — see <see cref="SlangProgramBuilder"/>.
+    /// </remarks>
+    public SlangProgramBuilder CreateProgram()
+    {
+        _ = Handle;
+
+        return new SlangProgramBuilder(this);
+    }
+
+    /// <summary>
     /// Compiles one module and links the requested entry points into a
     /// program.
     /// </summary>
