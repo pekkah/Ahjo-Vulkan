@@ -1394,8 +1394,8 @@ field. Settling it means probing both layout modes and reading the SPIR-V type
 of each per-location input variable.
 
 **OPEN-7 — `samples/AotSmoke` declares `DrawParameters` without enabling it
-(E19).** `Shaders/triangle.slang` uses `SV_VertexID`, so the emitted module
-declares the capability, and `AotSmoke`'s device is created with no
+(E19). Tracked as #168.** `Shaders/triangle.slang` uses `SV_VertexID`, so the
+emitted module declares the capability, and `AotSmoke`'s device is created with no
 `ConfigureFeatures` — a `VUID-VkShaderModuleCreateInfo-pCode-08740` violation
 that the NVIDIA driver renders straight through and that the sample, which
 enables no validation, never surfaces. Not fixed here because the two fixes
@@ -1409,26 +1409,31 @@ differ in what they claim:
   `triangle.slang` is a faithful translation of `triangle.vert`, which is the
   comment at the top of the file and the reason the PNGs match.
 
-Whichever is chosen should be applied to the sample-migration follow-up as a
-rule, not just to this one file.
+Whichever is chosen should be applied to the sample-migration follow-up (#172)
+as a rule, not just to this one file.
 
 ---
 
 ## Follow-ups this spec does not do
 
-- **Replace the samples'/tests' `glslc` `Exec` with a Slang MSBuild task**
-  (relates to #162). Should become its own issue after Phase 2 — it is a build
-  system change with its own failure modes (task host, incremental inputs,
-  design-time builds) and it is what finally deletes the eight duplicated
-  `_GlslcExe` blocks and lets `ci.yml:212` stop printing "NOT PROVEN".
-- **File the `specialize()` segfault upstream** (E14, OPEN-4). A minimal repro
-  exists: `ParameterBlock<ISurface>` + `IComponentType::specialize(Concrete)` +
-  `link` + `getEntryPointCode` on the consuming entry point. It is not this
-  spec's job to fix Slang, but it is this spec's job to record that D9 exists
-  because of it, so a future `Specialize` API is not added by someone who only
-  read the header.
-- **Migrate the existing GLSL sample shaders to Slang.** Should become its own
-  issue after that one. It is a content change with a per-sample visual diff to
-  review, it is not all-or-nothing (Slang can consume GLSL), and doing it before
-  the build task exists would mean hand-running `slangc` — trading one unpinned
-  external invocation for another.
+All three are now filed, along with the two defects the win-x64 verification
+found (#168, #169).
+
+- **Replace the samples'/tests' `glslc` `Exec` with a Slang MSBuild task** —
+  **#171** (relates to #162). It is a build system change with its own failure
+  modes (task host, incremental inputs, design-time builds) and it is what
+  finally deletes the eight duplicated `_GlslcExe` blocks and lets `ci.yml:212`
+  stop printing "NOT PROVEN".
+- **File the `specialize()` segfault upstream** (E14, OPEN-4) — **#170**. A
+  minimal repro exists: `ParameterBlock<ISurface>` +
+  `IComponentType::specialize(Concrete)` + `link` + `getEntryPointCode` on the
+  consuming entry point. It is not this spec's job to fix Slang, but it is this
+  spec's job to record that D9 exists because of it, so a future `Specialize`
+  API is not added by someone who only read the header. The report should say
+  **linux-x64 only** — see OPEN-4(b).
+- **Migrate the existing GLSL sample shaders to Slang** — **#172**, blocked on
+  #171. It is a content change with a per-sample visual diff to review, it is
+  not all-or-nothing (Slang can consume GLSL), and doing it before the build
+  task exists would mean hand-running `slangc` — trading one unpinned external
+  invocation for another. E19 prices it: the migration is not source-for-source,
+  because `SV_VertexID` adds a device-feature requirement the GLSL did not have.

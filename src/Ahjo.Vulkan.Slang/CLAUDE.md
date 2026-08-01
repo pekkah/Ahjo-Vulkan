@@ -119,9 +119,10 @@ null-terminated.
   `getTargetCode` all return `SLANG_OK` with empty diagnostics and the entry
   point emits 1 460 bytes of SPIR-V. That does **not** make `Specialize`
   shippable — this package ships both RIDs, and an API that SIGSEGVs on one of
-  them cannot have a per-platform contract — but it is what a future upstream
-  bug report should say, and it means point 4's guard is required rather than
-  conditional. Spec OPEN-4(b).
+  them cannot have a per-platform contract — but it is what the upstream bug
+  report should say, and it means point 4's guard is required rather than
+  conditional. Spec OPEN-4(b); the report is tracked as #170 and its upstream
+  number belongs here once filed.
 
 ## Reflection — four rules Slang does not hand you
 
