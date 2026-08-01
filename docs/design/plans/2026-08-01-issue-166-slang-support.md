@@ -2,9 +2,22 @@ Paired with [../specs/2026-08-01-issue-166-slang-support-design.md](../specs/202
 
 # Implementation plan — issue #166, Slang support
 
-Three phases. **Phase 1 and Phase 2 each ship independently**; Phase 3 requires
-Phase 2. Do not start a phase before the previous one is merged and its lane is
-green.
+Four phases. **Phase 1, Phase 2 and Phase 3a each ship independently**; Phase 3b
+requires 3a. Do not start a phase before the previous one is merged and its lane
+is green.
+
+**Revised 2026-08-01.** The consumer requirement (an Unreal-Substrate-style
+material system) made composed-program reflection and `ParameterBlock<T>`
+load-bearing. **Phase 1 is unchanged and is not to be re-opened** — every
+composition and reflection symbol this revision needs was verified present in
+the generated output produced by §1.3's exact `.rsp`
+(`ISession::createCompositeComponentType`, `ISession::createTypeConformanceComponentType`,
+`ITypeConformance`, `SpecializationArg`, `IMetadata::isParameterLocationUsed`,
+`IComponentType::{link, specialize, getSpecializationParamCount, getTargetCode,
+getEntryPointMetadata}`, and all 13 extra `spReflection*` exports 3b calls), and
+none of them is in the `--exclude` list. **Phase 2 gains §2.8** (the composition
+surface). **Phase 3 splits into 3a (composition) and 3b (reflection)**, and its
+former §3.4 multi-set guard is deleted — spec OPEN-2 is resolved.
 
 Nothing in this plan touches `src/Ahjo.Vulkan/`. If a step appears to require
 editing a type under `src/Ahjo.Vulkan/Pipelines/`, stop — that contradicts D5

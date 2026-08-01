@@ -4,12 +4,21 @@
 **Prevents the structural cause of:** [#162](https://github.com/pekkah/Ahjo-Vulkan/issues/162) (`glslc` absent from the runner; the toolchain is an unpinned `PATH` assumption)
 **Lands consistently with:** [#119](https://github.com/pekkah/Ahjo-Vulkan/issues/119) (valid-by-default descriptions — reflection must *produce* those types, not fork them), [#32](https://github.com/pekkah/Ahjo-Vulkan/issues/32) / `.github/CLAUDE.md` (no RID ships without a lane that has executed it)
 **Date:** 2026-08-01
+**Revised:** 2026-08-01 — consumer requirement narrowed the design. The
+downstream consumer is an Unreal-Engine-*Substrate*-style material system, which
+means reflection must work over a **program composed at runtime from N modules +
+N entry points**, and must handle **`ParameterBlock<T>` per material**. That
+promoted the original **OPEN-2** (multi-descriptor-set reflection) from a
+deferral to the load-bearing case; it is now settled empirically (E10) and
+specified in D5. New evidence E10-E17, new decisions D8-D10, Phase 3 split.
+Phase 1 and D1-D4, D6, D7 are unchanged.
 
 ---
 
 ## Problem
 
-Two defects, both downstream of "the shader compiler is whatever is on `PATH`".
+Three defects. The first two are downstream of "the shader compiler is whatever
+is on `PATH`"; the third is what the consumer requirement added.
 
 **1. The shader toolchain is the only unpinned native dependency in the repo.**
 Every other native input is version-pinned in `Directory.Build.props`
@@ -42,6 +51,18 @@ and `VertexInputDescription`
 validation-layer error at draw time at best. This is the class of bug the repo
 invests heavily in preventing elsewhere (#119's valid-by-default descriptions,
 the `vulkan-validation-reviewer` agent); reflection closes it at the source.
+
+**3. A material system's shader is not one file, and its layout is not one
+descriptor set.** A Substrate-style material system assembles a program at
+runtime out of a shared "common" module, a geometry module, and a per-material
+module, plus the entry points it wants — `ISession::createCompositeComponentType`
+over N components, then `IComponentType::link`, then `getLayout` on the *composed*
+program (`slang.h:5341-5386`). It gives each material its own descriptor set via
+`ParameterBlock<T>`. A reflection API that only reflects a single `IModule` and
+only enumerates descriptor space 0 does not serve that consumer at all: it
+reports the wrong bindings (E12) and throws on the one parameter that matters
+(E10). This is a gap in *this design*, not in the codebase, and it is what the
+revision fixes.
 
 **Allocation posture, stated up front so a reviewer does not flag it:**
 compilation and reflection are **setup-time**. Invariant #3 (zero per-frame
@@ -287,6 +308,353 @@ the identifier `Slang` walks outward and binds the **namespace**
 packages (`Vk`, `Vma`, `Ktx`) never hit this because no namespace shares their
 method-class name.
 
+### Method note for E10-E17
+
+Everything below was produced by extending the E2/E3 probe: the same
+ClangSharp-generated binding, the same renamed `libslang.so`, on linux-x64.
+Two things were added, and they are why these findings are assertions rather
+than readings of a header:
+
+1. **SPIR-V ground truth.** Every claim about a descriptor set/binding number is
+   cross-checked against the emitted module by parsing `OpName` (opcode 5) and
+   `OpDecorate` (opcode 71) with `DescriptorSet` (34) / `Binding` (33) out of
+   `IComponentType::getTargetCode` and `getEntryPointCode`. Where the text below
+   says "SPIR-V says set=1 binding=2", that is a decoration read out of the blob
+   Slang produced, not an inference from reflection.
+2. **Composition.** Programs are built as
+   `loadModuleFromSourceString` xN -> `findAndCheckEntryPoint` xM ->
+   `createCompositeComponentType` -> `link` -> `getLayout`, i.e. exactly the
+   consumer's shape.
+
+### E10. OPEN-2 is settled: the set index is `GetOffset(param, SUB_ELEMENT_REGISTER_SPACE)`
+
+A program with a populated global scope plus **two** `ParameterBlock<T>`s
+(`ConstantBuffer<Xform> gXform; Texture2D gAlbedo; SamplerState gSampler;`
+`ParameterBlock<MatParams> gMaterial;` `ParameterBlock<LightParams> gLights;`
+plus a push-constant block) reflects as:
+
+| parameter | category | `GetBindingIndex` | `GetOffset(…, SUB_ELEMENT_REGISTER_SPACE)` | `getSubObjectRangeSpaceOffset` | **SPIR-V set** |
+|---|---|---|---|---|---|
+| `gXform` | `DESCRIPTOR_TABLE_SLOT` | 0 | 0 | – | 0 |
+| `gAlbedo` | `DESCRIPTOR_TABLE_SLOT` | 1 | 0 | – | 0 |
+| `gSampler` | `DESCRIPTOR_TABLE_SLOT` | 2 | 0 | – | 0 |
+| `gMaterial` | `SUB_ELEMENT_REGISTER_SPACE` | 1 | **1** | 0 | **1** |
+| `gLights` | `SUB_ELEMENT_REGISTER_SPACE` | 2 | **2** | 0 | **2** |
+
+So the earlier confusion resolves cleanly:
+
+- **`spReflectionTypeLayout_getSubObjectRangeSpaceOffset`
+  (`slang-deprecated.h:678`) returned `0` because it is the wrong function for
+  this.** It reported `0` for *all four* sub-object ranges in the fixture,
+  including the two blocks that demonstrably land in spaces 1 and 2. It is not
+  the set index and must not be used as one.
+- **The set index is
+  `spReflectionVariableLayout_GetOffset(param, SLANG_PARAMETER_CATEGORY_SUB_ELEMENT_REGISTER_SPACE)`**
+  (`slang-deprecated.h:741`, category `slang.h:2297`). For a parameter whose
+  category *is* `SUB_ELEMENT_REGISTER_SPACE` this is the same number
+  `spReflectionParameter_GetBindingIndex` (`slang-deprecated.h:873`) returns —
+  which is why `GetBindingIndex` read `1` while `getSubObjectRangeSpaceOffset`
+  read `0`. `GetBindingIndex` was right; it just wasn't obviously a *space*.
+- The same number is reachable a second way, and both agree:
+  `spReflectionTypeLayout_getSubObjectRangeOffset(globals, i)`
+  (`slang-deprecated.h:681`) returns a `VariableLayout` whose
+  `GetOffset(SUB_ELEMENT_REGISTER_SPACE)` is 1 and 2 for the two blocks.
+
+**It is an offset, not an absolute index, and that matters for nesting.** With
+`struct Outer { ParameterBlock<Inner> inner; Texture2D o; float4 k; };
+ParameterBlock<Outer> gNested;` at global-scope offset 3, the `inner` field's
+own `GetOffset(SUB_ELEMENT_REGISTER_SPACE)` is `1` — relative to its parent —
+and SPIR-V places `gNested.inner` at **set 4**. The derivation is therefore
+recursive with accumulation:
+
+```
+setOf(block) = setOf(enclosing scope) + block.GetOffset(SUB_ELEMENT_REGISTER_SPACE)
+setOf(global scope) = 0
+```
+
+Verified end to end: `gNested` -> set 3, `gNested.o` -> set 3 binding 1,
+`gNested.inner` -> set 4, `gNested.inner.t` -> set 4 binding 1.
+
+**"Global scope is always set 0" is false, and the formula above is what saves
+it.** In a program whose global scope declares *no* descriptors at all (only
+`ParameterBlock`s — the natural Substrate shape once everything is in a block),
+`getDescriptorSetCount(globalParamsTypeLayout)` is `0`, the first block's
+`GetOffset(SUB_ELEMENT_REGISTER_SPACE)` is `0`, and SPIR-V puts it at **set 0**;
+the second lands at set 1. A hardcoded "global scope owns space 0, blocks start
+at 1" would be wrong by one for every set in that program.
+
+**Global-scope sets are not necessarily contiguous either.** With
+`[[vk::binding(3, 0)]] Texture2D gTex;` and `[[vk::binding(7, 2)]] SamplerState
+gSamp;`, the global params type layout reports **two** descriptor sets, and
+`spReflectionTypeLayout_getDescriptorSetSpaceOffset` (`slang-deprecated.h:632`)
+returns `0` for the first and **`2`** for the second — matching SPIR-V's
+`set=0 binding=3` / `set=2 binding=7`. The loop index over
+`getDescriptorSetCount` is *not* the Vulkan set number; `getDescriptorSetSpaceOffset`
+is.
+
+### E11. A `ParameterBlock<T>` with ordinary data silently owns binding 0, and reflection does not list it
+
+| block element type | `GetSize(elem, UNIFORM)` | descriptor ranges reflection lists | SPIR-V bindings |
+|---|---|---|---|
+| `{ Texture2D maps[4]; SamplerState samp; float4 factors; float roughness; }` | **32** | `TEXTURE idx=1 count=4`, `SAMPLER idx=2` | `0 = gWith` (implicit UB), `1 = gWith.maps`, `2 = gWith.samp` |
+| `{ StructuredBuffer<float4> buf; Texture2D tex; SamplerState samp; }` | **0** | `RAW_BUFFER idx=0`, `TEXTURE idx=1`, `SAMPLER idx=2` | `0,1,2` — no implicit UB |
+
+When the block's element type has ordinary (uniform) data, Slang allocates an
+implicit uniform buffer at **binding 0** of the block's space and shifts every
+listed range up by one — but **emits no descriptor range for that buffer**. A
+`DescriptorSetLayout` built only from the listed ranges is missing a binding and
+the pipeline is invalid at bind time.
+
+The rule is derivable and was verified on four separate blocks:
+`spReflectionTypeLayout_GetSize(elementTypeLayout, SLANG_PARAMETER_CATEGORY_UNIFORM) > 0`
+=> synthesize `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER` at slot 0 of that set.
+
+**The global scope does not have this problem.** Loose global uniforms
+(`float4 gTint; float gScale;`) *are* listed: the global set's range list gains
+`SLANG_BINDING_TYPE_CONSTANT_BUFFER idx=0`, `spReflection_getGlobalConstantBufferBinding`
+(`slang-deprecated.h:998`) returns `0` and `…_getGlobalConstantBufferSize`
+(`:1006`) returns `32`, and SPIR-V emits `set=0 binding=0 globalParams`. The
+asymmetry is real and the wrapper must handle exactly one of the two cases, not
+both.
+
+Also from that fixture, a warning worth surfacing to users: Slang emits
+`warning[E39019]: implicit global shader parameter` for each loose global — it
+treats them as shader parameters, not variables. That text reaches
+`SlangProgram.Warnings` under D4 unchanged.
+
+### E12. Composition changes the layout; per-module reflection is wrong
+
+Three modules — `common` (`ParameterBlock<CameraData> gCamera`), `geometry`
+(`StructuredBuffer<InstanceData> gInstances`, `vertexMain`), `material`
+(`ParameterBlock<SubstrateParams> gMaterial`, `ParameterBlock<LightParams> gLights`,
+a push-constant block, `Texture2D gLut`, `SamplerState gLutSamp`, `fragmentMain`)
+— reflected **alone** versus reflected through
+`createCompositeComponentType([common, geometry, material, vsEP, fsEP])` + `link`:
+
+| parameter | set/binding when its module is reflected alone | set/binding in the composed program |
+|---|---|---|
+| `gCamera` | set 0 | **set 1** |
+| `gInstances` | set 0, binding 0 | set 0, binding 0 |
+| `gMaterial` | set 1 | **set 2** |
+| `gLights` | set 2 | **set 3** |
+| `gLut` | set 0, binding 0 | set 0, **binding 1** |
+| `gLutSamp` | set 0, binding 1 | set 0, **binding 2** |
+
+SPIR-V for the composed program confirms every right-hand column value. Two
+consequences, both load-bearing:
+
+- **Reflection must be taken from the linked composite**, never from an
+  `IModule`. `slang.h:5378-5386` says this in the header ("If this component type
+  is combined into a composite, then the absolute offsets/bindings of parameters
+  may not stay the same"); the table is the measurement.
+- **Composite membership *and order* are part of the layout contract.** Re-running
+  the identical five components in the order `[material, common, geometry, fsEP,
+  vsEP]` produced: `gLut` binding 0, `gLutSamp` binding 1, `gInstances` binding 2,
+  `gMaterial` set 1, `gLights` set 2, `gCamera` set 3 — a completely different
+  assignment. Entry-point *indices* reorder with it too
+  (`ep[0] = fragmentMain, ep[1] = vertexMain`). A wrapper that lets composition
+  order vary between the reflect call and the codegen call produces a pipeline
+  layout that does not match its own SPIR-V.
+- Composing the entry points **without** naming their modules also links and
+  still reports all seven global parameters (an entry point carries its module as
+  a requirement, `slang.h:5337-5339`) — but with a *third* assignment again. So
+  "just add the entry points" is not equivalent to "add the modules and the entry
+  points"; the API has to make the component list explicit.
+
+Two things composition does **not** change: `loadModuleFromSourceString` registers
+the module under its name so a later `import common;` resolves with no file
+system present (verified — all three modules loaded from strings), and
+`getEntryPointCode(i)` indexes the same entry-point order that
+`spReflection_getEntryPointByIndex(i)` does (verified by correlating each blob's
+descriptor decorations with the entry point that uses them).
+
+### E13. Entry-point stage attribution *is* recoverable under composition — via `IMetadata`, not via reflection
+
+The E3 finding stands unchanged and is not composition-specific:
+`spReflectionVariableLayout_getStage` (`slang-deprecated.h:860`) returns
+`SLANG_STAGE_NONE` for every global descriptor parameter in every fixture
+probed, single-module and composed alike. `spReflectionEntryPoint_getStage`
+(`:908`) does return real stages (`SLANG_STAGE_VERTEX`, `SLANG_STAGE_PIXEL`),
+also under composition and also after re-ordering.
+
+What is new is a second source. `IComponentType::getEntryPointMetadata`
+(`slang.h:5536-5540`) yields an `IMetadata` whose `isParameterLocationUsed`
+(`slang.h:4715-4728`) answers, per entry point, whether a given
+(category, space, index) is actually used:
+
+```
+composed program, per-entry-point query on SLANG_PARAMETER_CATEGORY_DESCRIPTOR_TABLE_SLOT
+  vertexMain    : s0b0=USED  s0b1=no    s0b2=no    s1b0=USED  s2b*=no    s3b*=no
+  fragmentMain  : s0b0=no    s0b1=USED  s0b2=USED  s1b0=USED  s2b0..3=USED  s3b0..1=USED
+```
+
+Cross-checked against per-entry-point SPIR-V from `getEntryPointCode`: the
+`vertexMain` module contains decorations for exactly `set=0 binding=0` and
+`set=1 binding=0`; the `fragmentMain` module contains exactly the other nine.
+The two agree on every location, including `gCamera` (set 1) which both stages
+use because it is reached through a helper in a third module. **So
+`DescriptorBinding.Stages` is derivable after all** — E3's "not derivable" was
+true of the reflection API and false of the compiled-artifact API.
+
+Three caveats, all measured:
+
+- **Push constants are not covered.** `isParameterLocationUsed` returned `false`
+  for `(PUSH_CONSTANT_BUFFER, 0, 0)` on *both* entry points of a program whose
+  fragment stage demonstrably reads `gPush.tint` and whose fragment SPIR-V
+  contains a `PushConstant` variable. Sweeping `UNIFORM`, `CONSTANT_BUFFER`,
+  `REGISTER_SPACE` and `DESCRIPTOR_TABLE_SLOT` over spaces 0-1 and indices 0-1
+  found no category that reports the push constant as used. Push-constant stage
+  attribution stays a union.
+- **It costs a codegen.** `getEntryPointMetadata` carries the same preconditions
+  as `getEntryPointCode` (`slang.h:5532-5535`: "Has the same requirements … as
+  `getEntryPointCode()`"), i.e. fully specialized and fully linked, and it can
+  fail with diagnostics. Computing precise stages therefore makes reflection a
+  compiling operation that can throw.
+- **It reports post-optimization usage.** A binding no entry point touches
+  reports `false` everywhere, which would yield `Stages = None` — not a usable
+  `VkDescriptorSetLayoutBinding`.
+
+### E14. Specialization changes the reflected layout, so reflection must follow it
+
+Two distinct Slang mechanisms, two different answers, both measured.
+
+**Generic specialization parameters (`type_param`) — the layout changes.** For
+`type_param TSurface : ISurface; ParameterBlock<TSurface> gSurface;`
+(`getSpecializationParamCount()` = 1):
+
+| program | `gSurface` element kind | ranges reflected for its set | SPIR-V |
+|---|---|---|---|
+| unspecialized, linked | `SLANG_TYPE_KIND_GENERIC_TYPE_PARAMETER` (`slang.h:2124`) | **none** (`getDescriptorSetCount(elem)` = 0) | n/a |
+| `specialize(Glossy)` + link | `SLANG_TYPE_KIND_STRUCT` | `TEXTURE idx=1`, `SAMPLER idx=2` | set 1 bindings 0,1,2 |
+| `specialize(Matte)` + link | `SLANG_TYPE_KIND_STRUCT` | `TEXTURE idx=1,2,3`, `SAMPLER idx=4` | set 1 bindings 0..4 |
+
+Reflecting before specializing does not fail — it silently reports a descriptor
+set with **zero** bindings where the compiled shader has three or five. This is
+the strongest correctness statement in the revision: **reflect the specialized,
+linked component or the layout is wrong.** The header states the same thing at
+`slang.h:5370-5377`.
+
+**Interface-typed parameter blocks — the layout is specialization-invariant, by
+design.** For `ParameterBlock<ISurface> gSurface;`, the reflected layout is
+byte-identical before specialization, after `createTypeConformanceComponentType`
+linking, and after `specialize()`: category `MIXED`, element kind
+`SLANG_TYPE_KIND_INTERFACE` (`slang.h:2125`), `getDescriptorSetCount(elem)` = 0,
+`GetSize(elem, UNIFORM)` = 32. And that is *correct*: the SPIR-V from the
+conformance-linked program contains exactly one descriptor for the block —
+`set=1 binding=0 gSurface`, the existential value buffer — which is precisely
+what E11's "elem uniform size > 0 => uniform buffer at binding 0" rule already
+produces. `slang.h:5370-5377` documents this invariance explicitly.
+
+**Two codegen findings fall out, and one of them is a native crash.**
+
+- `getTargetCode` on an **unspecialized** program with an interface-typed block
+  fails cleanly: `0x80004005` with
+  `error[E50100]: no type conformances found … Code generation for current target
+  requires at least one implementation type present in the linkage.`
+- `IComponentType::specialize(Glossy)` + `link` on that same program **succeeds**,
+  `getLayout` **succeeds**, and then `getTargetCode` — or `getEntryPointCode` for
+  the entry point that consumes the block — **segfaults inside libslang**:
+
+  ```
+  Thread 1 received SIGSEGV
+  #0  Slang::IRVarLayout::getTypeLayout()
+  #1  Slang::declareVars(Slang::IRTypeLegalizationContext*, …)
+  #5  Slang::legalizeInst(…)
+  #7  Slang::legalizeTypes(…)
+  #8  Slang::linkAndOptimizeIR(…)
+  #11 Slang::TargetProgram::_createWholeProgramResult(…)
+  #13 Slang::ComponentType::getTargetCode(long, ISlangBlob**, ISlangBlob**)
+  ```
+
+  Every frame is Slang's own type-legalization pass; frame 13 is the correct
+  virtual entry, so this is not a binding defect. `getEntryPointCode(0)` for the
+  *vertex* entry point (which does not touch the block) returns a valid 223-word
+  module first; only the consuming entry point crashes. Reproduced 3/3 in a
+  minimal fixture.
+- The same `specialize()` call on the **`type_param`** form produced valid SPIR-V
+  for both `Glossy` and `Matte` (558 and 650 words, decorations matching the
+  reflected layout exactly). So the crash is specific to specializing a global
+  whose type is an *interface-typed* `ParameterBlock`, not to `specialize()` as
+  such.
+- `ISession::createTypeConformanceComponentType` (`slang.h:4608-4631`) is the
+  route that works for the interface form: composite of
+  `[module, module, vsEP, fsEP, conformance]` linked and produced a valid
+  1169-word module.
+
+### E15. Reflection reports the declared union, not the used subset
+
+A program declaring both `ParameterBlock<Glossy> gGlossyBlock` and
+`ParameterBlock<Matte> gMatteBlock` reflects **both** (sets 1 and 2) regardless of
+which fragment entry point is in the composite — while `getTargetCode` for the
+`fragGlossy` variant emits only set 1 and for the `fragMatte` variant only set 2.
+That is the right default for building a `VkPipelineLayout` (the layout must
+describe what the program declares), and it is why the narrowing in E13 is a
+separate, opt-in step rather than the default.
+
+### E16. Vertex inputs under composition: system values and structs
+
+`spReflectionEntryPoint_getParameterByIndex` on a composed program returns
+system-value parameters alongside real varying inputs, and they are cleanly
+distinguishable:
+
+| entry-point parameter | `GetParameterCategory(typeLayout)` | `GetSize(tl, VARYING_INPUT)` | `GetOffset(p, VARYING_INPUT)` |
+|---|---|---|---|
+| `VSIn vin` (struct) | `VARYING_INPUT` | 7 | 0 |
+| `uint iid : SV_InstanceID` | **`NONE`** | **0** | 0 |
+| `uint vid : SV_VertexID` | **`NONE`** | **0** | 0 |
+| `bool ff : SV_IsFrontFace` | **`NONE`** | **0** | 0 |
+
+The plan's original walk would have emitted a bogus attribute at location 0 for
+`SV_InstanceID`, colliding with the real `POSITION` at location 0. The filter is
+`GetParameterCategory(typeLayout) == SLANG_PARAMETER_CATEGORY_VARYING_INPUT`
+(`slang-deprecated.h:568`), verified on all four rows.
+
+Struct-typed vertex inputs need one level of recursion, and locations accumulate:
+
+```
+VSIn { float3 pos : POSITION; float2 uv : TEXCOORD0; float4 tangent : TANGENT; float4x4 inst : INSTANCEXF; }
+  pos      off(VARYING_INPUT)=0  size=1   -> SPIR-V Location 0
+  uv       off=1  size=1                  -> Location 1
+  tangent  off=2  size=1                  -> Location 2
+  inst     off=3  size=4  kind=MATRIX     -> Location 3 (SPIR-V decorates the matrix at 3, consuming 3..6)
+```
+
+Location = parent offset + field offset, via `GetFieldCount`/`GetFieldByIndex`
+(`slang-deprecated.h:538-539`). The fragment stage's struct input has a
+`SV_POSITION` field with category `NONE` and the same filter excludes it. A
+`MATRIX`-kind vertex input occupies `GetSize(tl, VARYING_INPUT)` consecutive
+locations, but which scalar count each of those locations carries depends on
+`SessionDesc.defaultMatrixLayoutMode`, and that was **not** probed across both
+modes — see OPEN-6.
+
+### E17. Two push-constant blocks compose, and the byte offsets are not derivable
+
+Two modules each declaring `[[vk::push_constant]]` compose and link. The global
+scope reports **two** `SLANG_BINDING_TYPE_PUSH_CONSTANT` ranges, at
+`indexOffset` 0 and 1, and SPIR-V emits two distinct `PushConstant` variables
+(`gPush1` used only by the vertex stage, `gPush2` only by the fragment stage).
+But `spReflectionVariableLayout_GetOffset(p, PUSH_CONSTANT_BUFFER)` returned `0`
+and `1` — a *buffer index*, not a byte offset, while the element uniform sizes
+are 16 and 8. `VkPushConstantRange.offset` is a byte offset. Nothing probed
+yields the byte offsets Vulkan wants for the two-block case, so D5 refuses it
+rather than guessing (OPEN-5).
+
+### E18. The C++ reflection shim in the pinned header does not compile
+
+Incidental, but it retires the last doubt about D2. `slang.h:3020-3023` defines
+`TypeLayoutReflection::getBindingRangeSpaceOffset` as a call to
+`spReflectionTypeLayout_getBindingRangeSpaceOffset` — a function that is
+**declared in no shipped header and exported by no shipped binary**
+(`nm -D` over `libslang-compiler.so.0.2026.14.1` finds 258 `sp*` symbols, not
+that one). Anyone using Slang's own recommended C++ shim for the reflection
+surface D5 needs would hit a link error on that member. Binding the flat
+`spReflection*` exports directly, as D2 decided, is not merely equivalent — it
+is the only one of the two that builds at this tag.
+
+Related: `slang-deprecated.h:685-696` wraps a further six
+`spReflectionTypeLayout_getSubObjectRangeDescriptorRange*` declarations in
+`#if 0`. They are not available and any design that wants them is blocked.
+
 ---
 
 ## Decision
@@ -491,81 +859,139 @@ refcounted `ISlangBlob`. Forcing one into the other means a copy for no benefit.
 The shared contract is the `ReadOnlySpan<uint>` at the call site, and that is
 preserved.
 
-### D5. Reflection API — produces the existing description types, and states where it cannot
+### D5. Reflection API — a composed program's *whole* binding surface, sparse sets included
 
-`SlangReflection` produces the types in `src/Ahjo.Vulkan/Pipelines/`. No new
-description type is introduced, and nothing in `src/Ahjo.Vulkan/` is modified.
+`SlangReflection` still produces only the types in `src/Ahjo.Vulkan/Pipelines/`.
+No new description type is introduced and nothing in `src/Ahjo.Vulkan/` is
+modified. What changed is that it reflects a **linked composite** and covers
+**every descriptor space the program declares**, not space 0.
 
 ```csharp
 public sealed class SlangReflection
 {
-    public int  DescriptorSetCount { get; }
-    public ReadOnlySpan<DescriptorBinding> DescriptorSet(int setIndex);
+    // Descriptor sets, in ascending set index. The program's set indices are
+    // NOT necessarily 0..N-1 and NOT necessarily contiguous (E10).
+    public int  DescriptorSetCount { get; }                    // number of POPULATED sets
+    public uint SetIndex(int i);                               // the Vulkan set number of the i-th
+    public ReadOnlySpan<DescriptorBinding> Bindings(int i);    // its bindings, ascending Slot
+    public bool TryGetSet(uint setIndex, out ReadOnlySpan<DescriptorBinding> bindings);
+
+    // Highest declared set index + 1 — the length PipelineLayoutDescription.SetLayouts
+    // must have, because that span is positional.
+    public uint SetLayoutSlotCount { get; }
+
     public ReadOnlySpan<PushConstantRange> PushConstantRanges { get; }
+
+    public int  EntryPointCount { get; }
+    public SlangEntryPointInfo EntryPoint(int index);
     public ReadOnlySpan<VertexAttributeDescription> VertexAttributes(int entryPointIndex);
 }
 ```
 
-Mapping, per E3:
+**Why `SetIndex(i)` exists rather than `DescriptorSet(int setIndex)`.**
+`PipelineLayoutDescription.SetLayouts` is a positional
+`ReadOnlySpan<DescriptorSetLayout>` (`PipelineLayoutDescription.cs:9`) consumed
+by index in `Device.CreatePipelineLayout`
+(`src/Ahjo.Vulkan/Lifecycle/Device.cs:505-507`). A Slang program can declare
+sets 0 and 2 and not 1 (E10, the `[[vk::binding]]` case; also any Substrate
+material that reserves a space). Collapsing "how many sets exist" and "what
+their indices are" into one number is precisely how a caller ends up binding a
+material's descriptor set at slot 1 of a layout whose SPIR-V expects slot 2.
+`SetLayoutSlotCount` plus per-index lookup makes the gap explicit; the XML doc
+says the caller fills gaps with one reusable empty `DescriptorSetLayout`.
 
-- `SlangBindingType` → `VkDescriptorType`, a total switch over the ten cases the
-  SPIR-V target can emit (`SAMPLER`, `TEXTURE`, `CONSTANT_BUFFER`,
-  `TYPED_BUFFER`, `RAW_BUFFER`, `COMBINED_TEXTURE_SAMPLER`,
-  `INPUT_RENDER_TARGET`, `INLINE_UNIFORM_DATA`,
-  `RAY_TRACING_ACCELERATION_STRUCTURE`, each optionally `| MUTABLE_FLAG`).
-  Unmapped cases throw rather than guess.
-- `DescriptorBinding.Slot` ← `getDescriptorSetDescriptorRangeIndexOffset`;
-  `.Count` ← `…DescriptorRangeDescriptorCount` (verified: a `Texture2D maps[4]`
-  inside a `ParameterBlock` reflects as `count=4`).
-- `PUSH_CONSTANT` ranges are filtered out of the binding stream into
-  `PushConstantRange { Offset = 0, Size = elementUniformSize }`.
-- `VertexAttributeDescription` is populated with `Location` and `Format` only.
+**The walk**, verified end to end against SPIR-V (E10, E11):
 
-**Two mapping gaps, stated rather than papered over:**
+```
+Walk(structTypeLayout, absoluteSet):
+  1. for s in 0 .. getDescriptorSetCount(structTypeLayout):
+       vkSet = absoluteSet + getDescriptorSetSpaceOffset(structTypeLayout, s)
+       for r in 0 .. getDescriptorSetDescriptorRangeCount(structTypeLayout, s):
+         category PUSH_CONSTANT_BUFFER  -> a PushConstantRange
+         otherwise                      -> DescriptorBinding into set vkSet:
+             Slot  = getDescriptorSetDescriptorRangeIndexOffset(…, s, r)
+             Count = getDescriptorSetDescriptorRangeDescriptorCount(…, s, r)
+             Type  = MapBindingType(getDescriptorSetDescriptorRangeType(…, s, r))
+  2. if structTypeLayout is a ParameterBlock element
+       and GetSize(structTypeLayout, UNIFORM) > 0:
+         emit UNIFORM_BUFFER at Slot 0 of absoluteSet          // E11 — reflection omits it
+  3. for i in 0 .. getSubObjectRangeCount(structTypeLayout):
+       br = getSubObjectRangeBindingRangeIndex(structTypeLayout, i)
+       if getBindingRangeType(structTypeLayout, br) != SLANG_BINDING_TYPE_PARAMETER_BLOCK: continue
+       blockTl = getBindingRangeLeafTypeLayout(structTypeLayout, br)
+       childSet = absoluteSet + getSubObjectRangeOffset(structTypeLayout, i)
+                                  .GetOffset(SUB_ELEMENT_REGISTER_SPACE)
+       Walk(GetElementTypeLayout(blockTl), childSet)
 
-1. **`DescriptorBinding.Stages` has no source in Slang reflection** (E3). The
-   wrapper sets it to the union of the stages of the entry points in the
-   compiled program, and the XML doc says so in one sentence. That is correct
-   (a superset of actual usage is always valid for `VkDescriptorSetLayout`) and
-   it is coarser than a hand-written layout. A caller who wants tighter
-   visibility overrides the field — the type is a `readonly record struct` with
-   `init` accessors, so `binding with { Stages = ShaderStages.Fragment }` is the
-   documented escape hatch.
-2. **`VertexInputDescription` cannot be produced at all** (E3).
-   `VertexBindingDescription.{Slot, Stride, InputRate}` and
-   `VertexAttributeDescription.{Binding, Offset}` describe the application's
-   buffer packing, which the shader never states. The reflection API therefore
-   returns `VertexAttributeDescription` values with `Binding`/`Offset` left at
-   their defaults and does **not** offer a `VertexInputDescription` factory. The
-   XML doc says the caller must fill those two fields. This is a genuine finding
-   about the shape of the request in #166, not a shortfall in
-   `VertexInputDescription` — and it is exactly why no parallel description type
-   is being invented: a `SlangVertexInput` that carried only half the fields
-   would be a worse `VertexAttributeDescription`, not a better one.
+entry: Walk(spReflection_getGlobalParamsTypeLayout(layout), 0)
+```
 
-**Scope of set enumeration.** The flat
-`spReflectionTypeLayout_getDescriptorSet*` walk over the global-params type
-layout returns the parameters in **space 0 only**. Slang's mechanism for
-additional descriptor sets is `ParameterBlock<T>`, which appears in the global
-walk as a sub-object range and requires recursing
-`getSubObjectRangeBindingRangeIndex` → `getBindingRangeLeafTypeLayout` →
-`GetElementTypeLayout` → `getDescriptorSetCount`. That recursion was verified to
-produce the block's own set (`ranges=2: TEXTURE count=4, SAMPLER count=1`), but
-`getSubObjectRangeSpaceOffset` reported `0` for it while
-`spReflectionParameter_GetBindingIndex` on the block reported `1` — i.e. the set
-*index* derivation is not settled. See **OPEN-2**.
+Step 2 is deliberately not applied to the global scope: E11 shows Slang *does*
+list the global implicit constant buffer as a `CONSTANT_BUFFER` range, so
+applying it there would double-count binding 0.
+
+**`DescriptorBinding.Stages` — the E3 gap is closed, with a switch.** Two modes,
+because precision costs a compile (E13):
+
+```csharp
+public enum SlangStageAttribution { ProgramStageUnion, PerEntryPointUsage }
+public SlangReflection GetReflection(SlangStageAttribution mode = SlangStageAttribution.ProgramStageUnion);
+```
+
+- `ProgramStageUnion` (default): every binding gets the union of the program's
+  entry-point stages. Always valid, sometimes broader than necessary, never
+  compiles anything, never throws.
+- `PerEntryPointUsage`: one `getEntryPointMetadata` per entry point, then
+  `isParameterLocationUsed(DESCRIPTOR_TABLE_SLOT, set, slot, …)` per binding per
+  entry point; `Stages` is the OR of the stages that report `true`. A binding no
+  entry point reports falls back to the union rather than to
+  `ShaderStages.None` — `stageFlags = 0` is not a binding any stage can access.
+  This mode compiles every entry point and therefore can throw
+  `SlangCompilationException`; the XML doc says so.
+
+`PushConstantRange.Stages` stays the program-stage union in **both** modes:
+`isParameterLocationUsed` reports push constants as unused even when they
+provably are (E13).
+
+**Vertex attributes** are produced only for entry points whose stage is
+`ShaderStages.Vertex`, and only from parameters (and struct fields, one level
+down) whose type layout's parameter category is `VARYING_INPUT` — which excludes
+`SV_InstanceID`, `SV_VertexID`, `SV_IsFrontFace` and `SV_Position` (E16).
+`Location` accumulates parent offset + field offset. `MATRIX`-kind inputs throw
+`NotSupportedException` naming the field (OPEN-6).
+
+**One remaining mapping gap** (E3's second gap, unchanged by composition):
+`VertexBindingDescription.{Slot, Stride, InputRate}` and
+`VertexAttributeDescription.{Binding, Offset}` describe how the *application*
+packs its vertex buffers, which the shader never states. `VertexAttributes`
+returns values with `Binding`/`Offset` at their defaults and there is
+deliberately no `VertexInputDescription` factory. Composition does not change
+this — nothing in a composite adds information about the application's buffer
+layout.
 
 *Why not the alternatives.*
-**A parallel `Slang*` description type set** — rejected, and explicitly out of
-bounds per the issue: reflection's whole value is that its output is the type
+**Keep "space 0 only, throw on `ParameterBlock<T>`" and defer** — rejected: the
+consumer's shader *is* the `ParameterBlock` case (§Problem 3); the deferral
+would ship an API that throws on its only user.
+**Use `spReflectionTypeLayout_getSubObjectRangeSpaceOffset` as the set index** —
+rejected on measurement: it returns `0` for every sub-object range in a fixture
+whose blocks are demonstrably at spaces 1 and 2 (E10).
+**Treat the global scope as always occupying set 0 and start blocks at 1** —
+rejected: false whenever the global scope has no descriptors (E10), which is the
+natural Substrate shape.
+**Use the loop index over `getDescriptorSetCount` as the Vulkan set number** —
+rejected: `[[vk::binding(7, 2)]]` yields index 1 for set 2 (E10).
+**Skip the synthesized `UNIFORM_BUFFER` at binding 0 of a block** — rejected: it
+is what the SPIR-V binds, and omitting it produces a descriptor set layout that
+does not match the shader (E11).
+**Make `PerEntryPointUsage` the default** — rejected: it turns reflection into a
+compile, gives it a failure mode it otherwise does not have, and a superset of
+stages is always valid Vulkan. Precision is opt-in.
+**A parallel `Slang*` description type set** — rejected, unchanged from the
+original: reflection's value is that its output is the type
 `Device.CreateDescriptorSetLayout` already takes.
-**Changing `DescriptorBinding`/`VertexAttributeDescription` to make them
-reflectable** (e.g. making `Stages` nullable) — rejected: it would regress #119's
-valid-by-default contract for every hand-written caller to accommodate one
-producer.
-**Deriving `Stages` from the SPIR-V binary instead** — rejected for Phase 3: it
-means a SPIR-V parser in this repo, which is a separate design with its own
-issue.
+**Deriving `Stages` by parsing the emitted SPIR-V ourselves** — rejected:
+`IMetadata` answers the same question without a SPIR-V parser in this repo.
 
 ### D6. Proving it — one native lane, one drift test
 
@@ -601,15 +1027,144 @@ This spec delivers the **runtime** API only. An MSBuild task replacing the
 which is half the point of #166. Doing both at once triples the surface under
 review in one PR.
 
+### D8. Composition — an explicit component list, in caller order
+
+Phase 3a extends the Phase 2 compiler API rather than replacing it. `Compile`
+(D4) stays as the one-module convenience path; composition gets first-class
+types, because E12 shows the component list and its order are part of the layout
+contract and therefore cannot be implicit.
+
+```csharp
+public sealed class SlangSession : IDisposable
+{
+    public SlangModule  LoadModule(string moduleName);                                   // via search paths
+    public SlangModule  LoadModuleFromSource(string moduleName, string path, ReadOnlySpan<byte> source);
+    public SlangProgram Compile(in SlangCompileRequest request);                         // unchanged (D4)
+    public SlangProgramBuilder CreateProgram();
+}
+
+public sealed class SlangModule : IDisposable                 // wraps IModule
+{
+    public string Name { get; }
+    public int    DefinedEntryPointCount { get; }
+    public SlangEntryPoint DefinedEntryPoint(int index);
+    public SlangEntryPoint FindEntryPoint(string name, ShaderStages stage);
+}
+
+public sealed class SlangEntryPoint : IDisposable             // wraps IEntryPoint
+{
+    public string       Name  { get; }
+    public ShaderStages Stage { get; }
+}
+
+public sealed class SlangProgramBuilder                        // accumulates the component list
+{
+    public SlangProgramBuilder Add(SlangModule module);
+    public SlangProgramBuilder Add(SlangEntryPoint entryPoint);
+    public SlangProgramBuilder AddTypeConformance(string concreteType, string interfaceType);
+    public SlangProgram Link();                                // composite -> link -> SlangProgram
+}
+```
+
+`Add` order is the composite order is the binding-assignment order is the
+entry-point index order (E12). The XML doc on `SlangProgramBuilder` states that
+in one sentence, and `SlangProgram` exposes the linked component so the SPIR-V a
+caller fetches and the reflection a caller reads come from the *same* linked
+object — there is no path on which they can diverge.
+
+*Why not the alternatives.*
+**Extend `SlangCompileRequest` with a list of module names** — rejected: it hides
+the ordering contract behind a record-struct field and gives the caller no
+handle on an individual entry point, which `AddTypeConformance` and
+per-entry-point SPIR-V both need.
+**Auto-compose from the entry points alone** (`Add(entryPoint)` only, letting
+Slang pull modules in as requirements) — rejected on measurement: it links, but
+produces a *third* binding assignment different from either explicit ordering
+(E12). Convenience that silently changes the layout is not convenience.
+**Make `SlangProgramBuilder` a `ref struct`** — rejected: it holds refcounted
+native components across statements and is setup-time; invariant #3 does not
+apply here (§Problem).
+
+### D9. Specialization — reflect after, conformance for interfaces, guard the crash
+
+Scope discipline first: this spec designs **no permutation system and no
+variant cache**. The issue puts runtime permutation workflows out of scope, and
+nothing here caches, hashes or keys anything. What is in scope is the
+correctness consequence E14 forces.
+
+1. **Reflection is taken from the specialized, linked component.** Reflecting
+   before specialization silently reports a descriptor set with zero bindings
+   where the shader has five (E14). `SlangProgram.Reflection` is therefore only
+   ever built from what `SlangProgramBuilder.Link()` returned, and
+   `SlangProgramBuilder` has no "reflect the unlinked composite" path at all.
+2. **Interface conformance is exposed; `IComponentType::specialize` is not, in
+   Phase 3.** `AddTypeConformance` maps to
+   `ISession::createTypeConformanceComponentType` (`slang.h:4626-4631`), which
+   was verified to link and emit valid SPIR-V for the interface-typed
+   `ParameterBlock` case. `specialize()` on that same case **segfaults the
+   process** in Slang's type-legalization pass (E14, with a stack trace) — an API
+   whose failure mode is SIGSEGV cannot ship behind a `try`.
+3. **A pre-flight guard, because a crash must become an exception.** Should a
+   later phase expose `Specialize`, it must first walk the *unspecialized*
+   composite's layout and throw `NotSupportedException` naming the parameter if
+   any global parameter's type-layout tree contains a node of kind
+   `SLANG_TYPE_KIND_INTERFACE` (`slang.h:2125`). The guard is precise and
+   testable: the crashing form reflects as element kind `INTERFACE`, the working
+   `type_param` form reflects as `GENERIC_TYPE_PARAMETER` (`slang.h:2124`).
+4. **The crash goes upstream.** A minimal repro exists; it should be filed
+   against shader-slang/slang, and the issue number recorded next to the guard.
+
+*Why not the alternatives.*
+**Expose `Specialize` now and document "do not call it on interface-typed
+blocks"** — rejected: documentation does not stop a SIGSEGV, and the consumer's
+material system is exactly the code that would call it.
+**Pin to an older or newer Slang to dodge the crash** — rejected without
+evidence: only `v2026.14.1` was measured, and moving the pin to avoid an
+unreported bug trades a known crash for an unknown set.
+**Build a specialization/permutation API in this spec** — rejected: explicitly
+out of scope in the issue, and it needs the compile-time story (D7's MSBuild
+task) before it needs a runtime cache.
+
+### D10. Sparse sets meet a positional API — state it, don't paper over it
+
+`PipelineLayoutDescription.SetLayouts` is positional
+(`PipelineLayoutDescription.cs:9`). A reflected program can leave set indices
+unused (E10). `SlangReflection.SetLayoutSlotCount` is the length the caller must
+allocate; `TryGetSet(i, …)` returns `false` for a gap, and the documented recipe
+is one empty `DescriptorSetLayout` reused for every gap. No API is added to
+`src/Ahjo.Vulkan/` for this — `DescriptorSetLayoutDescription` with an empty
+`Bindings` span already produces exactly that layout.
+
+*Why not the alternatives.*
+**Add a `PipelineLayoutDescription` overload keyed by set index** — rejected:
+it is a change to `src/Ahjo.Vulkan/` for one producer's convenience, and D5's
+whole premise is that reflection adapts to the existing types.
+**Renumber the reflected sets to be dense** — rejected outright: the set numbers
+are baked into the SPIR-V. Renumbering would produce a layout that compiles and
+then binds to the wrong slots at draw time, which is the exact bug class #166
+exists to eliminate.
+
 ---
 
 ## Phases and what can ship independently
 
 | Phase | Deliverable | Ships alone? |
 |---|---|---|
-| 1 | `Ahjo.Vulkan.Slang.Native`: `.rsp`, generated bindings, archive acquisition + staging + pack, `build-slang-native.yml`, native smoke + drift tests | **Yes.** A published raw-binding package, exactly like `Ahjo.Vulkan.Ktx.Native` was. |
+| 1 | `Ahjo.Vulkan.Slang.Native`: `.rsp`, generated bindings, archive acquisition + staging + pack, `build-slang-native.yml`, native smoke + drift tests | **Yes.** A published raw-binding package, exactly like `Ahjo.Vulkan.Ktx.Native` was. **Unchanged by this revision.** |
 | 2 | `Ahjo.Vulkan.Slang`: `SlangCompiler`/`SlangSession`/`SlangProgram`, diagnostics, `AotSmoke` coverage | **Yes.** Compile-to-SPIR-V is useful without reflection. |
-| 3 | `SlangReflection` → `DescriptorBinding` / `PushConstantRange` / `VertexAttributeDescription` | Requires Phase 2. |
+| **3a** | **Composition (D8/D9):** `SlangModule`, `SlangEntryPoint`, `SlangProgramBuilder`, `AddTypeConformance`, ordering contract | **Yes.** Composing and linking an N-module program to SPIR-V is useful before any reflection exists, and it is what Phase 3b must reflect *over*. |
+| **3b** | **Reflection (D5/D10):** the recursive `ParameterBlock` walk, sparse set indices, synthesized block uniform buffer, push constants, `SlangStageAttribution`, vertex attributes | Requires 3a. |
+
+**Why Phase 3 splits.** The original Phase 3 was "walk space 0 and map four
+range types". The revision adds a whole component-composition surface (three new
+public types plus an ordering contract, D8), a recursive multi-space walk with
+two derivations reflection does not expose directly (E10, E11), an opt-in
+compiling mode (E13), a specialization posture with a native-crash guard (D9),
+and a positional-API mismatch to document (D10). That is two reviewable diffs,
+not one — and 3a is independently useful, which is the repo's own bar for a
+phase boundary. 3a touches no `Pipelines/` type; 3b touches no `IComponentType`
+plumbing. Splitting also keeps the `vulkan-validation-reviewer` pass on 3b
+focused on binding correctness rather than on lifetime plumbing.
 
 ---
 
@@ -624,13 +1179,13 @@ Phase 1 ships core-only. Phase 2's test matrix compiles at every
 compressed) and the implementer should stop and confirm rather than silently
 growing the package or silently capping the optimization level.
 
-**OPEN-2 — multi-descriptor-set reflection.** Phase 3 as specified enumerates
-space 0. `ParameterBlock<T>` sub-object recursion was verified to reach the
-block's bindings, but the set-index derivation is not settled (E3/D5). The
-implementer should implement space 0, add an `[Fact(Skip=…)]`-free failing-loud
-guard (`SlangReflection` throws `NotSupportedException` naming the parameter
-when it encounters a `SUB_ELEMENT_REGISTER_SPACE` parameter), and raise a
-follow-up issue rather than guessing the mapping.
+**OPEN-2 — ~~multi-descriptor-set reflection~~ — RESOLVED 2026-08-01.** Settled
+empirically in E10 against SPIR-V ground truth: the set index is
+`spReflectionVariableLayout_GetOffset(param, SLANG_PARAMETER_CATEGORY_SUB_ELEMENT_REGISTER_SPACE)`,
+accumulated down the nesting chain from a global-scope base of 0.
+`getSubObjectRangeSpaceOffset` was the wrong function and returns 0 for every
+range. Specified in D5; no `NotSupportedException` guard for `ParameterBlock<T>`
+remains, and none should be added.
 
 **OPEN-3 — `SlangCompiler` lifetime and `slang_shutdown`.** `slang.h:5860`
 documents `slang_shutdown()` as callable only after every Slang object is
@@ -641,6 +1196,33 @@ header. Phase 2 should release the global session and **not** call
 `slang_shutdown`, and add a test that creates/disposes two compilers in
 sequence; if that test fails, stop and ask.
 
+**OPEN-4 — the `specialize()` segfault (E14).** `IComponentType::specialize` on
+a component whose global scope contains an interface-typed `ParameterBlock`,
+followed by any codegen call, crashes inside Slang's type-legalization pass —
+reproduced 3/3 with a stack trace, on `v2026.14.1` linux-x64. D9's answer is to
+**not expose `specialize()` in Phase 3** and to expose
+`createTypeConformanceComponentType` instead, which was verified to work for the
+same shader. Two things need a human call: (a) whether to file the repro
+upstream now and block on it, or ship 3a without `Specialize` and revisit; and
+(b) whether the crash reproduces on `win-x64` — it was measured on Linux only,
+and the Windows lane has no equivalent probe.
+
+**OPEN-5 — more than one push-constant block (E17).** Two modules each declaring
+`[[vk::push_constant]]` compose and link, and reflection reports two
+`PUSH_CONSTANT` ranges — but the only offset it exposes is a buffer *index*
+(0, 1), not the byte offset `VkPushConstantRange.offset` needs. Phase 3b emits
+one `PushConstantRange` for the single-block case and throws
+`NotSupportedException` naming both parameters when it sees two. Do not guess a
+byte offset. If the consumer needs two blocks, that is its own investigation.
+
+**OPEN-6 — `MATRIX`-kind vertex inputs (E16).** A `float4x4` vertex input
+occupies `GetSize(typeLayout, VARYING_INPUT)` = 4 consecutive locations and
+SPIR-V decorates it at the base location, but which scalar count each of those
+locations carries depends on `SessionDesc.defaultMatrixLayoutMode`, and only
+column-major was probed. Phase 3b throws `NotSupportedException` naming the
+field. Settling it means probing both layout modes and reading the SPIR-V type
+of each per-location input variable.
+
 ---
 
 ## Follow-ups this spec does not do
@@ -650,6 +1232,12 @@ sequence; if that test fails, stop and ask.
   system change with its own failure modes (task host, incremental inputs,
   design-time builds) and it is what finally deletes the eight duplicated
   `_GlslcExe` blocks and lets `ci.yml:212` stop printing "NOT PROVEN".
+- **File the `specialize()` segfault upstream** (E14, OPEN-4). A minimal repro
+  exists: `ParameterBlock<ISurface>` + `IComponentType::specialize(Concrete)` +
+  `link` + `getEntryPointCode` on the consuming entry point. It is not this
+  spec's job to fix Slang, but it is this spec's job to record that D9 exists
+  because of it, so a future `Specialize` API is not added by someone who only
+  read the header.
 - **Migrate the existing GLSL sample shaders to Slang.** Should become its own
   issue after that one. It is a content change with a per-sample visual diff to
   review, it is not all-or-nothing (Slang can consume GLSL), and doing it before
