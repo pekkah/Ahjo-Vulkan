@@ -1398,19 +1398,37 @@ of each per-location input variable.
 emitted module declares the capability, and `AotSmoke`'s device is created with no
 `ConfigureFeatures` — a `VUID-VkShaderModuleCreateInfo-pCode-08740` violation
 that the NVIDIA driver renders straight through and that the sample, which
-enables no validation, never surfaces. Not fixed here because the two fixes
-differ in what they claim:
+enables no validation, never surfaces. Not fixed here, but the recommendation is
+**enable the feature**, and the reason the alternative existed at all turned out
+to rest on a false premise:
 
 - **Enable `shaderDrawParameters`** via `chain.Push<VkPhysicalDeviceVulkan11Features>()`
-  — one line, and says "a Slang sample needs Vulkan 1.1". It also raises the
-  sample's implicit device floor, which is the AOT smoke lane's floor too.
+  — one line. This does **not** raise any floor, which was the original argument
+  against it. `PhysicalDevice.cs:214-226` already pushes `bufferDeviceAddress`,
+  `timelineSemaphore`, `separateDepthStencilLayouts`, `synchronization2` and
+  `dynamicRendering` with no `supported` guard, so every device created through
+  the wrapper is already required to be 1.2/1.3-capable; `shaderDrawParameters`
+  is 1.1 core and sits under that. The repo's lower-capability target, Mesa
+  lavapipe, is unaffected for two independent reasons: the `vma-linux` lane
+  references only the `*.Native` projects and calls `vkCreateDevice` with a bare
+  `VkDeviceCreateInfo` (no `pNext`, no features, no shader modules), and current
+  lavapipe advertises 1.4 anyway.
 - **Keep the sample on capabilities the GLSL original needed** by indexing from
-  something other than `SV_VertexID` — keeps the floor, costs the property that
-  `triangle.slang` is a faithful translation of `triangle.vert`, which is the
-  comment at the top of the file and the reason the PNGs match.
+  something other than `SV_VertexID` — costs the property that `triangle.slang`
+  is a faithful translation of `triangle.vert`, which is the comment at the top
+  of the file and the reason the PNGs match, and in Slang means reaching for
+  `[[vk::builtin("VertexIndex")]]`: a Vulkan-specific escape hatch in source
+  whose portability is the point.
 
 Whichever is chosen should be applied to the sample-migration follow-up (#172)
 as a rule, not just to this one file.
+
+**Out of scope, deliberately:** adding `shaderDrawParameters` to the *wrapper's*
+default feature set. That set is pushed unconditionally and this feature is
+**optional** even in 1.4, so it would be the first optional member and would
+need a `vkGetPhysicalDeviceFeatures2` gate — the lesson the `f14` comment at
+`PhysicalDevice.cs:228-237` already records. It is an `Ahjo.Vulkan` contract
+decision, and `src/Ahjo.Vulkan.Slang/CLAUDE.md` says this side does not make it.
 
 ---
 
