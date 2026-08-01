@@ -10,6 +10,13 @@ is green.
 material system) made composed-program reflection and `ParameterBlock<T>`
 load-bearing.
 
+**Revised 2026-08-01 (post-implementation).** Phase 1, Phase 2 and Phase 3a have
+landed (`e6efccc`, `9563394`, `f646463`). **OPEN-1 is resolved by human decision:
+`slang-glslang` ships on both RIDs**, and §1.4 now describes the shipped file set
+rather than a deferral. OPEN-3 is resolved in this plan's direction; OPEN-4 is
+decided except for the `win-x64` sub-question. Phase 3b is unchanged and is the
+only phase still to execute.
+
 **Phase 1 is unchanged and is not to be re-opened.** Verified against the
 generated tree the implementer committed in `e6efccc` — 138 files under
 `src/Ahjo.Vulkan.Slang.Native/Generated/`, `0` mangled `EntryPoint = "_Z…"`
@@ -224,28 +231,45 @@ deliberate, all commented:
   _SlangStagedDir     = $(_SlangStagedRootDir)$(_SlangRid)\
   ```
 - Per-RID file lists:
-  - `win-x64`: `slang.dll`, `slang-compiler.dll` (both extracted from `bin/`).
-    `slang.dll` is a 158 KB forwarder that loads `slang-compiler.dll` at
-    runtime; shipping only one of them yields a `DllNotFoundException` at the
-    first call.
+  - `win-x64`: `slang.dll`, `slang-compiler.dll`, `slang-glslang.dll` (all
+    extracted from `bin/`). `slang.dll` is a 158 KB forwarder that loads
+    `slang-compiler.dll` at runtime; shipping only one of them yields a
+    `DllNotFoundException` at the first call.
   - `linux-x64`: `libslang.so`, produced by **copying and renaming**
     `lib/libslang-compiler.so.0.$(SlangVersion.TrimStart('v'))`. In the archive
     `libslang.so` is a symlink and a nupkg cannot carry symlinks
     (`Ahjo.Vulkan.Ktx.Native.csproj:55-61`). The rename was verified to load
-    and run.
+    and run. **Plus** `lib/libslang-glslang-$(SlangVersion.TrimStart('v')).so`,
+    copied, staged and packed **unrenamed** — `libslang` `dlopen`s it by that
+    exact versioned name, so renaming it is indistinguishable from not shipping
+    it.
   - Not shipped, with a comment saying why: `libslang-llvm.so` /
     `slang-llvm.dll` (152 MB / 84 MB, CPU targets only),
     `libslang-glsl-module` (GLSL input only), `libgfx`, `libslang-rt`, the
     `slang-standard-module-*` tree (the core module is embedded — a compile was
     verified with none of it present), `bin/`, `share/doc/`.
-    `slang-glslang` — see **OPEN-1**, not shipped in Phase 1.
+  - **`slang-glslang` ships** (OPEN-1, resolved; landed in `f646463`). It
+    provides the `spirv-opt` downstream compiler. Without it every
+    `SlangOptimizationLevel` above `None` still returns `SLANG_OK` and valid
+    SPIR-V while putting `error[E00100]: failed to load downstream compiler
+    'spirv-opt'` into the diagnostics blob, and all four levels emit
+    byte-identical output — the setting is a silent no-op. The comment at the
+    file list must say that, not just "provides spirv-opt", because the reason
+    it ships is the failure mode and not the feature.
 - `None Include="$(_SlangStagedDir)<file>" CopyToOutputDirectory="PreserveNewest"
   Visible="false" Pack="false" Link="<file>"` for each host-RID file, gated on
   `'$(_SlangRid)' != '' and '$(SkipSlangNativeFetch)' != 'true'` — the same
   Content+Link propagation trick `Ahjo.Vulkan.Ktx.Native.csproj:79-85` uses.
 - Targets:
-  1. `FetchSlang` (`Condition="!Exists('$(_SlangStagedDir)<primary file>')"`,
-     `BeforeTargets="AssignTargetPaths"`):
+  1. `FetchSlang`, `BeforeTargets="AssignTargetPaths"`, gated on a
+     `_SlangStageNeeded` property that is `true` when **any** shipped file for
+     the RID is missing from `$(_SlangStagedDir)` — not just the primary one.
+     Keyed on the primary alone, a staged tree from before `slang-glslang`
+     joined the shipped set satisfies the check and the build silently produces
+     a package whose `Optimization` is a no-op, which is the defect OPEN-1
+     existed to fix. Staging also `<Error>`s when `slang-glslang` fails to
+     appear after extraction, for the same reason: it is an error, not a
+     warning.
      - `<DownloadFile SourceUrl="…" DestinationFolder="$(_SlangDownloadDir)" />`
      - `<GetFileHash Files="…" Algorithm="SHA256" HashEncoding="hex">` →
        `<Error>` when the hash does not equal `$(SlangWinX64Sha256)` /
@@ -520,7 +544,8 @@ Rules the implementation must follow:
 
 1. `SlangCompiler.Create()` calls `slang_createGlobalSession(0, out)`;
    `Dispose()` calls `release()` on the global session and **does not** call
-   `slang_shutdown()` — see **OPEN-3**.
+   `slang_shutdown()` — **OPEN-3**, resolved in exactly this direction and
+   verified by §2.5 case 9.
 2. `SlangSession.Compile` performs: `loadModuleFromSource{String,}` →
    `findAndCheckEntryPoint` per requested entry point (or
    `getDefinedEntryPointCount`/`getDefinedEntryPoint` when `EntryPoints` is
@@ -576,12 +601,23 @@ xUnit v3, `ProjectReference` to `Ahjo.Vulkan.Slang`. Runs in the Windows
 6. `Compile_UndefinedEntryPoint_Throws` — `findAndCheckEntryPoint` failure path.
 7. `Warnings_SurfaceOnSuccess` — a source that produces a Slang warning yields
    non-null `Warnings` and a valid blob.
-8. `OptimizationLevels_AllSucceed` — `[Theory]` over every
-   `SlangOptimizationLevel`. **This is the OPEN-1 decision procedure**: if any
-   level fails with `failed to load downstream compiler 'spirv-opt'`, stop and
-   report rather than capping the enum or growing the package.
-9. `TwoCompilers_InSequence_Work` — create, dispose, create, dispose. **This is
-   the OPEN-3 decision procedure**; if it fails, stop and ask.
+8. `OptimizationLevels_ReachTheDownstreamCompiler` — `[Theory]` over every
+   `SlangOptimizationLevel`, compiling a deliberately redundant shader. Asserts
+   valid SPIR-V **and** that `SlangProgram.Warnings` contains neither
+   `"spirv-opt"` nor `"failed to load downstream compiler"`. The diagnostic
+   assertion is the load-bearing half: an absent `slang-glslang` does not make
+   the compile fail, it makes the level a no-op and says so in a warning.
+8b. `Optimization_ChangesTheEmittedSpirv` — compiles the same redundant fixture
+   at `None` and at `Maximal` and requires the second to be **strictly
+   smaller** (measured: 317 vs 245 words on `v2026.14.1`/linux-x64). Assert the
+   direction only; exact counts are upstream's optimizer, not this wrapper's
+   contract. A trivial fixture is unusable here — it emits identical words with
+   or without the optimizer, which is precisely how the no-op went unnoticed.
+   **These two together are OPEN-1's resolved acceptance criterion**: withhold
+   `libslang-glslang-<version>.so` from the output directory and 4 of the 5
+   optimization tests must fail.
+9. `TwoCompilers_InSequence_Work` — create, dispose, create, dispose. **OPEN-3's
+   probe**; it passes, which is what resolved OPEN-3.
 10. `Spirv_FeedsCreateShaderModule` — behind `TestGate.RequireDriver`, per
     `tests/CLAUDE.md`. Creates a `ShaderModule` from `program.Spirv(0)` and
     disposes it.
@@ -1102,13 +1138,17 @@ and §3b.7 case 14 executing them.
 
 ## OPEN items — stop and ask
 
-- **OPEN-1** — whether `slang-glslang` ships. Decision procedure: Phase 2 step
-  2.5 test 8. Cost if yes: `slang-glslang.dll` +2 411 328 bytes compressed
-  (win-x64), `libslang-glslang-2026.14.1.so` +3 632 358 bytes compressed
-  (linux-x64), on top of a ~24.6 MB compressed baseline. The Linux file name is
-  version-embedded and is `dlopen`ed by that exact name, so it must ship
-  unrenamed. Do not add it, and do not silently cap the optimization enum,
-  without a human decision.
+- **OPEN-1** — **RESOLVED 2026-08-01 by human decision; shipped in `f646463`.
+  Nothing to ask.** `slang-glslang` ships on both RIDs, unrenamed on Linux
+  (`libslang` `dlopen`s it by its versioned name). Measured cost:
+  `slang-glslang.dll` 6 173 184 raw / 2 417 901 compressed in the pinned
+  archive (win-x64); `libslang-glslang-2026.14.1.so` 10 055 776 raw /
+  3 736 269 as deflated into the produced nupkg (linux-x64). Package total
+  ~24.6 MB → ~31 MB, and the READMEs carry it per RID: ~14 MB win-x64,
+  ~17 MB linux-x64. Implemented in §1.4; §2.5 cases 8 and 8b are the
+  acceptance tests. **Do not remove it to shrink the package** — without it
+  `Optimization` is a silent no-op, not a compile failure, so the regression
+  would ship green under any "valid SPIR-V" assertion.
 - **OPEN-2** — **RESOLVED 2026-08-01, nothing to ask.** The set index is
   `spReflectionVariableLayout_GetOffset(param, SLANG_PARAMETER_CATEGORY_SUB_ELEMENT_REGISTER_SPACE)`,
   accumulated down the nesting chain from a global-scope base of 0; verified
@@ -1117,9 +1157,11 @@ and §3b.7 case 14 executing them.
   `getSubObjectRangeSpaceOffset` was the wrong function. Implemented in §3b.2;
   §3b.7 case 8 is the acceptance test. The old §3.4 guard is deleted — do not
   reintroduce a `NotSupportedException` on `ParameterBlock<T>`.
-- **OPEN-3** — `SlangCompiler` lifetime and `slang_shutdown()`. Phase 2 releases
-  the global session and does not call `slang_shutdown`; step 2.5 test 9 is the
-  probe. If it fails, stop.
+- **OPEN-3** — **RESOLVED 2026-08-01 in this plan's direction, nothing to ask.**
+  `SlangCompiler.Dispose()` releases the global session and does not call
+  `slang_shutdown()` (`src/Ahjo.Vulkan.Slang/SlangCompiler.cs:19`, `:160`);
+  §2.5 case 9 (`TwoCompilers_InSequence_Work`) creates and disposes two
+  compilers in sequence and passes. Do not add a `slang_shutdown()` call.
 - **OPEN-4** — the `specialize()` segfault. `IComponentType::specialize` on a
   component whose global scope holds an interface-typed `ParameterBlock`,
   followed by `getTargetCode` or by `getEntryPointCode` for the consuming entry
@@ -1128,7 +1170,15 @@ and §3b.7 case 14 executing them.
   `AddTypeConformance` and **no** `Specialize` (§3a.1 rule 5). Two things need a
   human call before anyone adds `Specialize`: whether to file the repro upstream
   and block on it, and whether the crash reproduces on `win-x64` — it was
-  measured on Linux only. **Do not add a `Specialize` method to close a gap.**
+  measured on Linux only.
+
+  **Status 2026-08-01:** (a) is **decided** — ship 3a without `Specialize`,
+  exposing `AddTypeConformance`, rather than blocking on an upstream fix; that
+  is what `f646463` landed. Filing the repro upstream stays a follow-up, not a
+  gate. (b) — whether the crash reproduces on `win-x64` — is **still genuinely
+  open**; nothing shipped depends on the answer, but D9 rule 3's pre-flight
+  guard cannot be sized without it. **Do not add a `Specialize` method to close
+  a gap.**
 - **OPEN-5** — more than one push-constant block. Two modules each declaring
   `[[vk::push_constant]]` compose and link, and reflection reports two
   `PUSH_CONSTANT` ranges, but the only offset it exposes is a buffer *index*

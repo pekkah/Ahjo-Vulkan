@@ -12,6 +12,12 @@ promoted the original **OPEN-2** (multi-descriptor-set reflection) from a
 deferral to the load-bearing case; it is now settled empirically (E10) and
 specified in D5. New evidence E10-E17, new decisions D8-D10, Phase 3 split.
 Phase 1 and D1-D4, D6, D7 are unchanged.
+**Revised:** 2026-08-01 (post-implementation) — **OPEN-1 is resolved by human
+decision and shipped** (commit `f646463`): `slang-glslang` ships on both RIDs.
+E6 and D3 now carry the measurement instead of the projection, including the
+part this spec predicted wrongly. OPEN-3 is resolved in the plan's direction;
+OPEN-4 is decided except for one sub-question. No other decision changed, and
+nothing in D5/D8/D9/D10 or the reflection evidence is affected.
 
 ---
 
@@ -237,7 +243,7 @@ Extracted contents by size:
 |---|---|---|---|
 | `lib/libslang-llvm.so` | 152 111 720 | — | **No.** CPU/host-callable targets only. |
 | `lib/libslang-compiler.so.0.2026.14.1` (`libslang.so` → symlink) | 30 598 248 | 13 101 543 | **Yes.** This is the compiler. |
-| `lib/libslang-glslang-2026.14.1.so` | 10 055 776 | 3 632 358 | Provides `spirv-opt`; see below. |
+| `lib/libslang-glslang-2026.14.1.so` | 10 055 776 | 3 632 358 | **Yes** — provides `spirv-opt`, without which `Optimization` is a silent no-op. See below. |
 | `lib/libslang-glsl-module-2026.14.1.so` | 1 334 808 | — | No. GLSL *input* only. |
 | `lib/libgfx.so`, `lib/libslang-rt.so` | 1 069 288 / 320 096 | — | No. Slang's own gfx layer and CPU runtime. |
 | `lib/slang-standard-module-*/` (incl. `neural.slang-module`, 5.5 MB) | ~6 MB | — | No. The core module is embedded — E2 compiled with none present. |
@@ -254,18 +260,61 @@ exact constraint for libktx's SOVERSION chain). Verified: a **plain rename** of
 `libslang-compiler.so.0.2026.14.1` to `libslang.so` loads and runs (E2 was
 re-run against a renamed copy, not a symlink).
 
-**On `slang-glslang`, the evidence is mixed and is reported as such.**
-`slangc test.slang -target spirv` fails without it —
+**On `slang-glslang`, this spec originally reported the evidence as mixed. It
+is no longer mixed: the library ships (OPEN-1, commit `f646463`), and *how* the
+question resolved is the part worth keeping.**
+
+What was measured before implementation, and is still true as far as it goes:
+`slangc test.slang -target spirv` fails without the library —
 `error[E00100]: failed to load downstream compiler 'spirv-opt'` /
 `note[E99996]: failed to load dynamic library 'slang-glslang-2026.14.1'` — and
 succeeds with `-O0` (2 008-byte blob) or once the library is present
 (1 704-byte blob). The **API path this design uses** (`getEntryPointCode` on a
-linked composite) produced valid SPIR-V with only `libslang.so` present, both at
-default target flags and with an explicit `Optimization` target option — it did
-not demand `spirv-opt` in any configuration probed. That is not the same as
-proving no configuration demands it. Cost if we ship it anyway: **+3 632 358
-bytes (linux) / +2 411 328 bytes (win) compressed**, against a ~24.6 MB
-compressed baseline for the core-only subset.
+linked composite) produced valid SPIR-V with only `libslang.so` present, at
+default target flags and with an explicit `Optimization` target option. This
+spec concluded from that: "it did not demand `spirv-opt` in any configuration
+probed."
+
+What the Phase 2 implementation run measured, one process per level on
+`v2026.14.1` / linux-x64, on a deliberately redundant vertex shader (a
+fixed-trip loop that folds, a dead local chain, two arithmetic identities):
+
+| shipped set | `None` | `Default` | `High` | `Maximal` | downstream-compiler diagnostic |
+|---|---|---|---|---|---|
+| compiler only | 317 words | 317 | 317 | 317 | `error[E00100] … 'spirv-opt'` + `note[E99996] … 'slang-glslang-2026.14.1'` at every level above `None` |
+| compiler + `slang-glslang` | 317 | 313 | 245 | 245 | none, at any level |
+
+Verified from the other side by withholding the binary from the output
+directory: 4 of the 5 optimization tests fail without it, 5 of 5 pass with it.
+
+**"The API path does not demand `spirv-opt`" was true only in the sense that it
+never fails, and that is the more dangerous reading.** Every level returned
+`SLANG_OK` and a well-formed module; the missing optimizer surfaced as text in
+the diagnostics blob of a *successful* call, which the wrapper routes to
+`SlangProgram.Warnings` (D4). A caller asking for `Maximal` got `None`, quietly.
+The failure mode is therefore strictly worse than the outright failure OPEN-1's
+decision procedure was written to detect. **Carry this forward to the next
+`SlangVersion` bump: an absent Slang downstream compiler does not fail the call,
+it makes the option do nothing.** Any future "do we actually need this library"
+question is answered by comparing emitted bytes across settings, never by
+checking result codes.
+
+Cost, measured rather than estimated:
+
+| RID | File | Raw | Compressed |
+|---|---|---|---|
+| `win-x64` | `bin/slang-glslang.dll` | 6 173 184 | **2 417 901** in the pinned archive (this spec's pre-implementation figure of 2 411 328 was ~6 KB low) |
+| `linux-x64` | `lib/libslang-glslang-2026.14.1.so` | 10 055 776 | 3 632 358 in the archive; **3 736 269** as deflated into the produced nupkg — a different deflate level, so both numbers are real and they measure different things |
+
+Package total moves from ~24.6 MB to **~31 MB** across both RIDs: ~14 MB
+`win-x64`, ~17 MB `linux-x64`. `src/Ahjo.Vulkan.Slang.Native/README.md` now
+carries that as a per-RID column rather than a single number, because the two
+RIDs are no longer close enough for one figure to be honest.
+
+One deployment prediction held: on Linux the file ships **unrenamed**
+(`libslang-glslang-2026.14.1.so`), because `libslang` `dlopen`s it by its
+versioned name — unlike `libslang.so` itself, which is a renamed copy by
+necessity. Renaming it is indistinguishable from not shipping it.
 
 ### E7. Direct SPIR-V emission is Slang's own default
 
@@ -670,7 +719,9 @@ src/Ahjo.Vulkan.Slang/          compile + reflect -> existing description types 
 (Slang has no Vulkan surface at all; E8) and not `Ahjo.Vulkan`.
 `Ahjo.Vulkan.Slang` references `Ahjo.Vulkan` + `Ahjo.Vulkan.Slang.Native`.
 `Ahjo.Vulkan` itself gains no dependency, so a consumer shipping precompiled
-SPIR-V never pulls ~25 MB of compiler. This raises the repo to six projects
+SPIR-V never pulls ~31 MB of compiler (~14 MB `win-x64` / ~17 MB
+`linux-x64` — the figure grew with `slang-glslang`, OPEN-1). This raises the
+repo to six projects
 and six published packages under the single `v*` tag (`README.md:124`).
 
 *Why not the alternatives.*
@@ -749,12 +800,24 @@ files, and stages them under `native/slang/staged/<rid>/`. The staged path is
 the cache key, the `ProjectReference` copy source and the pack input — the same
 three-way role `Ahjo.Vulkan.Ktx.Native.csproj:55-65` gives its staged binary.
 
-Shipped subset (Phase 1):
+**Correction from implementation (`f646463`):** "the staged path is the cache
+key" is too coarse to be safe. Keyed on the *primary* staged file alone, a
+staged tree left over from before `slang-glslang` joined the shipped set
+satisfies the check, and the build then silently produces a package whose
+`Optimization` is still a no-op — the exact defect OPEN-1 existed to fix. The
+cache token is the presence of **every** shipped file for the RID, not of one
+representative file, and staging errors when any of them fails to appear.
+
+Shipped subset:
 
 | RID | Files | Compressed |
 |---|---|---|
-| `win-x64` | `slang.dll`, `slang-compiler.dll` | ~11.5 MB |
-| `linux-x64` | `libslang.so` (renamed copy of `libslang-compiler.so.0.2026.14.1`) | ~13.1 MB |
+| `win-x64` | `slang.dll`, `slang-compiler.dll`, `slang-glslang.dll` | ~14 MB |
+| `linux-x64` | `libslang.so` (renamed copy of `libslang-compiler.so.0.2026.14.1`), `libslang-glslang-2026.14.1.so` (**not** renamed) | ~17 MB |
+
+Phase 1 originally shipped the first two rows without `slang-glslang`;
+it was added by OPEN-1's resolution (`f646463`), and E6 carries the
+measurement that drove it.
 
 RIDs: `win-x64` + `linux-x64` only, matching the two lanes we are willing to
 run. Slang publishes `windows-aarch64`, `linux-aarch64`, `macos-x86_64` and
@@ -774,9 +837,13 @@ lane, no ship. That rule exists because #144 shipped an unexecuted `.so`.
 **Take a dependency on an existing NuGet Slang package** — rejected: the
 official distribution channel is the GitHub release; a third-party repackage
 adds a supply-chain hop we would then have to pin anyway.
-**Ship `slang-glslang` in Phase 1** — deferred, not rejected; see **OPEN-1**.
-The API path did not require it in any probed configuration (E6), so Phase 1
-ships without it and the lane's optimization-level matrix decides.
+**Ship the compiler without `slang-glslang`** — was the Phase 1 position, now
+**rejected on measurement**: the API path does not *require* `spirv-opt` only in
+the sense that it never fails without it. Every `SlangOptimizationLevel` above
+`None` returns `SLANG_OK` and byte-identical SPIR-V while reporting the missing
+downstream compiler as a warning, so `Optimization` is a silent no-op (E6). The
+2.4 MB / 3.7 MB is the price of the setting meaning anything, and a public
+option that does nothing is worse than an absent one.
 **Ship `slang-llvm`** — rejected outright: 152 MB for CPU targets this wrapper
 will never request.
 
@@ -1170,14 +1237,34 @@ focused on binding correctness rather than on lifetime plumbing.
 
 ## OPEN
 
-**OPEN-1 — does `slang-glslang` ship?** E6 shows the API path did not require
-`spirv-opt` in any probed configuration, while `slangc`'s default pipeline does.
-Phase 1 ships core-only. Phase 2's test matrix compiles at every
-`SlangOptimizationLevel`; if any level fails with
-`failed to load downstream compiler 'spirv-opt'`, the answer is to add
-`slang-glslang.dll` / `libslang-glslang-2026.14.1.so` (+2.4 MB / +3.6 MB
-compressed) and the implementer should stop and confirm rather than silently
-growing the package or silently capping the optimization level.
+**OPEN-1 — ~~does `slang-glslang` ship?~~ — RESOLVED 2026-08-01 by human
+decision; shipped in `f646463`.** Yes, on both RIDs, unrenamed on Linux. Without
+it every `SlangOptimizationLevel` above `None` returns `SLANG_OK` and
+byte-identical SPIR-V (317 words at all four levels) while reporting
+`failed to load downstream compiler 'spirv-opt'` in the diagnostics blob of a
+*successful* call; with it, 317 / 313 / 245 / 245 words at
+`None` / `Default` / `High` / `Maximal` and no diagnostic at any level (E6).
+Cost as measured: ~14 MB `win-x64` / ~17 MB `linux-x64`, package total
+~24.6 MB → ~31 MB.
+
+Two things this spec predicted wrongly, recorded because whoever bumps
+`SlangVersion` next will face the same question:
+
+- **The decision procedure was written to detect a failure that never
+  happens.** It said: if any level *fails* with `failed to load downstream
+  compiler 'spirv-opt'`, stop and confirm. No level ever failed. An absent Slang
+  downstream compiler does not fail the call — it makes the option do nothing
+  and puts the reason in text the caller has to go looking for. Compare emitted
+  bytes across settings; do not check result codes.
+- **The original test could not have caught it, and neither could its
+  fixture.** "Valid SPIR-V at every level" passed for a whole phase over a
+  setting that did nothing, and the trivial shader it compiled emitted identical
+  words with or without the optimizer. Both were replaced:
+  `Optimization_ChangesTheEmittedSpirv` requires `Maximal` to be strictly
+  smaller than `None` on a deliberately redundant shader, and
+  `OptimizationLevels_ReachTheDownstreamCompiler` requires the `spirv-opt`
+  diagnostic to be absent. Withholding the binary now fails 4 of the 5
+  optimization tests.
 
 **OPEN-2 — ~~multi-descriptor-set reflection~~ — RESOLVED 2026-08-01.** Settled
 empirically in E10 against SPIR-V ground truth: the set index is
@@ -1187,25 +1274,34 @@ accumulated down the nesting chain from a global-scope base of 0.
 range. Specified in D5; no `NotSupportedException` guard for `ParameterBlock<T>`
 remains, and none should be added.
 
-**OPEN-3 — `SlangCompiler` lifetime and `slang_shutdown`.** `slang.h:5860`
-documents `slang_shutdown()` as callable only after every Slang object is
-released, and Slang's global session is process-scoped. Whether
-`SlangCompiler.Dispose()` should call it (and therefore whether a second
-`SlangCompiler.Create()` in the same process is legal) is not settled by the
-header. Phase 2 should release the global session and **not** call
-`slang_shutdown`, and add a test that creates/disposes two compilers in
-sequence; if that test fails, stop and ask.
+**OPEN-3 — ~~`SlangCompiler` lifetime and `slang_shutdown`~~ — RESOLVED
+2026-08-01 in the plan's direction.** `SlangCompiler.Dispose()` releases the
+global session and does **not** call `slang_shutdown()`
+(`src/Ahjo.Vulkan.Slang/SlangCompiler.cs:19`, `:160`); a second
+`SlangCompiler.Create()` in the same process is legal, verified by
+`TwoCompilers_InSequence_Work`
+(`tests/Ahjo.Vulkan.Slang.Tests/SlangCompilerTests.cs:280`), which creates and
+disposes two compilers in sequence and passes. `slang_shutdown` stays uncalled:
+it is process-scoped (`slang.h:5860`), and a library has no standing to end the
+process's use of Slang on behalf of its host.
 
-**OPEN-4 — the `specialize()` segfault (E14).** `IComponentType::specialize` on
-a component whose global scope contains an interface-typed `ParameterBlock`,
-followed by any codegen call, crashes inside Slang's type-legalization pass —
-reproduced 3/3 with a stack trace, on `v2026.14.1` linux-x64. D9's answer is to
-**not expose `specialize()` in Phase 3** and to expose
-`createTypeConformanceComponentType` instead, which was verified to work for the
-same shader. Two things need a human call: (a) whether to file the repro
-upstream now and block on it, or ship 3a without `Specialize` and revisit; and
-(b) whether the crash reproduces on `win-x64` — it was measured on Linux only,
-and the Windows lane has no equivalent probe.
+**OPEN-4 — the `specialize()` segfault (E14) — DECIDED 2026-08-01, one
+sub-question still open.** `IComponentType::specialize` on a component whose
+global scope contains an interface-typed `ParameterBlock`, followed by any
+codegen call, crashes inside Slang's type-legalization pass — reproduced 3/3
+with a stack trace, on `v2026.14.1` linux-x64.
+
+- **(a) Decided by a human: ship 3a without `Specialize`, exposing
+  `AddTypeConformance`.** Do not block on an upstream fix.
+  `SlangProgramBuilder` (`f646463`) has `AddTypeConformance` and no
+  `Specialize`, and carries the reasoning in its XML doc so the omission reads
+  as a decision. Filing the repro upstream stays a follow-up (see below), not a
+  gate.
+- **(b) Still genuinely open: does the crash reproduce on `win-x64`?** It was
+  measured on Linux only and the Windows lane has no equivalent probe. Nothing
+  in the shipped code depends on the answer — `Specialize` is not exposed on
+  either RID — but D9 rule 3's pre-flight guard cannot be sized without it, so
+  anyone proposing a `Specialize` API must answer this first.
 
 **OPEN-5 — more than one push-constant block (E17).** Two modules each declaring
 `[[vk::push_constant]]` compose and link, and reflection reports two
