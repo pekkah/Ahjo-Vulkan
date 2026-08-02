@@ -6,8 +6,8 @@ namespace Ahjo.Vulkan.Slang;
 
 /// <summary>
 /// The binding surface of a linked Slang program, expressed in the wrapper's
-/// own description types — <c>DescriptorBinding</c>, <c>PushConstantRange</c>
-/// and <c>VertexAttributeDescription</c>.
+/// own description types — <c>SlangDescriptorBinding</c>, <c>SlangPushConstantRange</c>
+/// and <c>SlangVertexAttributeDescription</c>.
 /// </summary>
 /// <remarks>
 /// <para>There is deliberately no parallel <c>Slang*</c> description type set.
@@ -35,10 +35,10 @@ public sealed unsafe class SlangReflection
 {
     private readonly uint[] _setIndices;
     private readonly int[] _setStarts;
-    private readonly DescriptorBinding[] _bindings;
-    private readonly PushConstantRange[] _pushConstantRanges;
+    private readonly SlangDescriptorBinding[] _bindings;
+    private readonly SlangPushConstantRange[] _pushConstantRanges;
     private readonly SlangEntryPointInfo[] _entryPoints;
-    private readonly VertexAttributeDescription[][] _vertexAttributes;
+    private readonly SlangVertexAttributeDescription[][] _vertexAttributes;
 
     internal SlangReflection(SlangProgram program, SlangStageAttribution attribution)
     {
@@ -51,7 +51,7 @@ public sealed unsafe class SlangReflection
         int entryPointCount = (int)SlangApi.spReflection_getEntryPointCount(layout);
 
         _entryPoints = new SlangEntryPointInfo[entryPointCount];
-        _vertexAttributes = new VertexAttributeDescription[entryPointCount][];
+        _vertexAttributes = new SlangVertexAttributeDescription[entryPointCount][];
 
         ShaderStages programStages = ShaderStages.None;
 
@@ -108,7 +108,7 @@ public sealed unsafe class SlangReflection
     ///
     /// for (uint set = 0; set &lt; reflection.SetLayoutSlotCount; set++)
     /// {
-    ///     if (reflection.TryGetSet(set, out ReadOnlySpan&lt;DescriptorBinding&gt; bindings))
+    ///     if (reflection.TryGetSet(set, out ReadOnlySpan&lt;SlangDescriptorBinding&gt; bindings))
     ///         layouts[set] = device.CreateDescriptorSetLayout(
     ///             new DescriptorSetLayoutDescription { Bindings = bindings });
     /// }
@@ -140,7 +140,7 @@ public sealed unsafe class SlangReflection
     /// <c>PushConstant</c> variable reading it, under every parameter category
     /// and space swept, so there is no narrowing to be had.
     /// </remarks>
-    public ReadOnlySpan<PushConstantRange> PushConstantRanges => _pushConstantRanges;
+    public ReadOnlySpan<SlangPushConstantRange> PushConstantRanges => _pushConstantRanges;
 
     /// <summary>Number of entry points in the linked program.</summary>
     public int EntryPointCount => _entryPoints.Length;
@@ -161,7 +161,7 @@ public sealed unsafe class SlangReflection
     /// Bindings of the <paramref name="index"/>-th populated set, ascending by
     /// <c>Slot</c>. Pair it with <see cref="SetIndex"/> for the set number.
     /// </summary>
-    public ReadOnlySpan<DescriptorBinding> Bindings(int index)
+    public ReadOnlySpan<SlangDescriptorBinding> Bindings(int index)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(index);
         ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, _setIndices.Length);
@@ -177,7 +177,7 @@ public sealed unsafe class SlangReflection
     /// A <see langword="false"/> here is a gap the caller fills with an empty
     /// descriptor set layout; see <see cref="SetLayoutSlotCount"/>.
     /// </remarks>
-    public bool TryGetSet(uint setIndex, out ReadOnlySpan<DescriptorBinding> bindings)
+    public bool TryGetSet(uint setIndex, out ReadOnlySpan<SlangDescriptorBinding> bindings)
     {
         // Linear: setup-time, and the set count is single digits.
         for (int i = 0; i < _setIndices.Length; i++)
@@ -217,7 +217,7 @@ public sealed unsafe class SlangReflection
     /// <para><b><c>Binding</c> and <c>Offset</c> are left at their defaults and
     /// the caller must fill them.</b> A shader states its input locations and
     /// formats but not how the application packs its vertex buffers, so
-    /// <c>VertexAttributeDescription.Binding</c> / <c>.Offset</c> and every
+    /// <c>SlangVertexAttributeDescription.Binding</c> / <c>.Offset</c> and every
     /// field of <c>VertexBindingDescription</c> are information reflection
     /// simply does not have. There is deliberately no
     /// <c>VertexInputDescription</c> factory here; composition does not change
@@ -233,7 +233,7 @@ public sealed unsafe class SlangReflection
     /// The entry point takes a matrix-typed vertex input, whose per-location
     /// component count is not derivable — see the exception text.
     /// </exception>
-    public ReadOnlySpan<VertexAttributeDescription> VertexAttributes(int entryPointIndex)
+    public ReadOnlySpan<SlangVertexAttributeDescription> VertexAttributes(int entryPointIndex)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(entryPointIndex);
         ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(entryPointIndex, _vertexAttributes.Length);
@@ -247,53 +247,6 @@ public sealed unsafe class SlangReflection
     /// <c>VkDescriptorType</c> is a validation error the caller cannot trace
     /// back to here.
     /// </summary>
-    internal static VkDescriptorType MapBindingType(SlangBindingType type)
-    {
-        bool mutable = (type & SlangBindingType.SLANG_BINDING_TYPE_MUTABLE_FLAG) != 0;
-
-        return (type & SlangBindingType.SLANG_BINDING_TYPE_BASE_MASK) switch
-        {
-            SlangBindingType.SLANG_BINDING_TYPE_SAMPLER
-                => VkDescriptorType.VK_DESCRIPTOR_TYPE_SAMPLER,
-            SlangBindingType.SLANG_BINDING_TYPE_TEXTURE
-                => mutable
-                    ? VkDescriptorType.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
-                    : VkDescriptorType.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-            SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER
-                => VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            SlangBindingType.SLANG_BINDING_TYPE_TYPED_BUFFER
-                => mutable
-                    ? VkDescriptorType.VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER
-                    : VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,
-            SlangBindingType.SLANG_BINDING_TYPE_RAW_BUFFER
-                => VkDescriptorType.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            SlangBindingType.SLANG_BINDING_TYPE_COMBINED_TEXTURE_SAMPLER
-                => VkDescriptorType.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            SlangBindingType.SLANG_BINDING_TYPE_INPUT_RENDER_TARGET
-                => VkDescriptorType.VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
-            SlangBindingType.SLANG_BINDING_TYPE_INLINE_UNIFORM_DATA
-                => VkDescriptorType.VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK,
-            SlangBindingType.SLANG_BINDING_TYPE_RAY_TRACING_ACCELERATION_STRUCTURE
-                => VkDescriptorType.VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
-
-            // A ParameterBlock is a descriptor *space*, not a descriptor. The
-            // walk filters it out and recurses into its element; reaching here
-            // means the walk did not, and mapping it to a uniform buffer would
-            // put a phantom binding in the parent set on top of the real
-            // implicit one synthesized in the child.
-            SlangBindingType.SLANG_BINDING_TYPE_PARAMETER_BLOCK
-                => throw new NotSupportedException(
-                    "A SLANG_BINDING_TYPE_PARAMETER_BLOCK range reached the descriptor-type mapping. "
-                    + "Parameter blocks are recursed into, never mapped — this is a bug in the reflection walk, not in the shader."),
-
-            _ => throw new NotSupportedException(
-                $"Slang binding type {type} has no VkDescriptorType mapping."),
-        };
-    }
-
-    /// <summary>
-    /// Walks one struct-shaped scope — the global scope, or a
-    /// <c>ParameterBlock</c>'s element type — collecting its descriptor ranges
     /// and recursing into the parameter blocks it contains.
     /// </summary>
     /// <param name="structTypeLayout">The scope's type layout.</param>
@@ -378,11 +331,11 @@ public sealed unsafe class SlangReflection
 
                 pending.Add(new PendingBinding(
                     vkSet,
-                    new DescriptorBinding
+                    new SlangDescriptorBinding
                     {
                         Slot = (uint)slot,
                         Count = (uint)count,
-                        Type = MapBindingType(bindingType),
+                        Type = bindingType,
                     }));
             }
         }
@@ -404,14 +357,14 @@ public sealed unsafe class SlangReflection
         {
             pending.Add(new PendingBinding(
                 absoluteSet,
-                new DescriptorBinding
+                new SlangDescriptorBinding
                 {
                     Slot = 0,
                     Count = 1,
 
                     // By construction, not through MapBindingType — there is no
                     // Slang binding type for a range Slang does not report.
-                    Type = VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                    Type = SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER,
                 }));
         }
 
@@ -465,10 +418,10 @@ public sealed unsafe class SlangReflection
 
     /// <summary>
     /// Step 4 — turns the push-constant ranges step 1 counted into
-    /// <c>PushConstantRange</c> values, whose byte size comes from the
+    /// <c>SlangPushConstantRange</c> values, whose byte size comes from the
     /// declaring parameter rather than from the range.
     /// </summary>
-    private static PushConstantRange[] BuildPushConstantRanges(
+    private static SlangPushConstantRange[] BuildPushConstantRanges(
         SlangProgramLayout* layout,
         int pushConstantRangeCount,
         ShaderStages programStages)
@@ -523,7 +476,7 @@ public sealed unsafe class SlangReflection
                 + "Slang reflection exposes only a push-constant buffer index for each of them, not the byte offset "
                 + "VkPushConstantRange.Offset needs, so a correct set of ranges is not derivable here and a guessed "
                 + "one would mismatch the emitted SPIR-V (issue #166, OPEN-5). Declare a single [[vk::push_constant]] "
-                + "block across the composed program, or build the PushConstantRange values by hand.");
+                + "block across the composed program, or build the SlangPushConstantRange values by hand.");
         }
 
         if (matches == 0 || found == null)
@@ -548,11 +501,11 @@ public sealed unsafe class SlangReflection
         // Offset 0: with exactly one block there is nothing to offset past, and
         // Stages is the program union in both attribution modes — see the
         // PushConstantRanges remarks.
-        return [new PushConstantRange { Stages = programStages, Offset = 0, Size = (uint)size }];
+        return [new SlangPushConstantRange { Stages = programStages, Offset = 0, Size = (uint)size }];
     }
 
     /// <summary>
-    /// Step 5 — fills <c>DescriptorBinding.Stages</c> on everything the walk
+    /// Step 5 — fills <c>SlangDescriptorBinding.Stages</c> on everything the walk
     /// collected.
     /// </summary>
     private static void ApplyStages(
@@ -644,7 +597,7 @@ public sealed unsafe class SlangReflection
         List<PendingBinding> pending,
         out uint[] setIndices,
         out int[] setStarts,
-        out DescriptorBinding[] bindings)
+        out SlangDescriptorBinding[] bindings)
     {
         if (pending.Count == 0)
         {
@@ -673,7 +626,7 @@ public sealed unsafe class SlangReflection
 
         setIndices = new uint[distinctSets];
         setStarts = new int[distinctSets + 1];
-        bindings = new DescriptorBinding[sorted.Length];
+        bindings = new SlangDescriptorBinding[sorted.Length];
 
         int set = -1;
 
@@ -692,7 +645,7 @@ public sealed unsafe class SlangReflection
         setStarts[distinctSets] = sorted.Length;
     }
 
-    private static VertexAttributeDescription[] BuildVertexAttributes(SlangEntryPointLayout* entryPoint, ShaderStages stage)
+    private static SlangVertexAttributeDescription[] BuildVertexAttributes(SlangEntryPointLayout* entryPoint, ShaderStages stage)
     {
         // A fragment stage's struct input is VARYING_INPUT too; only a vertex
         // stage's inputs are VkVertexInputAttributeDescriptions.
@@ -702,7 +655,7 @@ public sealed unsafe class SlangReflection
         }
 
         uint parameterCount = SlangApi.spReflectionEntryPoint_getParameterCount(entryPoint);
-        List<VertexAttributeDescription>? attributes = null;
+        List<SlangVertexAttributeDescription>? attributes = null;
 
         for (uint i = 0; i < parameterCount; i++)
         {
@@ -742,20 +695,12 @@ public sealed unsafe class SlangReflection
                     uint location = baseLocation + (uint)SlangApi.spReflectionVariableLayout_GetOffset(
                         field, SlangParameterCategory.SLANG_PARAMETER_CATEGORY_VARYING_INPUT);
 
-                    (attributes ??= []).Add(new VertexAttributeDescription
-                    {
-                        Location = location,
-                        Format = MapVertexFormat(fieldTypeLayout, NameOf(field)),
-                    });
+(attributes ??= []).Add(BuildVertexAttribute(fieldTypeLayout, location, NameOf(field)));
                 }
             }
             else
             {
-                (attributes ??= []).Add(new VertexAttributeDescription
-                {
-                    Location = baseLocation,
-                    Format = MapVertexFormat(typeLayout, NameOf(parameter)),
-                });
+(attributes ??= []).Add(BuildVertexAttribute(typeLayout, baseLocation, NameOf(parameter)));
             }
         }
 
@@ -764,134 +709,54 @@ public sealed unsafe class SlangReflection
             return [];
         }
 
-        VertexAttributeDescription[] result = [.. attributes];
+        SlangVertexAttributeDescription[] result = [.. attributes];
 
         Array.Sort(result, static (a, b) => a.Location.CompareTo(b.Location));
 
         return result;
     }
 
-    private static VkFormat MapVertexFormat(SlangReflectionTypeLayout* typeLayout, string name)
+    
+    private static SlangVertexAttributeDescription BuildVertexAttribute(SlangReflectionTypeLayout* typeLayout, uint location, string name)
     {
         SlangTypeKind kind = SlangApi.spReflectionTypeLayout_getKind(typeLayout);
         SlangReflectionType* type = SlangApi.spReflectionTypeLayout_GetType(typeLayout);
+        
+        uint components = 0;
+        uint rows = 0;
+        uint cols = 0;
+        SlangScalarType scalar = SlangScalarType.SLANG_SCALAR_TYPE_NONE;
 
-        uint components;
-        SlangScalarType scalar;
-
-        switch (kind)
+        if (kind == SlangTypeKind.SLANG_TYPE_KIND_VECTOR)
         {
-            case SlangTypeKind.SLANG_TYPE_KIND_VECTOR:
-                components = (uint)SlangApi.spReflectionType_GetElementCount(type);
-                scalar = SlangApi.spReflectionType_GetScalarType(SlangApi.spReflectionType_GetElementType(type));
-
-                break;
-
-            case SlangTypeKind.SLANG_TYPE_KIND_SCALAR:
-                components = 1;
-                scalar = SlangApi.spReflectionType_GetScalarType(type);
-
-                break;
-
-            case SlangTypeKind.SLANG_TYPE_KIND_MATRIX:
-                // OPEN-6. A matrix input occupies GetSize(typeLayout,
-                // VARYING_INPUT) consecutive locations and SPIR-V decorates it
-                // at the base location — but which scalar count each of those
-                // locations carries depends on the session's
-                // defaultMatrixLayoutMode, and only column-major has been
-                // measured against the emitted SPIR-V. A VkFormat emitted here
-                // would be a guess that silently mis-describes the other mode,
-                // which is a wrong vertex fetch rather than a validation error.
-                throw new NotSupportedException(
-                    $"Vertex input '{name}' is a matrix ({SlangApi.spReflectionType_GetRowCount(type)}x"
-                    + $"{SlangApi.spReflectionType_GetColumnCount(type)}). It occupies "
-                    + $"{SlangApi.spReflectionTypeLayout_GetSize(typeLayout, SlangParameterCategory.SLANG_PARAMETER_CATEGORY_VARYING_INPUT)} "
-                    + "consecutive vertex-input locations, but the per-location component count depends on the "
-                    + "session's default matrix layout mode and only column-major has been verified against the "
-                    + "emitted SPIR-V, so the VkFormat for each location is not derivable here (issue #166, OPEN-6). "
-                    + "Declare the input as separate vector-typed fields, or fill VertexAttributeDescription by hand "
-                    + "for this entry point.");
-
-            default:
-                throw new NotSupportedException(
-                    $"Vertex input '{name}' has type kind {kind}, which has no VkFormat mapping. Vertex attributes "
-                    + "are scalars and vectors.");
+            components = (uint)SlangApi.spReflectionType_GetElementCount(type);
+            scalar = SlangApi.spReflectionType_GetScalarType(SlangApi.spReflectionType_GetElementType(type));
+        }
+        else if (kind == SlangTypeKind.SLANG_TYPE_KIND_SCALAR)
+        {
+            components = 1;
+            scalar = SlangApi.spReflectionType_GetScalarType(type);
+        }
+        else if (kind == SlangTypeKind.SLANG_TYPE_KIND_MATRIX)
+        {
+            rows = SlangApi.spReflectionType_GetRowCount(type);
+            cols = SlangApi.spReflectionType_GetColumnCount(type);
         }
 
-        VkFormat format = MapScalarFormat(scalar, components);
-
-        return format != VkFormat.VK_FORMAT_UNDEFINED
-            ? format
-            : throw new NotSupportedException(
-                $"Vertex input '{name}' is {components} x {scalar}, which has no VkFormat mapping.");
+        return new SlangVertexAttributeDescription
+        {
+            Location = location,
+            Name = name,
+            Kind = kind,
+            ScalarType = scalar,
+            ComponentCount = components,
+            RowCount = rows,
+            ColumnCount = cols,
+            SizeInLocations = (long)SlangApi.spReflectionTypeLayout_GetSize(typeLayout, SlangParameterCategory.SLANG_PARAMETER_CATEGORY_VARYING_INPUT)
+        };
     }
 
-    /// <summary>
-    /// <c>(scalar type, component count)</c> to <c>VkFormat</c>. Returns
-    /// <c>VK_FORMAT_UNDEFINED</c> for a combination with no Vulkan format, so
-    /// the caller can throw naming the field.
-    /// </summary>
-    private static VkFormat MapScalarFormat(SlangScalarType scalar, uint components) => (scalar, components) switch
-    {
-        (SlangScalarType.SLANG_SCALAR_TYPE_FLOAT32, 1) => VkFormat.VK_FORMAT_R32_SFLOAT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_FLOAT32, 2) => VkFormat.VK_FORMAT_R32G32_SFLOAT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_FLOAT32, 3) => VkFormat.VK_FORMAT_R32G32B32_SFLOAT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_FLOAT32, 4) => VkFormat.VK_FORMAT_R32G32B32A32_SFLOAT,
-
-        (SlangScalarType.SLANG_SCALAR_TYPE_INT32, 1) => VkFormat.VK_FORMAT_R32_SINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_INT32, 2) => VkFormat.VK_FORMAT_R32G32_SINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_INT32, 3) => VkFormat.VK_FORMAT_R32G32B32_SINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_INT32, 4) => VkFormat.VK_FORMAT_R32G32B32A32_SINT,
-
-        (SlangScalarType.SLANG_SCALAR_TYPE_UINT32, 1) => VkFormat.VK_FORMAT_R32_UINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_UINT32, 2) => VkFormat.VK_FORMAT_R32G32_UINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_UINT32, 3) => VkFormat.VK_FORMAT_R32G32B32_UINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_UINT32, 4) => VkFormat.VK_FORMAT_R32G32B32A32_UINT,
-
-        (SlangScalarType.SLANG_SCALAR_TYPE_FLOAT16, 1) => VkFormat.VK_FORMAT_R16_SFLOAT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_FLOAT16, 2) => VkFormat.VK_FORMAT_R16G16_SFLOAT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_FLOAT16, 3) => VkFormat.VK_FORMAT_R16G16B16_SFLOAT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_FLOAT16, 4) => VkFormat.VK_FORMAT_R16G16B16A16_SFLOAT,
-
-        (SlangScalarType.SLANG_SCALAR_TYPE_INT16, 1) => VkFormat.VK_FORMAT_R16_SINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_INT16, 2) => VkFormat.VK_FORMAT_R16G16_SINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_INT16, 3) => VkFormat.VK_FORMAT_R16G16B16_SINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_INT16, 4) => VkFormat.VK_FORMAT_R16G16B16A16_SINT,
-
-        (SlangScalarType.SLANG_SCALAR_TYPE_UINT16, 1) => VkFormat.VK_FORMAT_R16_UINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_UINT16, 2) => VkFormat.VK_FORMAT_R16G16_UINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_UINT16, 3) => VkFormat.VK_FORMAT_R16G16B16_UINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_UINT16, 4) => VkFormat.VK_FORMAT_R16G16B16A16_UINT,
-
-        (SlangScalarType.SLANG_SCALAR_TYPE_INT8, 1) => VkFormat.VK_FORMAT_R8_SINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_INT8, 2) => VkFormat.VK_FORMAT_R8G8_SINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_INT8, 3) => VkFormat.VK_FORMAT_R8G8B8_SINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_INT8, 4) => VkFormat.VK_FORMAT_R8G8B8A8_SINT,
-
-        (SlangScalarType.SLANG_SCALAR_TYPE_UINT8, 1) => VkFormat.VK_FORMAT_R8_UINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_UINT8, 2) => VkFormat.VK_FORMAT_R8G8_UINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_UINT8, 3) => VkFormat.VK_FORMAT_R8G8B8_UINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_UINT8, 4) => VkFormat.VK_FORMAT_R8G8B8A8_UINT,
-
-        (SlangScalarType.SLANG_SCALAR_TYPE_FLOAT64, 1) => VkFormat.VK_FORMAT_R64_SFLOAT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_FLOAT64, 2) => VkFormat.VK_FORMAT_R64G64_SFLOAT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_FLOAT64, 3) => VkFormat.VK_FORMAT_R64G64B64_SFLOAT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_FLOAT64, 4) => VkFormat.VK_FORMAT_R64G64B64A64_SFLOAT,
-
-        (SlangScalarType.SLANG_SCALAR_TYPE_INT64, 1) => VkFormat.VK_FORMAT_R64_SINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_INT64, 2) => VkFormat.VK_FORMAT_R64G64_SINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_INT64, 3) => VkFormat.VK_FORMAT_R64G64B64_SINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_INT64, 4) => VkFormat.VK_FORMAT_R64G64B64A64_SINT,
-
-        (SlangScalarType.SLANG_SCALAR_TYPE_UINT64, 1) => VkFormat.VK_FORMAT_R64_UINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_UINT64, 2) => VkFormat.VK_FORMAT_R64G64_UINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_UINT64, 3) => VkFormat.VK_FORMAT_R64G64B64_UINT,
-        (SlangScalarType.SLANG_SCALAR_TYPE_UINT64, 4) => VkFormat.VK_FORMAT_R64G64B64A64_UINT,
-
-        _ => VkFormat.VK_FORMAT_UNDEFINED,
-    };
-
-    private static SlangProgramLayout* GetLayout(IComponentType* linked)
+private static SlangProgramLayout* GetLayout(IComponentType* linked)
     {
         ISlangBlob* diagnostics = null;
         var layout = (SlangProgramLayout*)linked->getLayout(0, &diagnostics);
@@ -912,5 +777,5 @@ public sealed unsafe class SlangReflection
     /// A binding plus the Vulkan set it landed in, before
     /// <c>Stages</c> is resolved and before grouping.
     /// </summary>
-    private readonly record struct PendingBinding(uint Set, DescriptorBinding Binding);
+    private readonly record struct PendingBinding(uint Set, SlangDescriptorBinding Binding);
 }
