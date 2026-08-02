@@ -60,6 +60,9 @@ public sealed class SlangReflectionTests
     [InlineData("xcheckOnlyBlocks", ShaderFixtures.ReflectionOnlyBlocks)]
     [InlineData("xcheckSparse", ShaderFixtures.ReflectionSparseSets)]
     [InlineData("xcheckBindless", ShaderFixtures.ReflectionBindlessArrays)]
+    [InlineData("xcheckCompute", ShaderFixtures.ReflectionComputeStorageImage)]
+    [InlineData("xcheckMaterial", ShaderFixtures.ReflectionMaterialBlock)]
+    [InlineData("xcheckMaterialWide", ShaderFixtures.ReflectionMaterialBlockWidened)]
     public void Reflection_CoversEverySetAndBinding_TheSpirvDecorates(string moduleName, string source)
     {
         using var compiler = SlangCompiler.Create();
@@ -665,6 +668,252 @@ public sealed class SlangReflectionTests
         Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER, bindings[0].Type);
 
         AssertReflectionCoversSpirv(program, reflection, _output);
+    }
+
+    /// <summary>
+    /// The SPIR-V oracle for the binding-range join: every name reflection
+    /// reports for a <c>(set, slot)</c> is the <c>OpName</c> the emitted module
+    /// gives the variable it decorates at that very <c>(set, binding)</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>This is the cheapest possible test of spec E8 route 1. The join
+    /// runs <c>getBindingRangeDescriptorSetIndex</c> /
+    /// <c>getBindingRangeFirstDescriptorRangeIndex</c> through the same space
+    /// and index-offset calls the verified walk uses; if any of that produced
+    /// keys off by one — the way
+    /// <c>getSubObjectRangeSpaceOffset</c> silently returns <c>0</c> — the names
+    /// would land on the wrong bindings and this fails with both names in the
+    /// message.</para>
+    /// <para><b>The sparse row is the one that would catch a regression back
+    /// onto the loop index.</b> In the other two fixtures the descriptor-set
+    /// loop index equals the Vulkan set number, so a join that read the wrong
+    /// one would still land on the right binding.
+    /// <c>ReflectionSparseSets</c> puts <c>gSamp</c> in space 2 at loop index 1,
+    /// and a wrong read names a binding in a set that does not exist.</para>
+    /// <para>Only fixtures whose bindings are declared at global scope are
+    /// listed. A resource declared <em>inside</em> a <c>ParameterBlock</c> is
+    /// named <c>maps</c> by reflection and <c>gWith.maps</c> by SPIR-V — a
+    /// qualification difference, not a join failure, and asserting on it would
+    /// pin Slang's naming convention rather than the join.</para>
+    /// </remarks>
+    [Theory]
+    [InlineData("namesGlobals", ShaderFixtures.ReflectionGlobals)]
+    [InlineData("namesTwoBlocks", ShaderFixtures.ReflectionTwoBlocks)]
+    [InlineData("namesSparse", ShaderFixtures.ReflectionSparseSets)]
+    public void Reflection_BindingNames_MatchTheSpirvVariableNames(string moduleName, string source)
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile(moduleName, source);
+        SlangReflection reflection = reflected.Reflection;
+        int checkedBindings = 0;
+
+        for (int e = 0; e < reflected.Program.EntryPointCount; e++)
+        {
+            foreach ((uint set, uint binding, string name) in
+                SpirvDecorations.ReadDescriptorBindings(reflected.Program.Spirv(e)))
+            {
+                Assert.True(reflection.TryGetSet(set, out ReadOnlySpan<SlangDescriptorBinding> bindings));
+
+                foreach (SlangDescriptorBinding candidate in bindings)
+                {
+                    if (candidate.Slot != binding)
+                    {
+                        continue;
+                    }
+
+                    _output.WriteLine($"set={set} binding={binding}: SPIR-V '{name}' vs reflection '{candidate.Name}'");
+                    Assert.Equal(name, candidate.Name);
+                    checkedBindings++;
+                }
+            }
+        }
+
+        Assert.True(checkedBindings > 0, "The fixture produced no bindings to compare.");
+    }
+
+    /// <summary>
+    /// The implicit uniform buffer a <c>ParameterBlock</c> owns at binding 0 has
+    /// no descriptor range and therefore no name of its own; it takes the
+    /// block's.
+    /// </summary>
+    [Fact]
+    public void Reflection_ParameterBlockUniformBuffer_TakesTheBlockName()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile("blockName", ShaderFixtures.ReflectionBlockOrdinaryData);
+        SlangReflection reflection = reflected.Reflection;
+
+        Assert.True(reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> withData));
+        Assert.Equal("gWith", withData[0].Name);
+
+        // The declared resources inside the block keep their own field names.
+        Assert.Equal("maps", withData[1].Name);
+        Assert.Equal("samp", withData[2].Name);
+    }
+
+    /// <summary>
+    /// <c>isBindingRangeSpecializable</c> discriminates: the interface-typed
+    /// block reports <see langword="true"/>, everything concrete reports
+    /// <see langword="false"/>.
+    /// </summary>
+    /// <remarks>
+    /// The measurement gate for shipping <c>IsSpecializable</c> at all — a field
+    /// that is constant reads as information and is not. Measured on
+    /// <c>v2026.14.1</c> / win-x64: <c>1</c> for <c>gSurface</c>'s binding range
+    /// and <c>0</c> for every binding of every other fixture.
+    /// </remarks>
+    [Fact]
+    public void Reflection_InterfaceTypedBlock_IsSpecializable()
+    {
+        using var compiler = SlangCompiler.Create();
+        using SlangSession session = compiler.CreateSession(default);
+        using SlangModule module = session.LoadModuleFromSource(
+            "specializable", "specializable.slang", ShaderFixtures.InterfaceSurfaceModule);
+        using SlangEntryPoint fragment = module.DefinedEntryPoint(0);
+        using SlangProgram program = session.CreateProgram()
+            .Add(module)
+            .Add(fragment)
+            .AddTypeConformance("Glossy", "ISurface")
+            .Link();
+
+        // The one populated set, whatever its number: this program's only
+        // binding is the block's existential value buffer.
+        ReadOnlySpan<SlangDescriptorBinding> existential = program.Reflection.Bindings(0);
+
+        _output.WriteLine($"set {program.Reflection.SetIndex(0)} slot {existential[0].Slot} '{existential[0].Name}'");
+
+        Assert.Equal(1, existential.Length);
+        Assert.True(existential[0].IsSpecializable);
+        Assert.Equal("gSurface", existential[0].Name);
+
+        using ReflectedProgram concrete = ReflectedProgram.Compile("notSpecializable", ShaderFixtures.ReflectionTwoBlocks);
+
+        for (int i = 0; i < concrete.Reflection.DescriptorSetCount; i++)
+        {
+            foreach (SlangDescriptorBinding binding in concrete.Reflection.Bindings(i))
+            {
+                Assert.False(binding.IsSpecializable, $"'{binding.Name}' should not be specializable.");
+            }
+        }
+    }
+
+    [Fact]
+    public void Reflection_StorageImageFormat_IsReported()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile(
+            "imageFormat", ShaderFixtures.ReflectionComputeStorageImage);
+
+        Assert.True(reflected.Reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> bindings));
+        Assert.Equal(2, bindings.Length);
+
+        Assert.Equal("gAnnotated", bindings[0].Name);
+        Assert.Equal(SlangImageFormat.SLANG_IMAGE_FORMAT_rgba8, bindings[0].ImageFormat);
+
+        Assert.Equal("gPlain", bindings[1].Name);
+        Assert.Equal(SlangImageFormat.SLANG_IMAGE_FORMAT_unknown, bindings[1].ImageFormat);
+    }
+
+    [Fact]
+    public void Reflection_PushConstantRange_HasBlockName()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile("pushName", ShaderFixtures.ReflectionGlobals);
+
+        Assert.Equal("gPush", reflected.Reflection.PushConstantRanges[0].Name);
+    }
+
+    /// <summary>
+    /// A vertex-buffer binder matches on the semantic, not on the field name —
+    /// and Slang splits <c>TEXCOORD0</c> into a name and an index.
+    /// </summary>
+    [Fact]
+    public void Reflection_VertexAttributes_CarrySemantics()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile(
+            "semantics", ShaderFixtures.ReflectionSystemValueInputs);
+
+        ReadOnlySpan<SlangVertexAttributeDescription> attributes = reflected.Reflection.VertexAttributes(0);
+
+        // The two system values report parameter category NONE and are not here.
+        Assert.Equal(3, attributes.Length);
+
+        Assert.Equal("POSITION", attributes[0].SemanticName);
+        Assert.Equal("TEXCOORD", attributes[1].SemanticName);
+        Assert.Equal("TANGENT", attributes[2].SemanticName);
+
+        foreach (SlangVertexAttributeDescription attribute in attributes)
+        {
+            Assert.Equal(0u, attribute.SemanticIndex);
+        }
+
+        // The field names are a different thing, and are still reported.
+        Assert.Equal(["pos", "uv", "tangent"], new[] { attributes[0].Name, attributes[1].Name, attributes[2].Name });
+    }
+
+    /// <summary>
+    /// A compute dispatch cannot compute its group count without this.
+    /// </summary>
+    /// <remarks>
+    /// Measured on <c>v2026.14.1</c> / win-x64: every non-compute stage reports
+    /// <c>1, 1, 1</c> rather than zeroes, which is asserted here rather than
+    /// left to a comment — a future Slang returning <c>0, 0, 0</c> would make
+    /// a caller's <c>ceil(n / groupSize)</c> divide by zero.
+    /// </remarks>
+    [Fact]
+    public void Reflection_ComputeEntryPoint_ReportsThreadGroupSize()
+    {
+        using ReflectedProgram compute = ReflectedProgram.Compile(
+            "threadGroup", ShaderFixtures.ReflectionComputeStorageImage);
+
+        SlangEntryPointInfo computeMain = compute.Reflection.EntryPoint(0);
+
+        Assert.Equal(ShaderStages.Compute, computeMain.Stage);
+        Assert.Equal(8u, computeMain.ThreadGroupSizeX);
+        Assert.Equal(4u, computeMain.ThreadGroupSizeY);
+        Assert.Equal(1u, computeMain.ThreadGroupSizeZ);
+
+        using ReflectedProgram graphics = ReflectedProgram.Compile("threadGroupVs", ShaderFixtures.ReflectionGlobals);
+
+        SlangEntryPointInfo vertexMain = graphics.Reflection.EntryPoint(0);
+
+        Assert.Equal(ShaderStages.Vertex, vertexMain.Stage);
+        Assert.Equal((1u, 1u, 1u), (vertexMain.ThreadGroupSizeX, vertexMain.ThreadGroupSizeY, vertexMain.ThreadGroupSizeZ));
+    }
+
+    /// <summary>
+    /// <b>Reflection's entry-point name is not the name in the emitted
+    /// SPIR-V.</b> Measured, and asserted so it cannot drift silently.
+    /// </summary>
+    /// <remarks>
+    /// <para>Slang names every emitted entry point <c>main</c> regardless of the
+    /// stage or the Slang function's name, so a caller passing
+    /// <c>EntryPoint(i).Name</c> to
+    /// <c>VkPipelineShaderStageCreateInfo.pName</c> gets
+    /// <c>VUID-VkPipelineShaderStageCreateInfo-pName-00707</c> — a validation
+    /// error with no other symptom, because the handle still comes back
+    /// non-null.</para>
+    /// <para><c>spReflectionEntryPoint_getNameOverride</c> does not close the
+    /// gap: measured on <c>v2026.14.1</c> / win-x64 it returned exactly
+    /// <c>getName</c>'s string for every fixture and every stage, which is why
+    /// <c>SlangEntryPointInfo</c> carries no <c>NameOverride</c> member. If a
+    /// later Slang starts emitting the Slang name, this test fails and the
+    /// member becomes worth adding.</para>
+    /// </remarks>
+    [Fact]
+    public void Reflection_EntryPointName_IsNotTheNameInTheEmittedSpirv()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile("opEntryPoint", ShaderFixtures.ReflectionGlobals);
+
+        for (int e = 0; e < reflected.Program.EntryPointCount; e++)
+        {
+            List<string> emitted = SpirvDecorations.ReadEntryPointNames(reflected.Program.Spirv(e));
+            string reported = reflected.Reflection.EntryPoint(e).Name;
+
+            _output.WriteLine($"reflection '{reported}' vs OpEntryPoint '{string.Join(", ", emitted)}'");
+
+            Assert.Equal(["main"], emitted);
+            Assert.NotEqual("main", reported);
+        }
+
+        Assert.Equal("vertexMain", reflected.Reflection.EntryPoint(0).Name);
+        Assert.Equal("fragmentMain", reflected.Reflection.EntryPoint(1).Name);
     }
 
     /// <summary>

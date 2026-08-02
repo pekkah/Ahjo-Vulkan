@@ -72,6 +72,13 @@ internal static unsafe class Program
                 $"{reflection.PushConstantRanges.Length} push-constant range(s), " +
                 $"{program.Reflection.VertexAttributes(0).Length} vertex attribute(s).");
 
+            // Two lines, on purpose: the sample's job is the publish, not the
+            // demo. They root the #175 surface — the buffer-layout lookup and a
+            // binding's reported name — so ILC sees it.
+            Console.WriteLine($"Push-constant layout: {reflection.TryGetPushConstantLayout(out _)}.");
+            Console.WriteLine(
+                $"First binding: '{(reflection.DescriptorSetCount > 0 ? reflection.Bindings(0)[0].Name : "<none>")}'.");
+
             return Render(program);
         }
     }

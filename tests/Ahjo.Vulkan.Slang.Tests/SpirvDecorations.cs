@@ -21,12 +21,16 @@ internal static class SpirvDecorations
     private const int HeaderWords = 5;
 
     private const uint OpName = 5;
+    private const uint OpMemberName = 6;
+    private const uint OpEntryPoint = 15;
     private const uint OpVariable = 59;
     private const uint OpDecorate = 71;
+    private const uint OpMemberDecorate = 72;
 
     private const uint DecorationLocation = 30;
     private const uint DecorationBinding = 33;
     private const uint DecorationDescriptorSet = 34;
+    private const uint DecorationOffset = 35;
 
     private const uint StorageClassInput = 1;
 
@@ -133,6 +137,86 @@ internal static class SpirvDecorations
         }
 
         result.Sort(static (a, b) => a.Item1.CompareTo(b.Item1));
+
+        return result;
+    }
+
+    /// <summary>
+    /// Every <c>OpMemberDecorate … Offset</c> in the module, with the struct's
+    /// <c>OpName</c> and the member's <c>OpMemberName</c> when the module
+    /// carries them.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>This is the oracle issue #175 exists for.</b> The suite could
+    /// read member offsets back out of reflection and compare them to
+    /// themselves; that is what let a <c>float2</c> → <c>float4</c> widening
+    /// pass a 97-test suite untouched. A byte offset is a claim about what the
+    /// driver will read, and the only artifact carrying that is the SPIR-V.</para>
+    /// <para>Offsets here are <b>struct-relative</b>, the way SPIR-V states
+    /// them: a member of a nested struct is decorated relative to that struct,
+    /// not to the buffer. <c>SlangBufferMember.Offset</c> is buffer-absolute,
+    /// so a comparison subtracts the parent's offset.</para>
+    /// <para>Measured on <c>v2026.14.1</c> / win-x64: Slang <b>does</b> emit
+    /// <c>OpMemberName</c> for these fixtures, so members are matched by name.
+    /// The pre-committed fallback — comparing the ordered offset sequence of
+    /// the struct whose member count matches — was not needed; if a future
+    /// Slang stops emitting them, <c>MemberName</c> comes back empty and that
+    /// is the signal to switch.</para>
+    /// </remarks>
+    public static List<(string StructName, string MemberName, uint Index, uint Offset)> ReadMemberOffsets(
+        ReadOnlySpan<uint> words)
+    {
+        Dictionary<uint, string> names = ReadNames(words);
+        var memberNames = new Dictionary<(uint Type, uint Index), string>();
+
+        foreach (Instruction instruction in Instructions(words))
+        {
+            if (instruction.Opcode == OpMemberName && instruction.Operands.Length >= 3)
+            {
+                memberNames[(instruction.Operands[0], instruction.Operands[1])] =
+                    ReadLiteralString(instruction.Operands[2..]);
+            }
+        }
+
+        var result = new List<(string, string, uint, uint)>();
+
+        foreach (Instruction instruction in Instructions(words))
+        {
+            if (instruction.Opcode != OpMemberDecorate
+                || instruction.Operands.Length < 4
+                || instruction.Operands[2] != DecorationOffset)
+            {
+                continue;
+            }
+
+            uint type = instruction.Operands[0];
+            uint index = instruction.Operands[1];
+
+            result.Add((
+                names.TryGetValue(type, out string? structName) ? structName : $"<id {type}>",
+                memberNames.TryGetValue((type, index), out string? memberName) ? memberName : string.Empty,
+                index,
+                instruction.Operands[3]));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// The name of every <c>OpEntryPoint</c> in the module — what
+    /// <c>VkPipelineShaderStageCreateInfo.pName</c> has to match.
+    /// </summary>
+    public static List<string> ReadEntryPointNames(ReadOnlySpan<uint> words)
+    {
+        var result = new List<string>();
+
+        foreach (Instruction instruction in Instructions(words))
+        {
+            if (instruction.Opcode == OpEntryPoint && instruction.Operands.Length >= 3)
+            {
+                result.Add(ReadLiteralString(instruction.Operands[2..]));
+            }
+        }
 
         return result;
     }

@@ -83,8 +83,8 @@ public sealed class SlangCompilerTests
         });
 
         Assert.Equal(2, program.EntryPointCount);
-        Assert.Equal(new SlangEntryPointInfo("vertexMain", ShaderStages.Vertex), program.EntryPoint(0));
-        Assert.Equal(new SlangEntryPointInfo("fragmentMain", ShaderStages.Fragment), program.EntryPoint(1));
+        Assert.Equal(new SlangEntryPointInfo("vertexMain", ShaderStages.Vertex, 1, 1, 1), program.EntryPoint(0));
+        Assert.Equal(new SlangEntryPointInfo("fragmentMain", ShaderStages.Fragment, 1, 1, 1), program.EntryPoint(1));
     }
 
     [Fact]
@@ -129,8 +129,8 @@ public sealed class SlangCompilerTests
         });
 
         Assert.Equal(2, program.EntryPointCount);
-        Assert.Equal(new SlangEntryPointInfo("vertexMain", ShaderStages.Vertex), program.EntryPoint(0));
-        Assert.Equal(new SlangEntryPointInfo("fragmentMain", ShaderStages.Fragment), program.EntryPoint(1));
+        Assert.Equal(new SlangEntryPointInfo("vertexMain", ShaderStages.Vertex, 1, 1, 1), program.EntryPoint(0));
+        Assert.Equal(new SlangEntryPointInfo("fragmentMain", ShaderStages.Fragment, 1, 1, 1), program.EntryPoint(1));
 
         SlangReflection reflection = program.Reflection;
 

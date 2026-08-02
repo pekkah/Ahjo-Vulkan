@@ -200,6 +200,58 @@ descriptor space, nesting accumulates, and a block whose element carries
 ordinary data gets the implicit uniform buffer Slang puts at binding 0 of its
 space but never lists as a descriptor range.
 
+### Three names, and which one to key on
+
+Reflection reports a name for each of three different things, and they are not
+interchangeable:
+
+| what | where | what it is |
+|---|---|---|
+| `SlangDescriptorBinding.Name` | every binding | the declared parameter name — `gAlbedo`, `gMaterial`. **This is what a material system keys on** instead of hard-coding slot numbers. |
+| `SlangPushConstantRange.Name` | the push-constant range | the `[[vk::push_constant]]` block parameter's name. Vulkan never sees it; it is how you tell which block a layout describes. |
+| `SlangVertexAttributeDescription.SemanticName` + `SemanticIndex` | vertex inputs | **what a vertex-buffer binder matches on.** `Name` on the same type is the field's name in the shader struct and has nothing to do with your mesh format. |
+
+Two things about those to get right up front. A resource declared *inside* a
+`ParameterBlock` is named by its field — reflection says `maps`, the emitted
+SPIR-V says `gWith.maps` — and the block's implicit uniform buffer at binding 0
+has no name of its own, so it takes the block parameter's. And Slang splits
+`TEXCOORD0` into `SemanticName = "TEXCOORD"` and `SemanticIndex = 0`, so a
+binder comparing against the literal `"TEXCOORD0"` never matches.
+
+Bindings also carry `ImageFormat` — Slang's own `SlangImageFormat`, for a
+`[[vk::image_format("rgba8")]] RWTexture2D<float4>`, and
+`SLANG_IMAGE_FORMAT_unknown` for everything else. There is deliberately no
+`VkFormat` mapping: no Vulkan call at layout-creation time takes one, and the
+value matters when you create the `VkImageView` you write the binding with.
+
+> **`_unknown` is a device requirement, not a benign default.** A storage image
+> the shader reads or writes without a declared format needs the capability for
+> it. Below Vulkan 1.3 without `VK_KHR_format_feature_flags2`, an
+> `Unknown`-format storage image must be `NonReadable` / `NonWritable` unless
+> `shaderStorageImageReadWithoutFormat` /
+> `shaderStorageImageWriteWithoutFormat` is enabled
+> (`VUID-RuntimeSpirv-apiVersion-07955` / `-07954`). From 1.3 on the check moves
+> to draw/dispatch time and lands on the bound view's format features —
+> `VK_FORMAT_FEATURE_2_STORAGE_READ_WITHOUT_FORMAT_BIT` /
+> `..._WRITE_WITHOUT_FORMAT_BIT`
+> (`VUID-vkCmdDispatch-OpTypeImage-07028` / `-07027`). Plain
+> `RWTexture2D<float4> gPlain;` is exactly this case. Conversely, a
+> *non*-`unknown` value obliges you the other way: the `VkImageView` bound there
+> must have a matching format.
+
+`SlangEntryPointInfo` carries the compute thread-group size —
+`ThreadGroupSizeX/Y/Z`, `1, 1, 1` for every non-compute stage — which is what a
+dispatch needs to turn a work item count into a group count.
+
+> **`SlangEntryPointInfo.Name` is not `VkPipelineShaderStageCreateInfo.pName`.**
+> Slang names every emitted entry point `main` regardless of the stage or the
+> Slang function's name, while reflection reports the Slang name
+> (`vertexMain`). Passing the reflected name as `pName` produces
+> `VUID-VkPipelineShaderStageCreateInfo-pName-00707` and a non-null handle.
+> `spReflectionEntryPoint_getNameOverride` does not help — measured on
+> `v2026.14.1`, it returns exactly what `getName` returns — which is why no
+> member here carries it.
+
 ### Bindless arrays: reflection reports, you supply the capacity
 
 `Texture2D gTextures[];` has no descriptor count — the shader does not state
@@ -352,6 +404,70 @@ descriptor range whose *index offset*, or a scope whose *space offset*, is a
 sentinel throws `NotSupportedException` from reflection. A binding with no
 binding number and a scope with no set number leave no layout to report at all,
 so there is nothing to hand back.
+
+### What is inside a buffer
+
+A binding says *where* a resource lives. `TryGetBufferLayout` says what is in
+it — the member names, byte offsets and sizes Slang baked into the SPIR-V it
+emitted for this program's target.
+
+```csharp
+if (reflection.TryGetBufferLayout(set: 2, slot: 0, out SlangBufferLayout? material))
+{
+    Console.WriteLine($"{material.Name} is {material.Size} bytes");
+
+    if (material.TryGetMember("Params.UvScale", out SlangBufferMember uvScale))
+        WriteFloat2(bytes[(int)uvScale.Offset..], scale);
+}
+
+// Push constants are not descriptor bindings and have their own accessor.
+if (reflection.TryGetPushConstantLayout(out SlangBufferLayout? push))
+    …
+```
+
+Every buffer-shaped binding has one: a standalone `ConstantBuffer<T>`, the
+global scope's implicit constant buffer, a `ParameterBlock`'s implicit uniform
+buffer, and a structured buffer's element. A texture or a sampler reports
+`false`.
+
+Four rules the API will otherwise surprise you with:
+
+1. **`Members` is a flattened pre-order walk with dotted paths, and struct nodes
+   are kept.** `Params` appears as its own entry with its own offset and size,
+   immediately followed by `Params.BaseColor`, `Params.Roughness`, … Filter
+   `Kind != SLANG_TYPE_KIND_STRUCT` for the leaves.
+2. **The list is losslessly a tree.** A member's parent is
+   `Members[ParentIndex]` (`-1` at the root), and its children are the entries
+   whose `ParentIndex` is its own index — contiguous and in declaration order,
+   because the walk is pre-order. So the tree costs O(n) and no string parsing:
+   ```csharp
+   var children = new List<int>[layout.Members.Length];
+   for (int i = 0; i < layout.Members.Length; i++) children[i] = [];
+   for (int i = 0; i < layout.Members.Length; i++)
+       if (layout.Members[i].ParentIndex >= 0) children[layout.Members[i].ParentIndex].Add(i);
+   ```
+   That is why there is one representation here and not two.
+3. **Arrays are leaves.** An array member reports `ElementCount` and
+   `ElementStride`; element `i` is at `Offset + i * ElementStride`. Paths like
+   `Lights[0].Color` are not generated and an array-of-struct element's own
+   members are not described — use `ToJson()` until the follow-up lands.
+4. **Resources are not members.** A field with zero uniform size — a
+   `Texture2D`, a `SamplerState` — occupies no bytes and is omitted rather than
+   listed at offset 0 with size 0.
+
+`Offset` and `Size` alone are not enough to fill a buffer by hand. `Stride` is
+the padded footprint (a `float3` is 12 bytes of data in 16), `Alignment` is what
+you check your own struct against, and `MatrixLayout` decides whether a
+`float4x4` is written row- or column-major — the difference between a correct
+transform and a transposed one, with no other symptom. `MatrixStride` is derived
+from the row/column vector's layout, because Slang exposes no getter for it;
+it is `0` rather than a guess when that derivation yields nothing.
+
+**`ToJson()` is the escape hatch, for diagnostics.** It is Slang's own dump of
+the whole program layout, lazily produced and cached. The schema is Slang's, is
+not stable across versions, and is not something this package parses or
+promises — use the typed surface for anything a program depends on, and this for
+what the typed surface does not cover yet.
 
 ### `SV_VertexID` needs `shaderDrawParameters` enabled on the device
 
@@ -534,6 +650,24 @@ lets the CI coverage summary stop printing "NOT PROVEN" for SPIR-V gates.
 There is also no permutation or variant-cache API, and no `Specialize` — see
 "Specializing an interface-typed `ParameterBlock`" above for why the latter is a
 decision rather than an omission.
+
+On the reflection side, three gaps remain, each named with the entry points that
+would close it:
+
+- **Array-of-struct member paths** (`Lights[0].Color`). Needs a decision about
+  element-relative offsets rather than an append; `ToJson()` covers it today.
+- **User attributes on members and types** —
+  `spReflectionVariable_GetUserAttributeCount` / `GetUserAttribute` and
+  `spReflectionUserAttribute_GetArgumentValue{Int,Float,String}`. `[Attribute]`
+  is how a material *editor* gets UI ranges and display names, and its argument
+  model needs designing.
+- **Member default values** (`spReflectionVariable_HasDefaultValue`,
+  `GetDefaultValueInt`, `GetDefaultValueFloat`). The bound getters cannot
+  express a `float3` default, so shipping them would describe defaults
+  incorrectly.
+
+`SlangImageFormat` also has no `VkFormat` mapping in `SlangVulkanMapping` yet —
+a ~40-entry table with no consumer at layout-creation time.
 
 ## Licensing
 
