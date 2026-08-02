@@ -78,6 +78,12 @@ null-terminated.
   file — reflection returning `Slang*` types is what makes the Vulkan
   interpretation replaceable, and scattering `VkDescriptorType` decisions back
   into the reflection walk undoes it.
+- **There is one composition path, and it is `SlangProgramBuilder`.** The
+  session's convenience `Compile` composes `[module, ep₀, ep₁, …]` through the
+  builder (plus any `SlangCompileRequest.TypeConformances`) and carries the
+  module's warnings in through the internal `Link(string?)` overload. It used to
+  own a second, identical composition; a second implementation of "the component
+  order is the layout" can only drift from the first. Keep it that way.
 - The integration point with the wrapper is
   `Device.CreateShaderModule(ReadOnlySpan<uint>)` and nothing else. No new
   `Device` overload was added and none should be.
@@ -129,7 +135,7 @@ null-terminated.
   conditional. Spec OPEN-4(b); the report is tracked as #170 and its upstream
   number belongs here once filed.
 
-## Reflection — four rules Slang does not hand you
+## Reflection — five rules Slang does not hand you
 
 Every one of these was measured against `OpDecorate DescriptorSet` / `Binding`
 in the SPIR-V Slang emitted, not read off a header, and every one of them looks
@@ -159,6 +165,17 @@ proves nothing.
 4. **Set indices can be sparse, and the loop index is not the set number.**
    `[[vk::binding(7, 2)]]` is reported at loop index 1 for set 2; the number is
    `getDescriptorSetSpaceOffset`.
+
+5. **An unbounded array is reported, not refused.** `SLANG_UNBOUNDED_SIZE` (-1)
+   and `SLANG_UNKNOWN_SIZE` (-2) become `SlangDescriptorCount`, which has no
+   readable number unless the kind is `Fixed`; the capacity decision belongs to
+   `SlangVulkanMapping.MapBinding(binding, descriptorCount)`. The index-offset
+   and space-offset sentinels still throw from the walk, because those leave no
+   binding number to report. `-1` is measured
+   (`Reflection_UnboundedArray_ReportsBindingInsteadOfThrowing`); `-2` is mapped
+   from the header and untested — the unspecialized `type_param` form, the
+   obvious candidate, reports **zero** descriptor sets rather than a sentinel
+   count, so there is no fixture for it.
 
 Two further constraints, both about refusing rather than guessing: more than one
 `[[vk::push_constant]]` block throws from **reflection** (it exposes a buffer
