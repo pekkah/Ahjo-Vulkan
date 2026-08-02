@@ -14,7 +14,9 @@ namespace Ahjo.Vulkan.Slang;
 /// system needs — the component list and <em>its order</em> are part of the
 /// layout contract and cannot be expressed here. That is a separate surface;
 /// see <see cref="SlangSession.LoadModuleFromSource(string, string, string)"/>
-/// and <see cref="SlangModule"/>.</para>
+/// and <see cref="SlangModule"/>. <see cref="TypeConformances"/> is the one
+/// <see cref="SlangProgramBuilder"/> feature this request does carry, because a
+/// conformance says nothing about component order.</para>
 /// </remarks>
 public readonly record struct SlangCompileRequest
 {
@@ -49,4 +51,19 @@ public readonly record struct SlangCompileRequest
     /// <see cref="SlangProgram.Spirv"/> report.
     /// </remarks>
     public IReadOnlyList<string>? EntryPoints { get; init; }
+
+    /// <summary>
+    /// Implementations to make available to interface-typed parameters.
+    /// <see langword="null"/> (the default) is correct for any shader without an
+    /// <c>interface</c>-typed parameter.
+    /// </summary>
+    /// <remarks>
+    /// Without at least one conformance, a program with a
+    /// <c>ParameterBlock&lt;ISomeInterface&gt;</c> <b>links successfully and
+    /// then fails at <see cref="SlangProgram.Spirv"/></b> with
+    /// <c>error[E50100]: no type conformances found</c>. Names are resolved when
+    /// the program is linked, so a misspelling throws
+    /// <see cref="ArgumentException"/> from <see cref="SlangSession.Compile"/>.
+    /// </remarks>
+    public IReadOnlyList<SlangTypeConformance>? TypeConformances { get; init; }
 }

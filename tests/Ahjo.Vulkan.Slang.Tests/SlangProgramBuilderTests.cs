@@ -134,6 +134,127 @@ public sealed class SlangProgramBuilderTests
         Assert.Equal(ShaderFixtures.SpirvMagic, spirv[0]);
     }
 
+    /// <summary>
+    /// Issue #177: the capability the convenience path could not reach. A
+    /// conformance is the one <see cref="SlangProgramBuilder"/> feature
+    /// <see cref="SlangCompileRequest"/> carries, because it says nothing about
+    /// component order.
+    /// </summary>
+    [Fact]
+    public void Compile_WithTypeConformance_ProducesSpirv()
+    {
+        using var compiler = SlangCompiler.Create();
+        using SlangSession session = compiler.CreateSession(default);
+        using SlangProgram program = session.Compile(new SlangCompileRequest
+        {
+            ModuleName = "requestSurface",
+            Source = ShaderFixtures.InterfaceSurfaceModule,
+            TypeConformances = [new SlangTypeConformance("Glossy", "ISurface")],
+        });
+
+        ReadOnlySpan<uint> spirv = program.Spirv(0);
+
+        Assert.False(spirv.IsEmpty);
+        Assert.Equal(ShaderFixtures.SpirvMagic, spirv[0]);
+    }
+
+    /// <summary>
+    /// The reporter's own assertion, now ours: this shape links, reflects and
+    /// reports its entry point, and refuses only at <c>Spirv(...)</c> — with a
+    /// message that names the fix.
+    /// </summary>
+    [Fact]
+    public void Compile_WithoutTypeConformance_LinksThenFailsAtSpirv()
+    {
+        using var compiler = SlangCompiler.Create();
+        using SlangSession session = compiler.CreateSession(default);
+        using SlangProgram program = session.Compile(new SlangCompileRequest
+        {
+            ModuleName = "requestUnconformed",
+            Source = ShaderFixtures.InterfaceSurfaceModule,
+        });
+
+        Assert.Equal(1, program.EntryPointCount);
+        Assert.Equal(1, program.Reflection.DescriptorSetCount);
+
+        var ex = Assert.Throws<SlangCompilationException>(() => program.Spirv(0).Length);
+
+        _output.WriteLine(ex.Message);
+
+        Assert.Contains("E50100", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("AddTypeConformance", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("E50100", ex.Diagnostics, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Compile_WithUnknownConformanceType_ThrowsArgumentException()
+    {
+        using var compiler = SlangCompiler.Create();
+        using SlangSession session = compiler.CreateSession(default);
+
+        var ex = Assert.Throws<ArgumentException>(() => session.Compile(new SlangCompileRequest
+        {
+            ModuleName = "requestBadConformance",
+            Source = ShaderFixtures.InterfaceSurfaceModule,
+            TypeConformances = [new SlangTypeConformance("Nope", "ISurface")],
+        }));
+
+        Assert.Contains("Nope", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Compile_WithTwoConformances_LinksBoth()
+    {
+        using var compiler = SlangCompiler.Create();
+        using SlangSession session = compiler.CreateSession(default);
+        using SlangProgram program = session.Compile(new SlangCompileRequest
+        {
+            ModuleName = "requestTwoConformances",
+            Source = ShaderFixtures.InterfaceSurfaceModule,
+            TypeConformances =
+            [
+                new SlangTypeConformance("Glossy", "ISurface"),
+                new SlangTypeConformance("Matte", "ISurface"),
+            ],
+        });
+
+        Assert.Equal(ShaderFixtures.SpirvMagic, program.Spirv(0)[0]);
+    }
+
+    /// <summary>
+    /// <c>getSpecializationParamCount()</c> reports, it does not predict: the
+    /// existential shape is <c>1</c> both before and after a conformance, and a
+    /// statically dispatched interface is <c>0</c> like any concrete program.
+    /// </summary>
+    [Fact]
+    public void SpecializationParameterCount_ReportsUnresolvedExistentials()
+    {
+        using var compiler = SlangCompiler.Create();
+        using SlangSession session = compiler.CreateSession(default);
+
+        using SlangProgram concrete = session.Compile(new SlangCompileRequest
+        {
+            ModuleName = "specConcrete",
+            Source = ShaderFixtures.ReflectionTwoBlocks,
+        });
+
+        using SlangProgram existential = session.Compile(new SlangCompileRequest
+        {
+            ModuleName = "specExistential",
+            Source = ShaderFixtures.InterfaceSurfaceModule,
+        });
+
+        using SlangProgram staticDispatch = session.Compile(new SlangCompileRequest
+        {
+            ModuleName = "specStatic",
+            Source = ShaderFixtures.StaticDispatchInterfaceModule,
+        });
+
+        Assert.Equal(0, concrete.SpecializationParameterCount);
+        Assert.Equal(1, existential.SpecializationParameterCount);
+        Assert.Equal(0, staticDispatch.SpecializationParameterCount);
+    }
+
     [Fact]
     public void Compose_UnknownConformanceType_Throws()
     {
