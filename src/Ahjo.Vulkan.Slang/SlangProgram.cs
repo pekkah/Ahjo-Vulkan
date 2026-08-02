@@ -17,6 +17,13 @@ namespace Ahjo.Vulkan.Slang;
 /// (<c>slang.h:5378-5386</c>). Binding the type so that the SPIR-V a caller
 /// fetches and the layout a caller reads come from the same linked object is
 /// the cheapest place to make that impossible to get wrong.</para>
+/// <para><b>A linked program is not necessarily a compilable one.</b> A program
+/// whose global scope holds an interface-typed parameter links, reflects and
+/// reports its entry points correctly, and refuses only at
+/// <see cref="Spirv"/> — with <c>error[E50100]: no type conformances found</c>,
+/// until an implementation is named through
+/// <see cref="SlangCompileRequest.TypeConformances"/> or
+/// <see cref="SlangProgramBuilder.AddTypeConformance"/>.</para>
 /// <para>Dispose this before the <see cref="SlangSession"/> it came from.</para>
 /// </remarks>
 public sealed unsafe class SlangProgram : IDisposable
@@ -37,6 +44,7 @@ public sealed unsafe class SlangProgram : IDisposable
         {
             _entryPoints = ReadEntryPoints(linked);
             _codeBlobs = new nint[_entryPoints.Length];
+            SpecializationParameterCount = (int)linked->getSpecializationParamCount();
         }
         catch
         {
@@ -49,6 +57,33 @@ public sealed unsafe class SlangProgram : IDisposable
 
     /// <summary>Number of entry points linked into this program.</summary>
     public int EntryPointCount => _entryPoints.Length;
+
+    /// <summary>
+    /// Number of specialization parameters the linked program still has —
+    /// <c>IComponentType::getSpecializationParamCount()</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>A report, not a predicate.</b> It does <em>not</em> say whether
+    /// <see cref="Spirv"/> will succeed. Measured on <c>v2026.14.1</c> /
+    /// win-x64:</para>
+    /// <list type="table">
+    /// <item><description>a concrete program (<c>ConstantBuffer</c>s and
+    /// <c>ParameterBlock</c>s) — <c>0</c></description></item>
+    /// <item><description>a <c>ParameterBlock&lt;ISurface&gt;</c> with no type
+    /// conformance — <c>1</c></description></item>
+    /// <item><description>the same program with
+    /// <c>AddTypeConformance("Glossy", "ISurface")</c> — <b><c>1</c></b>, and it
+    /// generates code: a conformance does not consume a specialization
+    /// parameter</description></item>
+    /// <item><description>an <c>interface</c> declared but dispatched statically
+    /// — <c>0</c></description></item>
+    /// </list>
+    /// <para>So a non-zero value means "this program has an unresolved
+    /// existential or generic parameter", which is worth reporting; the third
+    /// row is why nothing in this package refuses a program on the strength of
+    /// it.</para>
+    /// </remarks>
+    public int SpecializationParameterCount { get; }
 
     /// <summary>
     /// Diagnostics Slang produced on calls that nonetheless succeeded —
@@ -139,6 +174,10 @@ public sealed unsafe class SlangProgram : IDisposable
     /// to outlive the program.</para>
     /// <para>Code is generated once per index and cached, so repeated calls
     /// return the same span.</para>
+    /// <para><b>A linked program is not necessarily a compilable one.</b> An
+    /// interface-typed parameter with no type conformance in the linkage links,
+    /// reflects and reports its entry points, and refuses only here — see the
+    /// type's remarks.</para>
     /// </remarks>
     /// <exception cref="SlangCompilationException">
     /// The backend refused to generate code for this entry point. There is no
@@ -162,9 +201,23 @@ public sealed unsafe class SlangProgram : IDisposable
 
             if (rc < 0 || code == null)
             {
-                throw new SlangCompilationException(
-                    $"getEntryPointCode({entryPointIndex}) (0x{rc:X8})",
-                    text);
+                // The one failure this package can say more about than Slang
+                // does: E50100 means an interface-typed parameter reached code
+                // generation with no implementation in the linkage, and the fix
+                // is a conformance rather than anything about this entry point.
+                throw text.Contains("E50100", StringComparison.Ordinal)
+                    ? new SlangCompilationException(
+                        "Slang compilation failed: error[E50100]: no type conformances found. Entry point "
+                        + $"{entryPointIndex} dispatches through an interface-typed parameter, so at least one "
+                        + "implementation must be in the linkage. Add one with "
+                        + "SlangCompileRequest.TypeConformances or "
+                        + "SlangProgramBuilder.AddTypeConformance(concreteType, interfaceType). This shape links "
+                        + "successfully — the failure can only appear here.",
+                        text,
+                        innerException: null)
+                    : new SlangCompilationException(
+                        $"getEntryPointCode({entryPointIndex}) (0x{rc:X8})",
+                        text);
             }
 
             nuint size = code->getBufferSize();

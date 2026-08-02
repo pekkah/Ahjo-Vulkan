@@ -129,7 +129,15 @@ public sealed unsafe class SlangProgramBuilder
     /// in the composed program.
     /// </exception>
     /// <exception cref="SlangCompilationException">Slang refused to compose or link.</exception>
-    public SlangProgram Link()
+    public SlangProgram Link() => Link(carriedWarnings: null);
+
+    /// <param name="carriedWarnings">
+    /// Diagnostics produced before composition began — the module's own load
+    /// warnings, when <see cref="SlangSession.Compile"/> composed this builder —
+    /// so they still reach <see cref="SlangProgram.Warnings"/>.
+    /// </param>
+    /// <inheritdoc cref="Link()"/>
+    internal SlangProgram Link(string? carriedWarnings)
     {
         if (_components.Count == 0)
         {
@@ -158,8 +166,8 @@ public sealed unsafe class SlangProgramBuilder
             }
 
             return _conformances.Count == 0
-                ? LinkDirect(components)
-                : LinkWithConformances(components);
+                ? LinkDirect(components, carriedWarnings)
+                : LinkWithConformances(components, carriedWarnings);
         }
         finally
         {
@@ -170,13 +178,13 @@ public sealed unsafe class SlangProgramBuilder
         }
     }
 
-    private SlangProgram LinkDirect(ReadOnlySpan<nint> components)
+    private SlangProgram LinkDirect(ReadOnlySpan<nint> components, string? carriedWarnings)
     {
         IComponentType* composite = CreateComposite(components, out string compositeText);
 
         try
         {
-            return LinkComposite(composite, compositeText);
+            return LinkComposite(composite, SlangProgram.JoinDiagnostics(carriedWarnings, compositeText));
         }
         finally
         {
@@ -189,7 +197,7 @@ public sealed unsafe class SlangProgramBuilder
     /// <c>0 .. _components.Count</c>; the conformance slots after them are
     /// filled here.
     /// </param>
-    private SlangProgram LinkWithConformances(Span<nint> components)
+    private SlangProgram LinkWithConformances(Span<nint> components, string? carriedWarnings)
     {
         ReadOnlySpan<nint> declared = components[.._components.Count];
 
@@ -216,7 +224,9 @@ public sealed unsafe class SlangProgramBuilder
 
             try
             {
-                return LinkComposite(composite, SlangProgram.JoinDiagnostics(firstCompositeText, compositeText));
+                return LinkComposite(
+                    composite,
+                    SlangProgram.JoinDiagnostics(carriedWarnings, firstCompositeText, compositeText));
             }
             finally
             {

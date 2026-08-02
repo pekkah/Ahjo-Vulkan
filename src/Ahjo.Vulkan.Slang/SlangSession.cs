@@ -129,13 +129,16 @@ public sealed unsafe class SlangSession : IDisposable
     /// <remarks>
     /// The convenience path: load a module, find its entry points, composite
     /// and link. Expressed entirely in terms of
-    /// <see cref="LoadModuleFromSource(string, string, string)"/> and
-    /// <see cref="SlangModule"/>, so there is exactly one code path that loads
-    /// a module and one that finds an entry point.
+    /// <see cref="LoadModuleFromSource(string, string, string)"/>,
+    /// <see cref="SlangModule"/> and <see cref="SlangProgramBuilder"/>, so there
+    /// is exactly one code path that loads a module, one that finds an entry
+    /// point, and one that composes components.
     /// </remarks>
     /// <exception cref="ArgumentException">
     /// Neither or both of <see cref="SlangCompileRequest.Path"/> and
-    /// <see cref="SlangCompileRequest.Source"/> were set.
+    /// <see cref="SlangCompileRequest.Source"/> were set, or a name in
+    /// <see cref="SlangCompileRequest.TypeConformances"/> does not name a type
+    /// in the composed program.
     /// </exception>
     /// <exception cref="SlangCompilationException">Slang refused at any step.</exception>
     public SlangProgram Compile(in SlangCompileRequest request)
@@ -161,7 +164,25 @@ public sealed unsafe class SlangSession : IDisposable
 
         try
         {
-            return Link(module, entryPoints, module.Warnings);
+            // One composition path, and it is SlangProgramBuilder's: the
+            // component list is [module, ep₀, ep₁, …] in both, and the order is
+            // the layout. A second implementation of it here could drift.
+            SlangProgramBuilder builder = CreateProgram().Add(module);
+
+            for (int i = 0; i < entryPoints.Length; i++)
+            {
+                builder.Add(entryPoints[i]);
+            }
+
+            if (request.TypeConformances is { Count: > 0 } conformances)
+            {
+                for (int i = 0; i < conformances.Count; i++)
+                {
+                    builder.AddTypeConformance(conformances[i].ConcreteType, conformances[i].InterfaceType);
+                }
+            }
+
+            return builder.Link(module.Warnings);
         }
         finally
         {
@@ -338,49 +359,5 @@ public sealed unsafe class SlangSession : IDisposable
         }
 
         return string.Join(", ", names);
-    }
-
-    private SlangProgram Link(SlangModule module, SlangEntryPoint[] entryPoints, string? carriedWarnings)
-    {
-        ISession* session = Handle;
-        int componentCount = entryPoints.Length + 1;
-        IComponentType** components = stackalloc IComponentType*[componentCount];
-
-        components[0] = module.Component;
-
-        for (int i = 0; i < entryPoints.Length; i++)
-        {
-            components[i + 1] = entryPoints[i].Component;
-        }
-
-        IComponentType* composite = null;
-        ISlangBlob* diagnostics = null;
-        int rc = session->createCompositeComponentType(components, componentCount, &composite, &diagnostics);
-        string compositeText = SlangUtf8.TakeDiagnostics(&diagnostics);
-
-        if (rc < 0 || composite == null)
-        {
-            throw new SlangCompilationException($"createCompositeComponentType (0x{rc:X8})", compositeText);
-        }
-
-        IComponentType* linked = null;
-        string linkText;
-
-        try
-        {
-            rc = composite->link(&linked, &diagnostics);
-            linkText = SlangUtf8.TakeDiagnostics(&diagnostics);
-        }
-        finally
-        {
-            composite->release();
-        }
-
-        if (rc < 0 || linked == null)
-        {
-            throw new SlangCompilationException($"link (0x{rc:X8})", linkText);
-        }
-
-        return new SlangProgram(linked, SlangProgram.JoinDiagnostics(carriedWarnings, compositeText, linkText));
     }
 }

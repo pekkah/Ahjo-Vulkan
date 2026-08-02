@@ -105,6 +105,60 @@ public sealed class SlangCompilerTests
     }
 
     /// <summary>
+    /// The regression pin for routing <see cref="SlangSession.Compile"/> through
+    /// <see cref="SlangProgramBuilder"/> (issue #177): the convenience path must
+    /// compose <c>[module, ep₀, ep₁, …]</c>, and the composition order <em>is</em>
+    /// the layout.
+    /// </summary>
+    /// <remarks>
+    /// Entry-point order and every reflected <c>(set, slot)</c> are asserted as
+    /// literals. A composition that differed by so much as one component's
+    /// position would move a set or a binding number here — which is a
+    /// behaviour change, not a number to rebaseline.
+    /// </remarks>
+    [Fact]
+    public void Compile_EntryPointOrder_IsRequestOrder()
+    {
+        using var compiler = SlangCompiler.Create();
+        using SlangSession session = compiler.CreateSession(default);
+        using SlangProgram program = session.Compile(new SlangCompileRequest
+        {
+            ModuleName = "orderPin",
+            Source = ShaderFixtures.ReflectionTwoBlocks,
+            EntryPoints = ["vertexMain", "fragmentMain"],
+        });
+
+        Assert.Equal(2, program.EntryPointCount);
+        Assert.Equal(new SlangEntryPointInfo("vertexMain", ShaderStages.Vertex), program.EntryPoint(0));
+        Assert.Equal(new SlangEntryPointInfo("fragmentMain", ShaderStages.Fragment), program.EntryPoint(1));
+
+        SlangReflection reflection = program.Reflection;
+
+        Assert.Equal(3, reflection.DescriptorSetCount);
+        Assert.Equal(3u, reflection.SetLayoutSlotCount);
+
+        var layout = new List<string>();
+
+        for (int i = 0; i < reflection.DescriptorSetCount; i++)
+        {
+            foreach (SlangDescriptorBinding binding in reflection.Bindings(i))
+            {
+                layout.Add($"{reflection.SetIndex(i)}:{binding.Slot}:{binding.Type}");
+            }
+        }
+
+        Assert.Equal(
+            [
+                "0:0:SLANG_BINDING_TYPE_CONSTANT_BUFFER",
+                "0:1:SLANG_BINDING_TYPE_TEXTURE",
+                "0:2:SLANG_BINDING_TYPE_SAMPLER",
+                "1:0:SLANG_BINDING_TYPE_CONSTANT_BUFFER",
+                "2:0:SLANG_BINDING_TYPE_CONSTANT_BUFFER",
+            ],
+            layout);
+    }
+
+    /// <summary>
     /// The acceptance criterion issue #166 states: a broken compile is an
     /// exception carrying the compiler's text, never a silent empty blob.
     /// </summary>
