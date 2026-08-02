@@ -153,16 +153,82 @@ public static class SlangVulkanMapping
     /// Maps one reflected Slang descriptor binding to the <c>Ahjo.Vulkan</c>
     /// description type <c>Device.CreateDescriptorSetLayout</c> takes.
     /// </summary>
+    /// <remarks>
+    /// A binding whose <see cref="SlangDescriptorBinding.Count"/> is not
+    /// <see cref="SlangDescriptorCountKind.Fixed"/> has no
+    /// <c>descriptorCount</c> derivable from the shader, and this overload
+    /// refuses it rather than inventing one. <see cref="MapBinding(SlangDescriptorBinding, uint)"/>
+    /// takes the capacity as a parameter — the mapper is where information the
+    /// shader does not state gets supplied, the same reason
+    /// <see cref="MapVertexAttribute"/> takes <c>binding</c> and
+    /// <c>offset</c>.
+    /// </remarks>
     /// <exception cref="NotSupportedException">
-    /// The binding's Slang type has no Vulkan descriptor equivalent.
+    /// The binding's Slang type has no Vulkan descriptor equivalent, or Slang
+    /// reported no descriptor count for it.
     /// </exception>
     public static DescriptorBinding MapBinding(this SlangDescriptorBinding binding)
     {
+        if (binding.Count.Kind != SlangDescriptorCountKind.Fixed)
+        {
+            throw new NotSupportedException(UnsizedBindingMessage(binding));
+        }
+
         return new DescriptorBinding
         {
             Slot = binding.Slot,
             Type = MapBindingType(binding.Type),
-            Count = binding.Count,
+            Count = binding.Count.Value,
+            Stages = binding.Stages
+        };
+    }
+
+    /// <summary>
+    /// Maps one reflected Slang descriptor binding that reflection could not
+    /// size, using the capacity the caller reserves for it.
+    /// </summary>
+    /// <remarks>
+    /// <para>The mapper is where information the shader does not state gets
+    /// supplied — the same reason <see cref="MapVertexAttribute"/> takes
+    /// <c>binding</c> and <c>offset</c>. A bindless array's capacity is a
+    /// property of the caller's descriptor heap, not of the shader.</para>
+    /// <para><b><c>BindingFlags</c> is left at
+    /// <c>DescriptorBindingFlags.None</c> on purpose.</b> Vulkan allows
+    /// <c>VariableDescriptorCount</c> on at most one binding per set (the one
+    /// with the highest binding number), and a set with several unbounded
+    /// arrays is the motivating shape — so setting it here would produce an
+    /// invalid layout. Add
+    /// <c>DescriptorBindingFlags.VariableDescriptorCount</c> /
+    /// <c>PartiallyBound</c> yourself, on the binding whose count actually
+    /// varies.</para>
+    /// </remarks>
+    /// <param name="binding">The reflected binding.</param>
+    /// <param name="descriptorCount">The number of descriptors to reserve.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="descriptorCount"/> is zero.</exception>
+    /// <exception cref="ArgumentException">
+    /// Reflection already reported a descriptor count for this binding.
+    /// </exception>
+    /// <exception cref="NotSupportedException">
+    /// The binding's Slang type has no Vulkan descriptor equivalent.
+    /// </exception>
+    public static DescriptorBinding MapBinding(this SlangDescriptorBinding binding, uint descriptorCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfZero(descriptorCount);
+
+        if (binding.Count.Kind == SlangDescriptorCountKind.Fixed)
+        {
+            throw new ArgumentException(
+                $"Descriptor binding {binding.Slot} already has a descriptor count from reflection "
+                + $"({binding.Count.Value}). Supplying one here would override what the shader declares; use "
+                + "MapBinding().",
+                nameof(descriptorCount));
+        }
+
+        return new DescriptorBinding
+        {
+            Slot = binding.Slot,
+            Type = MapBindingType(binding.Type),
+            Count = descriptorCount,
             Stages = binding.Stages
         };
     }
@@ -187,13 +253,58 @@ public static class SlangVulkanMapping
     /// suitable for <c>DescriptorSetLayoutDescription.Bindings</c>.
     /// </summary>
     /// <exception cref="NotSupportedException">
-    /// A binding's Slang type has no Vulkan descriptor equivalent.
+    /// A binding's Slang type has no Vulkan descriptor equivalent, or Slang
+    /// reported no descriptor count for one of them — see
+    /// <see cref="MapBindings(ReadOnlySpan{SlangDescriptorBinding}, SlangUnboundedCapacity)"/>.
     /// </exception>
     public static DescriptorBinding[] MapBindings(this ReadOnlySpan<SlangDescriptorBinding> bindings)
     {
         var result = new DescriptorBinding[bindings.Length];
         for (int i = 0; i < bindings.Length; i++)
             result[i] = bindings[i].MapBinding();
+        return result;
+    }
+
+    /// <summary>
+    /// Maps a reflected descriptor set's bindings, asking
+    /// <paramref name="capacity"/> for the descriptor count of each binding
+    /// reflection could not size.
+    /// </summary>
+    /// <remarks>
+    /// <para><paramref name="capacity"/> is <b>not</b> called for a binding
+    /// whose <see cref="SlangDescriptorBinding.Count"/> is
+    /// <see cref="SlangDescriptorCountKind.Fixed"/>, so an implementation may
+    /// assume it is only ever asked about bindings it must size. A resolver
+    /// rather than one <see cref="uint"/> because a set may hold several
+    /// unbounded arrays whose capacities a heap picks independently.</para>
+    /// <para>The mapper is where information the shader does not state gets
+    /// supplied — the same reason <see cref="MapVertexAttribute"/> takes
+    /// <c>binding</c> and <c>offset</c>. See
+    /// <see cref="MapBinding(SlangDescriptorBinding, uint)"/> for why the
+    /// bindless <c>DescriptorBindingFlags</c> are still the caller's to set.</para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="capacity"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="capacity"/> returned zero.
+    /// </exception>
+    /// <exception cref="NotSupportedException">
+    /// A binding's Slang type has no Vulkan descriptor equivalent.
+    /// </exception>
+    public static DescriptorBinding[] MapBindings(
+        this ReadOnlySpan<SlangDescriptorBinding> bindings,
+        SlangUnboundedCapacity capacity)
+    {
+        ArgumentNullException.ThrowIfNull(capacity);
+
+        var result = new DescriptorBinding[bindings.Length];
+
+        for (int i = 0; i < bindings.Length; i++)
+        {
+            result[i] = bindings[i].Count.Kind == SlangDescriptorCountKind.Fixed
+                ? bindings[i].MapBinding()
+                : bindings[i].MapBinding(capacity(bindings[i]));
+        }
+
         return result;
     }
 
@@ -209,5 +320,25 @@ public static class SlangVulkanMapping
         for (int i = 0; i < ranges.Length; i++)
             result[i] = ranges[i].MapPushConstantRange();
         return result;
+    }
+
+    /// <summary>
+    /// The refusal <see cref="MapBinding(SlangDescriptorBinding)"/> raises for a
+    /// binding reflection could not size. Both kinds name the fix; only the
+    /// first sentence differs.
+    /// </summary>
+    private static string UnsizedBindingMessage(SlangDescriptorBinding binding)
+    {
+        string cause = binding.Count.Kind == SlangDescriptorCountKind.Unbounded
+            ? $"Descriptor binding {binding.Slot} is an unbounded (bindless) array: Slang reports no descriptor "
+              + "count for it. Reflection cannot choose your heap's capacity."
+            : $"Descriptor binding {binding.Slot} reports a descriptor count that depends on unresolved generic "
+              + "parameters or link-time constants. Reflect a fully specialized program, or call "
+              + "MapBinding(binding, descriptorCount).";
+
+        return cause
+            + " Call MapBinding(binding, descriptorCount) with the capacity you reserve, and set "
+            + "DescriptorBindingFlags.VariableDescriptorCount yourself on the one binding of the set whose count "
+            + "actually varies — Vulkan allows it on at most one binding per set.";
     }
 }

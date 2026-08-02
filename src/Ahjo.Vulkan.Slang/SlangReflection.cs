@@ -26,6 +26,13 @@ namespace Ahjo.Vulkan.Slang;
 /// <para><b>Set indices are Vulkan set numbers, not positions.</b> A program's
 /// descriptor spaces need not start at 0 and need not be contiguous — see
 /// <see cref="SetLayoutSlotCount"/>.</para>
+/// <para><b>An unbounded (bindless) array is reported, not refused.</b> A
+/// descriptor range whose count is one of Slang's sentinels lands here as a
+/// <see cref="SlangDescriptorCount"/> whose <c>Kind</c> is
+/// <c>Unbounded</c> or <c>Unknown</c>, and the rest of the program — the other
+/// sets, the push-constant ranges, the vertex attributes — is reported as
+/// usual. The capacity decision lives in <c>SlangVulkanMapping</c>, which
+/// refuses the binding or takes the capacity as a parameter.</para>
 /// <para>Everything is computed once, eagerly, in the constructor; the spans
 /// this type hands out are views over those arrays and stay valid for its
 /// lifetime. Reflection is setup-time — the wrapper's zero-per-frame-allocation
@@ -311,6 +318,14 @@ public sealed unsafe class SlangReflection
                 // reach here as -1 / -2. Casting either to uint yields
                 // 4294967295 or 4294967294 — a driver crash at
                 // vkCreateDescriptorSetLayout, not a validation message.
+                //
+                // The *count* sentinels are classified rather than refused
+                // (issue #176): an unsized count still leaves a perfectly
+                // usable (set, slot, type), and the capacity decision belongs
+                // to SlangVulkanMapping. The *index offset* sentinel below —
+                // and the sub-object space offset sentinel in step 3 — stay
+                // all-or-nothing, because a binding with no binding number and
+                // a scope with no set number have no layout to report at all.
                 if (slot < 0 || slot > uint.MaxValue)
                 {
                     throw new NotSupportedException(
@@ -319,14 +334,21 @@ public sealed unsafe class SlangReflection
                         + "constants; there is no binding number to emit. Reflect a fully specialized program.");
                 }
 
-                if (count < 0 || count > uint.MaxValue)
+                // Measured on v2026.14.1 / win-x64: three unbounded arrays in
+                // one space report -1 here, which is SLANG_UNBOUNDED_SIZE
+                // through the long-returning binding
+                // (Reflection_UnboundedArray_ReportsBindingInsteadOfThrowing).
+                SlangDescriptorCount descriptorCount = count switch
                 {
-                    throw new NotSupportedException(
-                        $"Descriptor range {r} of descriptor set {vkSet} reports descriptor count {count}. That is "
-                        + "Slang's sentinel for an unbounded array, or for a count that depends on unresolved "
-                        + "generic parameters or link-time constants. Bindless arrays need an explicit Count plus "
-                        + "DescriptorBindingFlags.VariableDescriptorCount, which reflection cannot choose for you.");
-                }
+                    -1 => SlangDescriptorCount.Unbounded,
+                    -2 => SlangDescriptorCount.Unknown,
+                    >= 0 and <= uint.MaxValue => SlangDescriptorCount.Fixed((uint)count),
+                    _ => throw new NotSupportedException(
+                        $"Descriptor range {r} of descriptor set {vkSet} reports descriptor count {count}, which is "
+                        + "neither a descriptor count nor one of Slang's documented sentinels "
+                        + "(`SLANG_UNBOUNDED_SIZE` = -1, `SLANG_UNKNOWN_SIZE` = -2). Casting it to a `uint` would "
+                        + "hand `vkCreateDescriptorSetLayout` a nonsense `descriptorCount`."),
+                };
 
                 SlangBindingType bindingType =
                     SlangApi.spReflectionTypeLayout_getDescriptorSetDescriptorRangeType(structTypeLayout, s, r);
@@ -336,7 +358,7 @@ public sealed unsafe class SlangReflection
                     new SlangDescriptorBinding
                     {
                         Slot = (uint)slot,
-                        Count = (uint)count,
+                        Count = descriptorCount,
                         Type = bindingType,
                     }));
             }
@@ -362,7 +384,7 @@ public sealed unsafe class SlangReflection
                 new SlangDescriptorBinding
                 {
                     Slot = 0,
-                    Count = 1,
+                    Count = SlangDescriptorCount.Fixed(1),
 
                     // By construction, not through MapBindingType — there is no
                     // Slang binding type for a range Slang does not report.

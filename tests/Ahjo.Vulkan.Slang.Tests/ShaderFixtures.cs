@@ -225,6 +225,37 @@ internal static class ShaderFixtures
         }
         """;
 
+    /// <summary>
+    /// An <c>interface</c> is declared and implemented, but dispatched
+    /// <em>statically</em> — no interface-typed parameter anywhere.
+    /// </summary>
+    /// <remarks>
+    /// The control for <c>SlangProgram.SpecializationParameterCount</c>: this
+    /// shape reports <c>0</c>, the same as a fully concrete program, which is
+    /// what makes the count worth reporting. A refusal keyed on "this program
+    /// declares an interface" would reject this one for nothing.
+    /// </remarks>
+    public const string StaticDispatchInterfaceModule = """
+        interface ISurface
+        {
+            float4 shade(float3 normal);
+        };
+
+        struct Glossy : ISurface
+        {
+            float4 tint;
+            float4 shade(float3 normal) { return tint * float4(normal, 1.0); }
+        };
+
+        [shader("fragment")]
+        float4 fragmentMain(float3 normal : NORMAL) : SV_Target
+        {
+            Glossy g;
+            g.tint = float4(1.0, 1.0, 1.0, 1.0);
+            return g.shade(normal);
+        }
+        """;
+
     /// <summary>Imports <c>common</c> by module name — no file system involved.</summary>
     public const string ImportsCommonModule = """
         import common;
@@ -292,6 +323,55 @@ internal static class ShaderFixtures
                  + gMaps[1].Sample(gSampler, uv)
                  + gMaps[2].Sample(gSampler, uv)
                  + gMaps[3].Sample(gSampler, uv);
+        }
+        """;
+
+    /// <summary>
+    /// Three unbounded (bindless) arrays in set 0, plus an ordinary set and a
+    /// push-constant block — issue #176's shape.
+    /// </summary>
+    /// <remarks>
+    /// <para>The ordinary set and the push-constant block are the point: the
+    /// issue is not that an unbounded array cannot be sized, it is that one of
+    /// them used to make the <em>rest</em> of the program unreflectable. Every
+    /// array is indexed with <c>gPush.index</c> so nothing folds away — the
+    /// fixture-file rule that an unread global survives reflection but not
+    /// codegen.</para>
+    /// <para>The second set is a <c>ParameterBlock</c> rather than the
+    /// <c>[[vk::binding(0, 1)]] ConstantBuffer&lt;Xform&gt;</c> the plan
+    /// sketched, because that shape is misreported by reflection today and the
+    /// misreport has nothing to do with bindless arrays: measured on
+    /// <c>v2026.14.1</c> / win-x64, a global-scope <c>ConstantBuffer&lt;T&gt;</c>
+    /// carrying an explicit <c>[[vk::binding(n, space)]]</c> with
+    /// <c>space &gt; 0</c> is reported at set <b>0</b> while the emitted SPIR-V
+    /// decorates it <c>DescriptorSet = space</c> — reproduced with no unbounded
+    /// array anywhere in the module. That is its own defect; this fixture is
+    /// about issue #176 and stays on a shape reflection gets right.</para>
+    /// </remarks>
+    public const string ReflectionBindlessArrays = """
+        struct Push  { float4 tint; uint index; };
+        struct Xform { float4x4 mvp; };
+
+        Texture2D                gTextures[];
+        SamplerState             gSamplers[];
+        StructuredBuffer<float4> gBuffers[];
+
+        ParameterBlock<Xform> gXform;
+
+        [[vk::push_constant]] ConstantBuffer<Push> gPush;
+
+        [shader("vertex")]
+        float4 vertexMain(float3 position : POSITION) : SV_Position
+        {
+            return mul(gXform.mvp, float4(position, 1.0)) + gPush.tint;
+        }
+
+        [shader("fragment")]
+        float4 fragmentMain(float2 uv : TEXCOORD0) : SV_Target
+        {
+            return gTextures[gPush.index].Sample(gSamplers[gPush.index], uv)
+                 * gBuffers[gPush.index][0]
+                 * gPush.tint;
         }
         """;
 
