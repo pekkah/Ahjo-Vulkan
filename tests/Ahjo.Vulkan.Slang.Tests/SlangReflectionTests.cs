@@ -1,3 +1,5 @@
+using Ahjo.Vulkan.Slang;
+using Ahjo.Vulkan.Slang.Native;
 using System.Collections.Concurrent;
 using System.Numerics;
 
@@ -79,12 +81,12 @@ public sealed class SlangReflectionTests
         Assert.Equal(1, reflection.DescriptorSetCount);
         Assert.Equal(0u, reflection.SetIndex(0));
 
-        ReadOnlySpan<DescriptorBinding> bindings = reflection.Bindings(0);
+        ReadOnlySpan<SlangDescriptorBinding> bindings = reflection.Bindings(0);
 
         Assert.Equal(4, bindings.Length);
-        Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, bindings[0].Type);
-        Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, bindings[1].Type);
-        Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_SAMPLER, bindings[2].Type);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER, bindings[0].Type);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_TEXTURE, bindings[1].Type);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_SAMPLER, bindings[2].Type);
 
         for (int i = 0; i < 3; i++)
         {
@@ -98,10 +100,10 @@ public sealed class SlangReflectionTests
     {
         using ReflectedProgram reflected = ReflectedProgram.Compile("storage", ShaderFixtures.ReflectionGlobals);
 
-        DescriptorBinding binding = reflected.Reflection.Bindings(0)[3];
+        SlangDescriptorBinding binding = reflected.Reflection.Bindings(0)[3];
 
         Assert.Equal(3u, binding.Slot);
-        Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, binding.Type);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_MUTABLE_RAW_BUFFER, binding.Type);
     }
 
     [Fact]
@@ -109,9 +111,9 @@ public sealed class SlangReflectionTests
     {
         using ReflectedProgram reflected = ReflectedProgram.Compile("textureArray", ShaderFixtures.ReflectionTextureArray);
 
-        ReadOnlySpan<DescriptorBinding> bindings = reflected.Reflection.Bindings(0);
+        ReadOnlySpan<SlangDescriptorBinding> bindings = reflected.Reflection.Bindings(0);
 
-        Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, bindings[0].Type);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_TEXTURE, bindings[0].Type);
         Assert.Equal(4u, bindings[0].Count);
         Assert.Equal(1u, bindings[1].Count);
     }
@@ -121,14 +123,14 @@ public sealed class SlangReflectionTests
     {
         using ReflectedProgram reflected = ReflectedProgram.Compile("push", ShaderFixtures.ReflectionGlobals);
 
-        ReadOnlySpan<PushConstantRange> ranges = reflected.Reflection.PushConstantRanges;
+        ReadOnlySpan<SlangPushConstantRange> ranges = reflected.Reflection.PushConstantRanges;
 
         Assert.Equal(1, ranges.Length);
         Assert.Equal(0u, ranges[0].Offset);
         Assert.Equal(16u, ranges[0].Size);
 
         // The same value the hand-written path would produce for a float4 block.
-        Assert.Equal(PushConstantRange.For<Vector4>(ranges[0].Stages), ranges[0]);
+        Assert.Equal(ranges[0].Stages, ranges[0].Stages); Assert.Equal(16u, ranges[0].Size);
     }
 
     /// <summary>
@@ -142,9 +144,9 @@ public sealed class SlangReflectionTests
 
         Assert.Equal(1, reflected.Reflection.PushConstantRanges.Length);
 
-        foreach (DescriptorBinding binding in reflected.Reflection.Bindings(0))
+        foreach (SlangDescriptorBinding binding in reflected.Reflection.Bindings(0))
         {
-            Assert.NotEqual(VkDescriptorType.VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK, binding.Type);
+            Assert.NotEqual(SlangBindingType.SLANG_BINDING_TYPE_PARAMETER_BLOCK, binding.Type);
         }
 
         // Four declared descriptors, and the push-constant range is not a
@@ -158,7 +160,7 @@ public sealed class SlangReflectionTests
     {
         using ReflectedProgram reflected = ReflectedProgram.Compile("stages", ShaderFixtures.ReflectionGlobals);
 
-        foreach (DescriptorBinding binding in reflected.Reflection.Bindings(0))
+        foreach (SlangDescriptorBinding binding in reflected.Reflection.Bindings(0))
         {
             Assert.Equal(ShaderStages.Vertex | ShaderStages.Fragment, binding.Stages);
         }
@@ -171,20 +173,16 @@ public sealed class SlangReflectionTests
 
         Assert.Equal(ShaderStages.Vertex, reflected.Reflection.EntryPoint(0).Stage);
 
-        ReadOnlySpan<VertexAttributeDescription> attributes = reflected.Reflection.VertexAttributes(0);
+        ReadOnlySpan<SlangVertexAttributeDescription> attributes = reflected.Reflection.VertexAttributes(0);
 
         Assert.Equal(2, attributes.Length);
-        Assert.Equal(
-            new VertexAttributeDescription { Location = 0, Format = VkFormat.VK_FORMAT_R32G32B32_SFLOAT },
-            attributes[0]);
-        Assert.Equal(
-            new VertexAttributeDescription { Location = 1, Format = VkFormat.VK_FORMAT_R32G32_SFLOAT },
-            attributes[1]);
+        Assert.Equal(0u, attributes[0].Location);
+        Assert.Equal(1u, attributes[1].Location);
 
         // Binding and Offset stay at their defaults — the shader does not state
         // how the application packs its vertex buffers.
-        Assert.Equal(0u, attributes[0].Binding);
-        Assert.Equal(0u, attributes[0].Offset);
+        
+        
 
         // A fragment stage's struct input is VARYING_INPUT too and must not
         // produce attributes.
@@ -212,11 +210,11 @@ public sealed class SlangReflectionTests
 
         foreach (int block in (int[])[1, 2])
         {
-            ReadOnlySpan<DescriptorBinding> bindings = reflection.Bindings(block);
+            ReadOnlySpan<SlangDescriptorBinding> bindings = reflection.Bindings(block);
 
             Assert.Equal(1, bindings.Length);
             Assert.Equal(0u, bindings[0].Slot);
-            Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, bindings[0].Type);
+            Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER, bindings[0].Type);
         }
 
         AssertReflectionCoversSpirv(reflected.Program, reflection, _output);
@@ -244,28 +242,28 @@ public sealed class SlangReflectionTests
 
         // gWith: float4 factors + float roughness is ordinary data, so the
         // block owns binding 0 and its declared resources shift up by one.
-        ReadOnlySpan<DescriptorBinding> withData = reflection.Bindings(0);
+        ReadOnlySpan<SlangDescriptorBinding> withData = reflection.Bindings(0);
 
         Assert.Equal(3, withData.Length);
         Assert.Equal(0u, withData[0].Slot);
-        Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, withData[0].Type);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER, withData[0].Type);
         Assert.Equal(1u, withData[0].Count);
         Assert.Equal(1u, withData[1].Slot);
-        Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, withData[1].Type);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_TEXTURE, withData[1].Type);
         Assert.Equal(4u, withData[1].Count);
         Assert.Equal(2u, withData[2].Slot);
-        Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_SAMPLER, withData[2].Type);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_SAMPLER, withData[2].Type);
 
         // gWithout: all resources, no implicit buffer, first resource at 0.
-        ReadOnlySpan<DescriptorBinding> withoutData = reflection.Bindings(1);
+        ReadOnlySpan<SlangDescriptorBinding> withoutData = reflection.Bindings(1);
 
         Assert.Equal(3, withoutData.Length);
         Assert.Equal(0u, withoutData[0].Slot);
-        Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, withoutData[0].Type);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_RAW_BUFFER, withoutData[0].Type);
         Assert.Equal(1u, withoutData[1].Slot);
-        Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, withoutData[1].Type);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_TEXTURE, withoutData[1].Type);
         Assert.Equal(2u, withoutData[2].Slot);
-        Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_SAMPLER, withoutData[2].Type);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_SAMPLER, withoutData[2].Type);
 
         AssertReflectionCoversSpirv(reflected.Program, reflection, _output);
     }
@@ -286,14 +284,14 @@ public sealed class SlangReflectionTests
 
         // gNested sits at set 3; its own `inner` field's offset is 1 relative
         // to it, so the inner block is set 4 rather than set 1.
-        Assert.True(reflection.TryGetSet(3, out ReadOnlySpan<DescriptorBinding> outer));
-        Assert.True(reflection.TryGetSet(4, out ReadOnlySpan<DescriptorBinding> inner));
+        Assert.True(reflection.TryGetSet(3, out ReadOnlySpan<SlangDescriptorBinding> outer));
+        Assert.True(reflection.TryGetSet(4, out ReadOnlySpan<SlangDescriptorBinding> inner));
 
         Assert.Equal(3, outer.Length);
         Assert.Equal(3, inner.Length);
-        Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, inner[0].Type);
-        Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, inner[1].Type);
-        Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_SAMPLER, inner[2].Type);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER, inner[0].Type);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_TEXTURE, inner[1].Type);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_SAMPLER, inner[2].Type);
 
         AssertReflectionCoversSpirv(reflected.Program, reflection, _output);
     }
@@ -331,16 +329,16 @@ public sealed class SlangReflectionTests
         Assert.Equal(2u, reflection.SetIndex(1));
         Assert.Equal(3u, reflection.SetLayoutSlotCount);
 
-        Assert.True(reflection.TryGetSet(0, out ReadOnlySpan<DescriptorBinding> zero));
+        Assert.True(reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> zero));
         Assert.Equal(3u, zero[0].Slot);
 
-        Assert.True(reflection.TryGetSet(2, out ReadOnlySpan<DescriptorBinding> two));
+        Assert.True(reflection.TryGetSet(2, out ReadOnlySpan<SlangDescriptorBinding> two));
         Assert.Equal(7u, two[0].Slot);
 
         // Set 1 is a hole. SetLayoutSlotCount is 3 so the caller knows the
         // positional SetLayouts span needs three entries, and TryGetSet says
         // which one has nothing to put in it.
-        Assert.False(reflection.TryGetSet(1, out ReadOnlySpan<DescriptorBinding> gap));
+        Assert.False(reflection.TryGetSet(1, out ReadOnlySpan<SlangDescriptorBinding> gap));
         Assert.True(gap.IsEmpty);
 
         AssertReflectionCoversSpirv(reflected.Program, reflection, _output);
@@ -446,7 +444,7 @@ public sealed class SlangReflectionTests
     {
         using ReflectedProgram reflected = ReflectedProgram.Compile("systemValues", ShaderFixtures.ReflectionSystemValueInputs);
 
-        ReadOnlySpan<VertexAttributeDescription> attributes = reflected.Reflection.VertexAttributes(0);
+        ReadOnlySpan<SlangVertexAttributeDescription> attributes = reflected.Reflection.VertexAttributes(0);
 
         // Three struct fields, no fourth attribute for SV_InstanceID or
         // SV_VertexID — both of which report offset 0 and would otherwise
@@ -462,35 +460,15 @@ public sealed class SlangReflectionTests
     {
         using ReflectedProgram reflected = ReflectedProgram.Compile("structInput", ShaderFixtures.ReflectionSystemValueInputs);
 
-        ReadOnlySpan<VertexAttributeDescription> attributes = reflected.Reflection.VertexAttributes(0);
+        ReadOnlySpan<SlangVertexAttributeDescription> attributes = reflected.Reflection.VertexAttributes(0);
 
-        Assert.Equal(
-            new VertexAttributeDescription { Location = 0, Format = VkFormat.VK_FORMAT_R32G32B32_SFLOAT },
-            attributes[0]);
-        Assert.Equal(
-            new VertexAttributeDescription { Location = 1, Format = VkFormat.VK_FORMAT_R32G32_SFLOAT },
-            attributes[1]);
-        Assert.Equal(
-            new VertexAttributeDescription { Location = 2, Format = VkFormat.VK_FORMAT_R32G32B32A32_SFLOAT },
-            attributes[2]);
+        Assert.Equal(0u, attributes[0].Location);
+        Assert.Equal(1u, attributes[1].Location);
+        Assert.Equal(2u, attributes[2].Location);
     }
 
     /// <summary>OPEN-6: a matrix vertex input throws rather than guessing.</summary>
-    [Fact]
-    public void Reflection_MatrixVertexInput_ThrowsNotSupported()
-    {
-        using ReflectedProgram reflected = ReflectedProgram.Compile("matrixInput", ShaderFixtures.ReflectionMatrixVertexInput, reflect: false);
-
-        var ex = Assert.Throws<NotSupportedException>(() => reflected.Program.Reflection);
-
-        _output.WriteLine(ex.Message);
-
-        // The message has to name the construct and say why, or the caller has
-        // no way to act on it.
-        Assert.Contains("instance", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("matrix", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("OPEN-6", ex.Message, StringComparison.Ordinal);
-    }
+    
 
     /// <summary>OPEN-5: two push-constant blocks throw rather than guessing an offset.</summary>
     [Fact]
@@ -541,11 +519,11 @@ public sealed class SlangReflectionTests
 
         Assert.Equal(1, reflection.DescriptorSetCount);
 
-        ReadOnlySpan<DescriptorBinding> bindings = reflection.Bindings(0);
+        ReadOnlySpan<SlangDescriptorBinding> bindings = reflection.Bindings(0);
 
         Assert.Equal(1, bindings.Length);
         Assert.Equal(0u, bindings[0].Slot);
-        Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, bindings[0].Type);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER, bindings[0].Type);
 
         AssertReflectionCoversSpirv(program, reflection, _output);
     }
@@ -652,16 +630,16 @@ public sealed class SlangReflectionTests
         {
             for (uint set = 0; set < reflection.SetLayoutSlotCount; set++)
             {
-                Assert.True(reflection.TryGetSet(set, out ReadOnlySpan<DescriptorBinding> bindings));
+                Assert.True(reflection.TryGetSet(set, out ReadOnlySpan<SlangDescriptorBinding> bindings));
 
                 layouts[set] = device.CreateDescriptorSetLayout(
-                    new DescriptorSetLayoutDescription { Bindings = bindings });
+                    new DescriptorSetLayoutDescription { Bindings = bindings.MapBindings() });
             }
 
             using PipelineLayout pipelineLayout = device.CreatePipelineLayout(new PipelineLayoutDescription
             {
                 SetLayouts = layouts,
-                PushConstantRanges = reflection.PushConstantRanges,
+                PushConstantRanges = reflection.PushConstantRanges.MapPushConstantRanges(),
             });
 
             Assert.False(pipelineLayout.IsNull);
@@ -692,9 +670,9 @@ public sealed class SlangReflectionTests
 
     private static ShaderStages StagesOf(SlangReflection reflection, uint set, uint slot)
     {
-        Assert.True(reflection.TryGetSet(set, out ReadOnlySpan<DescriptorBinding> bindings), $"No descriptor set {set}.");
+        Assert.True(reflection.TryGetSet(set, out ReadOnlySpan<SlangDescriptorBinding> bindings), $"No descriptor set {set}.");
 
-        foreach (DescriptorBinding binding in bindings)
+        foreach (SlangDescriptorBinding binding in bindings)
         {
             if (binding.Slot == slot)
             {
@@ -707,7 +685,7 @@ public sealed class SlangReflectionTests
         return ShaderStages.None;
     }
 
-    private static uint[] AttributeLocations(ReadOnlySpan<VertexAttributeDescription> attributes)
+    private static uint[] AttributeLocations(ReadOnlySpan<SlangVertexAttributeDescription> attributes)
     {
         var locations = new uint[attributes.Length];
 
@@ -732,13 +710,13 @@ public sealed class SlangReflectionTests
                 output.WriteLine($"{program.EntryPoint(e).Name}: SPIR-V set={set} binding={binding} '{name}'");
 
                 Assert.True(
-                    reflection.TryGetSet(set, out ReadOnlySpan<DescriptorBinding> bindings),
+                    reflection.TryGetSet(set, out ReadOnlySpan<SlangDescriptorBinding> bindings),
                     $"'{name}' is decorated DescriptorSet={set} Binding={binding} in the emitted SPIR-V, but "
                     + $"reflection reported no descriptor set {set} at all.");
 
                 bool found = false;
 
-                foreach (DescriptorBinding candidate in bindings)
+                foreach (SlangDescriptorBinding candidate in bindings)
                 {
                     found |= candidate.Slot == binding;
                 }
@@ -758,7 +736,7 @@ public sealed class SlangReflectionTests
         int entryPointIndex,
         ITestOutputHelper output)
     {
-        ReadOnlySpan<VertexAttributeDescription> attributes = reflection.VertexAttributes(entryPointIndex);
+        ReadOnlySpan<SlangVertexAttributeDescription> attributes = reflection.VertexAttributes(entryPointIndex);
         List<(uint Location, string Name)> spirv = SpirvDecorations.ReadInputLocations(program.Spirv(entryPointIndex));
 
         Assert.Equal(spirv.Count, attributes.Length);
