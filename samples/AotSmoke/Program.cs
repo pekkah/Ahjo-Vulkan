@@ -302,6 +302,27 @@ internal static unsafe class Program
         return gpu.CreateDevice(new DeviceDescription
         {
             Queues = [new QueueRequest(family, count: 1, priority: 1.0f)],
+
+            // triangle.slang's vertexMain takes SV_VertexID; mapping that HLSL
+            // semantic onto Vulkan's VertexIndex costs a BaseVertex subtraction,
+            // so the module Slang emits declares the SPIR-V DrawParameters
+            // capability. Enabling shaderDrawParameters is what that requires —
+            // without it vkCreateShaderModule still returns a usable handle but
+            // trips VUID-VkShaderModuleCreateInfo-pCode-08740 under validation
+            // (issue #168). The wrapper does not enable this by default, so the
+            // sample opts in like any other consumer. VkPhysicalDeviceVulkan11Features
+            // is not one of the four structs the configurer hands out by ref, but
+            // it is IChainable<VkDeviceCreateInfo>, so it goes on through the chain.
+            ConfigureFeatures = static (
+                ref ChainBuilder<VkDeviceCreateInfo> chain,
+                ref VkPhysicalDeviceFeatures2        _,
+                ref VkPhysicalDeviceVulkan12Features _,
+                ref VkPhysicalDeviceVulkan13Features _,
+                ref VkPhysicalDeviceVulkan14Features _) =>
+            {
+                ref VkPhysicalDeviceVulkan11Features f11 = ref chain.Push<VkPhysicalDeviceVulkan11Features>();
+                f11.shaderDrawParameters = 1;
+            },
         });
     }
 }
