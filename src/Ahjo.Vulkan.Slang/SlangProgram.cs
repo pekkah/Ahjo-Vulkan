@@ -146,7 +146,8 @@ public sealed unsafe class SlangProgram : IDisposable
     }
 
     /// <summary>
-    /// The <paramref name="index"/>-th entry point's name and stage.
+    /// The <paramref name="index"/>-th entry point's name, stage and thread
+    /// group size.
     /// </summary>
     /// <remarks>
     /// The index is the same one <see cref="Spirv"/> takes: entry point
@@ -318,11 +319,7 @@ public sealed unsafe class SlangProgram : IDisposable
 
         for (ulong i = 0; i < count; i++)
         {
-            SlangEntryPointLayout* entryPoint = SlangApi.spReflection_getEntryPointByIndex(layout, i);
-            string name = SlangUtf8.ToString(SlangApi.spReflectionEntryPoint_getName(entryPoint)) ?? string.Empty;
-            ShaderStages stage = SlangStages.ToShaderStages(SlangApi.spReflectionEntryPoint_getStage(entryPoint));
-
-            infos[(int)i] = new SlangEntryPointInfo(name, stage);
+            infos[(int)i] = SlangEntryPoints.Read(SlangApi.spReflection_getEntryPointByIndex(layout, i));
         }
 
         return infos;

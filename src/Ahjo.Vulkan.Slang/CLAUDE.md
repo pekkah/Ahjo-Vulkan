@@ -135,7 +135,7 @@ null-terminated.
   conditional. Spec OPEN-4(b); the report is tracked as #170 and its upstream
   number belongs here once filed.
 
-## Reflection — five rules Slang does not hand you
+## Reflection — eight rules Slang does not hand you
 
 Every one of these was measured against `OpDecorate DescriptorSet` / `Binding`
 in the SPIR-V Slang emitted, not read off a header, and every one of them looks
@@ -176,6 +176,45 @@ proves nothing.
    from the header and untested — the unspecialized `type_param` form, the
    obvious candidate, reports **zero** descriptor sets rather than a sentinel
    count, so there is no fixture for it.
+
+6. **The binding-range pass is how a `(set, slot)` gets back to what declared
+   it, and it is route 1 of a measured ladder.**
+   `getBindingRangeDescriptorSetIndex` + `getBindingRangeFirstDescriptorRangeIndex`,
+   then the *same* `getDescriptorSetSpaceOffset` /
+   `getDescriptorSetDescriptorRangeIndexOffset` calls the walk uses, produce keys
+   that match the SPIR-V-verified bindings exactly — including the sparse case,
+   where `[[vk::binding(7, 2)]]` joins to set 2 rather than to its loop index.
+   Unlike `getSubObjectRangeSpaceOffset` (rule 1) these are **not** the wrong
+   functions; `Reflection_BindingNames_MatchTheSpirvVariableNames` is the oracle
+   and compares each reported name against the module's `OpName` at that very
+   `(set, binding)`. The pass is additive: it never modifies the descriptor walk,
+   so a key it cannot produce costs a name rather than a binding. Three binding
+   types are skipped and each skip is load-bearing — `PARAMETER_BLOCK` (the walk
+   recurses into it), `PUSH_CONSTANT` (it joins to slot 0 of the enclosing set,
+   which is somebody else's constant buffer), and `EXISTENTIAL_VALUE` (it joins
+   to the block's own synthesized binding and has a null leaf variable).
+
+7. **`spReflectionTypeLayout_getBindingRangeImageFormat` is not a total
+   function.** Called on the `SLANG_BINDING_TYPE_EXISTENTIAL_VALUE` range that a
+   `ParameterBlock<ISurface>`'s element scope reports, it takes the process down
+   with `0xC0000005` — no result code, no exception, just a dead test host.
+   Every *other* call on that same range returns normally, so nothing about the
+   range looks dangerous until this one is made. `SlangReflection.ImageFormatOf`
+   asks it only of texture and typed-buffer ranges, which are the only
+   declarations `[[vk::image_format]]` applies to. Do not widen that guard, and
+   do not assume the rest of this call family is total either — the member walk
+   checks `SLANG_TYPE_KIND_STRUCT` before `GetFieldCount` for the same reason.
+
+8. **Member offsets come from `SLANG_PARAMETER_CATEGORY_UNIFORM`, and the test
+   asserts them against `OpMemberDecorate … Offset`.** A default or wrong
+   category produces offsets that look plausible and are silently wrong — the
+   failure issue #175 exists to prevent, and the one that survived a 97-test
+   suite. `BufferLayout_MaterialBlock_OffsetsMatchTheEmittedSpirv` reads the
+   emitted module's member decorations and compares; do not change the category
+   without moving that assertion with it. `BufferLayout_WideningAMember_Changes…`
+   is the other half: two fixtures differing only in `float2` → `float4`, whose
+   layouts must differ. It cannot be made green by editing a constant, which is
+   the whole point of keeping a near-duplicate shader in the fixture file.
 
 Two further constraints, both about refusing rather than guessing: more than one
 `[[vk::push_constant]]` block throws from **reflection** (it exposes a buffer

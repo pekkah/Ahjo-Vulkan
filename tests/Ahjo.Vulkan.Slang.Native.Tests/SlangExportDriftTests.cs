@@ -86,10 +86,35 @@ public sealed class SlangExportDriftTests
         "spReflectionTypeLayout_getBindingRangeType",
         "spReflectionTypeLayout_getBindingRangeLeafTypeLayout",
 
+        // The binding-range pass (SlangReflection.CollectBindingRangeFacts):
+        // the additive join from a descriptor range back to the name, image
+        // format, specializability and leaf type layout of what declared it.
+        // This is spec E8 route 1, measured: the keys these produce match the
+        // SPIR-V-verified descriptor walk exactly.
+        //
+        // spReflectionTypeLayout_getBindingRangeImageFormat is called only for
+        // texture and typed-buffer ranges — it access-violates on an
+        // EXISTENTIAL_VALUE range (SlangReflection.ImageFormatOf) — but it is
+        // called, so it belongs here.
+        "spReflectionTypeLayout_getBindingRangeCount",
+        "spReflectionTypeLayout_getBindingRangeDescriptorSetIndex",
+        "spReflectionTypeLayout_getBindingRangeFirstDescriptorRangeIndex",
+        "spReflectionTypeLayout_getBindingRangeLeafVariable",
+        "spReflectionTypeLayout_getBindingRangeImageFormat",
+        "spReflectionTypeLayout_isBindingRangeSpecializable",
+
         // Struct-typed vertex inputs: one level of recursion, locations
-        // accumulating parent offset + field offset.
+        // accumulating parent offset + field offset. The same two calls walk a
+        // buffer's members (SlangReflection.AppendMembers).
         "spReflectionTypeLayout_GetFieldCount",
         "spReflectionTypeLayout_GetFieldByIndex",
+
+        // Buffer member layouts: bytes, padding and matrix orientation
+        // (SlangReflection.AppendMembers).
+        "spReflectionTypeLayout_GetStride",
+        "spReflectionTypeLayout_GetElementStride",
+        "spReflectionTypeLayout_GetMatrixLayoutMode",
+        "spReflectionType_GetName",
 
         // Types: what a vertex attribute's VkFormat is derived from.
         "spReflectionType_GetKind",
@@ -108,10 +133,20 @@ public sealed class SlangExportDriftTests
         "spReflectionVariable_GetName",
 
         // Entry points and their varying parameters.
+        //
+        // spReflectionEntryPoint_getNameOverride is deliberately NOT here: it
+        // returned exactly getName's string for every fixture and every stage
+        // on v2026.14.1, so SlangEntryPointInfo carries no member for it and
+        // nothing calls it. An entry with no caller is noise.
         "spReflectionEntryPoint_getName",
         "spReflectionEntryPoint_getStage",
+        "spReflectionEntryPoint_getComputeThreadGroupSize",
         "spReflectionEntryPoint_getParameterCount",
         "spReflectionEntryPoint_getParameterByIndex",
+
+        // SlangReflection.ToJson — the diagnostics escape hatch for what the
+        // typed surface does not cover.
+        "spReflection_ToJson",
     ];
 
     [Fact]

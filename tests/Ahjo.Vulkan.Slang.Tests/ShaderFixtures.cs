@@ -561,6 +561,142 @@ internal static class ShaderFixtures
         """;
 
     /// <summary>
+    /// A compute entry point with a non-default <c>[numthreads]</c>, plus an
+    /// annotated and an unannotated storage image.
+    /// </summary>
+    /// <remarks>
+    /// Serves two facts at once: <c>ThreadGroupSize</c> is only observable on a
+    /// compute stage, and <c>[[vk::image_format]]</c> is only observable on a
+    /// mutable texture. <c>8, 4, 1</c> rather than a square group so a
+    /// transposed read is visible.
+    /// </remarks>
+    public const string ReflectionComputeStorageImage = """
+        [[vk::image_format("rgba8")]] RWTexture2D<float4> gAnnotated;
+        RWTexture2D<float4>                               gPlain;
+
+        [shader("compute")]
+        [numthreads(8, 4, 1)]
+        void computeMain(uint3 tid : SV_DispatchThreadID)
+        {
+            gAnnotated[tid.xy] = gPlain[tid.xy];
+        }
+        """;
+
+    /// <summary>
+    /// Issue #175's own shape: a material block with a nested struct of scalars
+    /// and vectors, a matrix, and two resources that are not members.
+    /// </summary>
+    /// <remarks>
+    /// <para>The <c>float4x4</c> is there so the matrix-layout and matrix-stride
+    /// members have a subject, and the two resources are there so the
+    /// "a field with zero UNIFORM size is not a member" rule has one.</para>
+    /// <para><b><c>Tint</c> comes before <c>Params</c> on purpose, and moving it
+    /// blinds the suite.</b> SPIR-V decorates a nested struct's members relative
+    /// to that struct; <c>SlangBufferMember.Offset</c> is relative to the
+    /// buffer. With <c>Params</c> at offset 0 the two conventions coincide, and
+    /// <c>BufferLayout_MaterialBlock_OffsetsMatchTheEmittedSpirv</c> passes
+    /// whether the walk accumulates offsets or not — verified by mutating
+    /// <c>AppendMembers</c> to pass <c>baseOffset</c> instead of <c>offset</c>,
+    /// which left 96/96 green. <c>Tint</c> pushes <c>Params</c> to 16 so every
+    /// <c>Params.*</c> member's buffer offset differs from its SPIR-V one, and
+    /// that same mutation now fails two tests —
+    /// <c>BufferLayout_MaterialBlock_OffsetsMatchTheEmittedSpirv</c> and
+    /// <c>BufferLayout_MaterialBlock_HasGoldenSizeAndOffsets</c>. This is issue
+    /// #175's own failure mode — an assertion that cannot move — reproduced
+    /// inside the test written to prevent it.</para>
+    /// </remarks>
+    public const string ReflectionMaterialBlock = """
+        struct MaterialParams
+        {
+            float3 BaseColor;
+            float  Roughness;
+            float  Metallic;
+            float2 UvScale;
+            uint   Flags;
+        };
+
+        struct MaterialBlock
+        {
+            float4            Tint;
+            MaterialParams    Params;
+            float4x4          Transform;
+            Texture2D<float4> BaseColorMap;
+            SamplerState      Sampler;
+        };
+
+        ParameterBlock<MaterialBlock> gMaterial;
+
+        [shader("fragment")]
+        float4 fragmentMain(float2 uv : TEXCOORD0) : SV_Target
+        {
+            float2 scaled = uv * gMaterial.Params.UvScale.xy;
+            float4 base   = gMaterial.BaseColorMap.Sample(gMaterial.Sampler, scaled);
+
+            float4 tinted = base
+                          * gMaterial.Tint
+                          * float4(gMaterial.Params.BaseColor, 1.0)
+                          * gMaterial.Params.Roughness
+                          * gMaterial.Params.Metallic
+                          * float(gMaterial.Params.Flags);
+
+            return mul(gMaterial.Transform, tinted);
+        }
+        """;
+
+    /// <summary>
+    /// <see cref="ReflectionMaterialBlock"/>, character-for-character, except
+    /// that <c>UvScale</c> is a <c>float4</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>This is the fault-sweep mutation from issue #175, kept as a
+    /// fixture.</b> Widening that one member changes the block's size and every
+    /// member offset after it, and when the issue was filed <em>no assertion in
+    /// a 97-test reflection suite moved</em> — the change was structurally
+    /// unobservable through this API.</para>
+    /// <para><c>BufferLayout_WideningAMember_ChangesSizeAndSubsequentOffsets</c>
+    /// compiles both and asserts the two layouts differ. That test cannot be
+    /// made green by editing a constant, which is the point of keeping a second
+    /// copy of a shader that is otherwise identical.</para>
+    /// </remarks>
+    public const string ReflectionMaterialBlockWidened = """
+        struct MaterialParams
+        {
+            float3 BaseColor;
+            float  Roughness;
+            float  Metallic;
+            float4 UvScale;
+            uint   Flags;
+        };
+
+        struct MaterialBlock
+        {
+            float4            Tint;
+            MaterialParams    Params;
+            float4x4          Transform;
+            Texture2D<float4> BaseColorMap;
+            SamplerState      Sampler;
+        };
+
+        ParameterBlock<MaterialBlock> gMaterial;
+
+        [shader("fragment")]
+        float4 fragmentMain(float2 uv : TEXCOORD0) : SV_Target
+        {
+            float2 scaled = uv * gMaterial.Params.UvScale.xy;
+            float4 base   = gMaterial.BaseColorMap.Sample(gMaterial.Sampler, scaled);
+
+            float4 tinted = base
+                          * gMaterial.Tint
+                          * float4(gMaterial.Params.BaseColor, 1.0)
+                          * gMaterial.Params.Roughness
+                          * gMaterial.Params.Metallic
+                          * float(gMaterial.Params.Flags);
+
+            return mul(gMaterial.Transform, tinted);
+        }
+        """;
+
+    /// <summary>
     /// Two modules each declaring a push-constant block — OPEN-5's guard.
     /// Module 1 of 2.
     /// </summary>

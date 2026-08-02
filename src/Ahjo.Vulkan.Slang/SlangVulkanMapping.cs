@@ -218,9 +218,9 @@ public static class SlangVulkanMapping
         if (binding.Count.Kind == SlangDescriptorCountKind.Fixed)
         {
             throw new ArgumentException(
-                $"Descriptor binding {binding.Slot} already has a descriptor count from reflection "
-                + $"({binding.Count.Value}). Supplying one here would override what the shader declares; use "
-                + "MapBinding().",
+                $"Descriptor binding {binding.Slot} ('{binding.Name}') already has a descriptor count from "
+                + $"reflection ({binding.Count.Value}). Supplying one here would override what the shader declares; "
+                + "use MapBinding().",
                 nameof(descriptorCount));
         }
 
@@ -330,10 +330,10 @@ public static class SlangVulkanMapping
     private static string UnsizedBindingMessage(SlangDescriptorBinding binding)
     {
         string cause = binding.Count.Kind == SlangDescriptorCountKind.Unbounded
-            ? $"Descriptor binding {binding.Slot} is an unbounded (bindless) array: Slang reports no descriptor "
-              + "count for it. Reflection cannot choose your heap's capacity."
-            : $"Descriptor binding {binding.Slot} reports a descriptor count that depends on unresolved generic "
-              + "parameters or link-time constants. Reflect a fully specialized program, or call "
+            ? $"Descriptor binding {binding.Slot} ('{binding.Name}') is an unbounded (bindless) array: Slang reports "
+              + "no descriptor count for it. Reflection cannot choose your heap's capacity."
+            : $"Descriptor binding {binding.Slot} ('{binding.Name}') reports a descriptor count that depends on "
+              + "unresolved generic parameters or link-time constants. Reflect a fully specialized program, or call "
               + "MapBinding(binding, descriptorCount).";
 
         return cause
