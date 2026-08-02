@@ -59,6 +59,7 @@ public sealed class SlangReflectionTests
     [InlineData("xcheckNested", ShaderFixtures.ReflectionNestedBlock)]
     [InlineData("xcheckOnlyBlocks", ShaderFixtures.ReflectionOnlyBlocks)]
     [InlineData("xcheckSparse", ShaderFixtures.ReflectionSparseSets)]
+    [InlineData("xcheckBindless", ShaderFixtures.ReflectionBindlessArrays)]
     public void Reflection_CoversEverySetAndBinding_TheSpirvDecorates(string moduleName, string source)
     {
         using var compiler = SlangCompiler.Create();
@@ -91,7 +92,7 @@ public sealed class SlangReflectionTests
         for (int i = 0; i < 3; i++)
         {
             Assert.Equal((uint)i, bindings[i].Slot);
-            Assert.Equal(1u, bindings[i].Count);
+            Assert.Equal(1u, bindings[i].Count.Value);
         }
     }
 
@@ -114,8 +115,146 @@ public sealed class SlangReflectionTests
         ReadOnlySpan<SlangDescriptorBinding> bindings = reflected.Reflection.Bindings(0);
 
         Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_TEXTURE, bindings[0].Type);
-        Assert.Equal(4u, bindings[0].Count);
-        Assert.Equal(1u, bindings[1].Count);
+        Assert.Equal(4u, bindings[0].Count.Value);
+        Assert.Equal(1u, bindings[1].Count.Value);
+    }
+
+    /// <summary>
+    /// Issue #176: an unbounded (bindless) array is a binding reflection
+    /// reports, not a program it refuses.
+    /// </summary>
+    /// <remarks>
+    /// This is also the measurement that pins <c>SLANG_UNBOUNDED_SIZE</c> to
+    /// <see cref="SlangDescriptorCountKind.Unbounded"/>. If Slang ever reported
+    /// a different sentinel for this shape, the walk's classification would
+    /// produce a different <c>Kind</c> — or throw, naming the value — rather
+    /// than this test quietly passing.
+    /// </remarks>
+    [Fact]
+    public void Reflection_UnboundedArray_ReportsBindingInsteadOfThrowing()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile("bindless", ShaderFixtures.ReflectionBindlessArrays);
+
+        Assert.True(reflected.Reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> bindings));
+        Assert.Equal(3, bindings.Length);
+
+        for (int i = 0; i < bindings.Length; i++)
+        {
+            SlangDescriptorBinding binding = bindings[i];
+
+            _output.WriteLine($"set 0 slot {binding.Slot}: {binding.Type} count kind {binding.Count.Kind}");
+
+            Assert.Equal((uint)i, binding.Slot);
+            Assert.Equal(SlangDescriptorCountKind.Unbounded, binding.Count.Kind);
+            Assert.True(binding.Count.IsUnbounded);
+            Assert.False(binding.Count.TryGetValue(out _));
+            Assert.Throws<InvalidOperationException>(() => binding.Count.Value);
+        }
+    }
+
+    /// <summary>
+    /// The issue's actual complaint: one unbounded array used to make the whole
+    /// program unreflectable — no other set, no push-constant ranges, no vertex
+    /// attributes.
+    /// </summary>
+    [Fact]
+    public void Reflection_UnboundedArray_DoesNotHideTheRestOfTheProgram()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile("bindlessRest", ShaderFixtures.ReflectionBindlessArrays);
+        SlangReflection reflection = reflected.Reflection;
+
+        Assert.True(reflection.TryGetSet(1, out ReadOnlySpan<SlangDescriptorBinding> ordinary));
+        Assert.Equal(1, ordinary.Length);
+        Assert.Equal(0u, ordinary[0].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER, ordinary[0].Type);
+        Assert.Equal(1u, ordinary[0].Count.Value);
+
+        Assert.Equal(1, reflection.PushConstantRanges.Length);
+        Assert.False(reflection.VertexAttributes(0).IsEmpty);
+    }
+
+    /// <summary>
+    /// The refusal moved to the mapper: that is where a
+    /// <c>VkDescriptorSetLayoutBinding.descriptorCount</c> is chosen.
+    /// </summary>
+    [Fact]
+    public void MapBinding_UnboundedBinding_Throws()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile("bindlessMap", ShaderFixtures.ReflectionBindlessArrays);
+
+        Assert.True(reflected.Reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> bindings));
+
+        SlangDescriptorBinding binding = bindings[2];
+        var ex = Assert.Throws<NotSupportedException>(() => binding.MapBinding());
+
+        _output.WriteLine(ex.Message);
+
+        Assert.Contains("binding 2", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("MapBinding", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MapBinding_WithCapacity_ProducesCountAndNoFlags()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile("bindlessCapacity", ShaderFixtures.ReflectionBindlessArrays);
+
+        Assert.True(reflected.Reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> bindings));
+
+        DescriptorBinding mapped = bindings[0].MapBinding(1024);
+
+        Assert.Equal(0u, mapped.Slot);
+        Assert.Equal(1024u, mapped.Count);
+        Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, mapped.Type);
+
+        // Deliberate: VariableDescriptorCount is legal on at most one binding
+        // per set, and this set has three unbounded arrays. The caller sets it.
+        Assert.Equal(DescriptorBindingFlags.None, mapped.BindingFlags);
+    }
+
+    [Fact]
+    public void MapBinding_WithCapacity_OnFixedBinding_Throws()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile("bindlessFixed", ShaderFixtures.ReflectionBindlessArrays);
+
+        Assert.True(reflected.Reflection.TryGetSet(1, out ReadOnlySpan<SlangDescriptorBinding> ordinary));
+
+        SlangDescriptorBinding binding = ordinary[0];
+        var ex = Assert.Throws<ArgumentException>(() => binding.MapBinding(64));
+
+        Assert.Contains("already has a descriptor count", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MapBindings_WithResolver_SizesEachArrayIndependently()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile("bindlessResolver", ShaderFixtures.ReflectionBindlessArrays);
+        SlangReflection reflection = reflected.Reflection;
+
+        int asked = 0;
+        SlangUnboundedCapacity capacity = binding =>
+        {
+            asked++;
+
+            return binding.Slot switch { 0 => 512u, 1 => 16u, _ => 64u };
+        };
+
+        Assert.True(reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> bindless));
+
+        DescriptorBinding[] mapped = bindless.MapBindings(capacity);
+
+        Assert.Equal(3, mapped.Length);
+        Assert.Equal(512u, mapped[0].Count);
+        Assert.Equal(16u, mapped[1].Count);
+        Assert.Equal(64u, mapped[2].Count);
+        Assert.Equal(3, asked);
+
+        // The resolver is never asked about a binding reflection could size.
+        Assert.True(reflection.TryGetSet(1, out ReadOnlySpan<SlangDescriptorBinding> ordinary));
+
+        DescriptorBinding[] fixedBindings = ordinary.MapBindings(capacity);
+
+        Assert.Equal(1u, fixedBindings[0].Count);
+        Assert.Equal(3, asked);
     }
 
     [Fact]
@@ -247,10 +386,10 @@ public sealed class SlangReflectionTests
         Assert.Equal(3, withData.Length);
         Assert.Equal(0u, withData[0].Slot);
         Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER, withData[0].Type);
-        Assert.Equal(1u, withData[0].Count);
+        Assert.Equal(1u, withData[0].Count.Value);
         Assert.Equal(1u, withData[1].Slot);
         Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_TEXTURE, withData[1].Type);
-        Assert.Equal(4u, withData[1].Count);
+        Assert.Equal(4u, withData[1].Count.Value);
         Assert.Equal(2u, withData[2].Slot);
         Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_SAMPLER, withData[2].Type);
 
