@@ -108,9 +108,19 @@ builder keeps no linked state.
 ### Specializing an interface-typed `ParameterBlock`
 
 A `ParameterBlock<ISomeInterface>` cannot generate code until at least one
-implementation is in the linkage — Slang refuses with
-`error[E50100]: no type conformances found` at `Spirv(...)`, not at `Link()`.
-Declare the implementation with `AddTypeConformance`:
+implementation is in the linkage. Name them on the request:
+
+```csharp
+using var program = session.Compile(new SlangCompileRequest
+{
+    Source           = surfaceSource,
+    ModuleName       = "surface",
+    TypeConformances = [new SlangTypeConformance("Glossy", "ISurface")],
+});
+```
+
+For a program composed from several modules, the same declaration lives on the
+builder:
 
 ```csharp
 using var program = session.CreateProgram()
@@ -120,9 +130,23 @@ using var program = session.CreateProgram()
     .Link();
 ```
 
-Type names are resolved when `Link()` runs, not when `AddTypeConformance` is
-called — resolving a name needs a composite to resolve it against — so an
-unknown type name throws `ArgumentException` from `Link()`.
+Type names are resolved when the program is linked, not when the conformance is
+declared — resolving a name needs a composite to resolve it against — so an
+unknown type name throws `ArgumentException` from `Link()` (or from `Compile`,
+which composes through the builder).
+
+**The refusal lands at `Spirv(...)`, not at `Link()`, and that is deliberate.**
+Without a conformance this shape links cleanly: `EntryPointCount` is right,
+`EntryPoint(0)` reports the right name and stage, and reflection reports the
+whole binding surface. Only code generation fails, with
+`error[E50100]: no type conformances found` — and this package rewrites that
+exception's `Message` to name `SlangCompileRequest.TypeConformances` and
+`AddTypeConformance` (`Diagnostics` stays Slang's text, verbatim). Refusing at
+`Link()` instead would throw away a reflection that is correct and useful, on
+the strength of a predicate Slang does not expose:
+`SlangProgram.SpecializationParameterCount` reports `1` for this shape both
+*before and after* the conformance that makes it compile, so it is a report, not
+a test for "will this generate code".
 
 There is deliberately **no `Specialize` method**. `IComponentType::specialize`
 on a component whose global scope holds an interface-typed `ParameterBlock`
@@ -175,6 +199,159 @@ bindings where the compiled shader has five.
 descriptor space, nesting accumulates, and a block whose element carries
 ordinary data gets the implicit uniform buffer Slang puts at binding 0 of its
 space but never lists as a descriptor range.
+
+### Bindless arrays: reflection reports, you supply the capacity
+
+`Texture2D gTextures[];` has no descriptor count — the shader does not state
+one, so neither does reflection. `SlangDescriptorBinding.Count` is therefore an
+option (`SlangDescriptorCount`), not a `uint`:
+
+```csharp
+foreach (var binding in reflection.Bindings(i))
+{
+    if (binding.Count.TryGetValue(out uint count))    // Fixed
+        …
+    else if (binding.Count.IsUnbounded)               // SLANG_UNBOUNDED_SIZE
+        …
+}
+```
+
+`MapBinding()` refuses such a binding with `NotSupportedException`, because a
+`VkDescriptorSetLayoutBinding.descriptorCount` has to come from somewhere and
+reflection cannot pick your heap's capacity. Supply it:
+
+```csharp
+var bindings = reflection.Bindings(i).MapBindings(static binding => binding.Slot switch
+{
+    0 => 4096u,        // gTextures
+    1 => 32u,          // gSamplers
+    _ => 1024u,
+});
+```
+
+The resolver is asked **only** about bindings reflection could not size, so it
+never has to second-guess a count the shader did state. `MapBinding(binding,
+descriptorCount)` is the single-binding form, and it throws `ArgumentException`
+if reflection *did* report a count — overriding what the shader declares is not
+something an overload should do quietly.
+
+**That array is not yet a layout a driver will accept.** A capacity like 4096
+with `BindingFlags = None` is measured against the **base** per-stage descriptor
+limits, not the update-after-bind ones — and the base limits are small: the
+Vulkan-guaranteed minimum for `maxPerStageDescriptorSampledImages` is **16**.
+The six-figure numbers usually quoted for bindless are
+`maxPerStageDescriptorUpdateAfterBindSampledImages`, and a binding only gets
+measured against those once it is flagged `UpdateAfterBind` and its layout is
+created with `UpdateAfterBindPool = true`. Miss that and
+`vkCreatePipelineLayout` rejects the layout.
+
+So a bindless heap needs three things this package cannot do for you.
+
+**1. Device features.** Slang emits `OpCapability RuntimeDescriptorArray` and
+`OpTypeRuntimeArray` for `Texture2D gTextures[]`, and a declared capability
+whose requirement is not met is rejected when the module is created
+(`VUID-VkShaderModuleCreateInfo-pCode-08740`) — so `runtimeDescriptorArray` has
+to be on. These are Vulkan 1.2 core features, which the configurer hands out by
+`ref`:
+
+```csharp
+using var device = gpu.CreateDevice(new DeviceDescription
+{
+    Queues = [new QueueRequest(family, count: 1, priority: 1.0f)],
+
+    ConfigureFeatures = static (
+        ref ChainBuilder<VkDeviceCreateInfo> _,
+        ref VkPhysicalDeviceFeatures2        _,
+        ref VkPhysicalDeviceVulkan12Features f12,
+        ref VkPhysicalDeviceVulkan13Features _,
+        ref VkPhysicalDeviceVulkan14Features _) =>
+    {
+        f12.runtimeDescriptorArray                       = 1;
+        f12.descriptorBindingPartiallyBound              = 1;
+
+        // Update-after-bind is enabled per descriptor TYPE, not once. The
+        // three unbounded arrays above are a SAMPLED_IMAGE, a SAMPLER and —
+        // because StructuredBuffer<float4> maps to it — a STORAGE_BUFFER, so
+        // flagging all three UpdateAfterBind needs both of these bits.
+        f12.descriptorBindingSampledImageUpdateAfterBind  = 1;
+        f12.descriptorBindingStorageBufferUpdateAfterBind = 1;
+
+        // NOT needed by the fixture above, and enabling what you do not need is
+        // its own failure — see the VK_ERROR_FEATURE_NOT_PRESENT note below.
+        // `gTextures[gPush.index]` is dynamically uniform: a push constant is
+        // the same value for every invocation in the draw, so Slang emits no
+        // ShaderNonUniform capability and no `OpDecorate … NonUniform` for it.
+        // Enable the matching bit only when the index comes from a
+        // per-invocation source — an interpolated varying, a buffer read, a
+        // material ID — *and* the shader wraps it in
+        // `NonUniformResourceIndex(...)`, which is what makes Slang emit the
+        // capability and the decoration:
+        //
+        // f12.shaderSampledImageArrayNonUniformIndexing = 1;
+    },
+});
+```
+
+**The per-type point is the generalizable one.** Miss
+`descriptorBindingStorageBufferUpdateAfterBind` and `vkCreateDescriptorSetLayout`
+rejects the very layout step 2 builds —
+`VUID-VkDescriptorSetLayoutBindingFlagsCreateInfo-descriptorBindingStorageBufferUpdateAfterBind-03008`.
+Whichever descriptor types your heap holds, enable the matching
+`descriptorBinding<Type>UpdateAfterBind` for each of them.
+
+Check the bits first with `vkGetPhysicalDeviceFeatures2`; they are optional, and
+`vkCreateDevice` fails with `VK_ERROR_FEATURE_NOT_PRESENT` on a device that does
+not advertise one you asked for.
+
+**2. Binding flags and an update-after-bind layout.** The mapper leaves
+`BindingFlags` at `None`, so stamp them on the heap bindings yourself:
+
+```csharp
+for (int b = 0; b < bindings.Length; b++)
+{
+    if (reflection.Bindings(i)[b].Count.IsUnbounded)
+        bindings[b] = bindings[b] with
+        {
+            BindingFlags = DescriptorBindingFlags.UpdateAfterBind
+                         | DescriptorBindingFlags.PartiallyBound,
+        };
+}
+
+using var layout = device.CreateDescriptorSetLayout(new DescriptorSetLayoutDescription
+{
+    Bindings            = bindings,
+    UpdateAfterBindPool = true,      // required by the UpdateAfterBind flag above
+});
+```
+
+`PartiallyBound` is not decoration either: without it, every one of those 4096
+descriptors must have been written before a draw that could index them, and
+core validation reports the first one that was not. Allocate the set from a pool
+created with `updateAfterBind: true` to match
+(`new DescriptorSetPool(device, maxSets, sizes, updateAfterBind: true)`).
+
+**3. `VariableDescriptorCount`, if you want the count to shrink per set.**
+Vulkan allows `VariableDescriptorCount` on at most one binding per set — the one
+with the highest binding number — and a set with three unbounded arrays is the
+shape this exists for. Add `VariableDescriptorCount` / `PartiallyBound` to the
+binding whose count actually varies.
+
+> **This one needs more than the flag, and `DescriptorSetPool` cannot give it to
+> you yet.** It additionally requires `descriptorBindingVariableDescriptorCount`
+> enabled on the device
+> (`VUID-VkDescriptorSetLayoutBindingFlagsCreateInfo-descriptorBindingVariableDescriptorCount-03014`)
+> **and** a `VkDescriptorSetVariableDescriptorCountAllocateInfo` chained onto the
+> allocation, which is where the actual count is stated. `DescriptorSetPool.Acquire`
+> has no overload that chains it, so a set allocated through the pool takes that
+> binding's count as **zero** — every write past element 0 fails and every shader
+> access is out of bounds. Allocate such a set yourself until the wrapper grows
+> the overload.
+
+There is one thing reflection still refuses outright, and it is not the count: a
+descriptor range whose *index offset*, or a scope whose *space offset*, is a
+sentinel throws `NotSupportedException` from reflection. A binding with no
+binding number and a scope with no set number leave no layout to report at all,
+so there is nothing to hand back.
 
 ### `SV_VertexID` needs `shaderDrawParameters` enabled on the device
 
