@@ -135,8 +135,9 @@ a `try`.
 ## Reflection-driven layouts
 
 A linked program knows its own binding surface, and `SlangReflection` hands it
-back as the description types `Ahjo.Vulkan` already takes — there is no parallel
-`Slang*` type set to convert from.
+back as `Slang*` types that describe what the *shader* declared. `SlangVulkanMapping`
+converts them to the description types `Ahjo.Vulkan` takes, with one extension
+method per shape.
 
 ```csharp
 SlangReflection reflection = program.Reflection;
@@ -145,15 +146,23 @@ for (int i = 0; i < reflection.DescriptorSetCount; i++)
 {
     uint set = reflection.SetIndex(i);            // the Vulkan set number
     using var layout = device.CreateDescriptorSetLayout(
-        new DescriptorSetLayoutDescription { Bindings = reflection.Bindings(i) });
+        new DescriptorSetLayoutDescription { Bindings = reflection.Bindings(i).MapBindings() });
 }
 
 using var pipelineLayout = device.CreatePipelineLayout(new PipelineLayoutDescription
 {
     SetLayouts         = layouts,
-    PushConstantRanges = reflection.PushConstantRanges,
+    PushConstantRanges = reflection.PushConstantRanges.MapPushConstantRanges(),
 });
 ```
+
+The indirection is deliberate. Reflection reports what the shader declared;
+`VkDescriptorType` is one interpretation of that, and a binding Slang reports as
+a mutable texture is a `STORAGE_IMAGE` only because this mapping says so. Keeping
+the two apart means a caller who disagrees can read `SlangDescriptorBinding` and
+build the `DescriptorBinding` themselves, rather than being handed a decision
+already baked in. `MapBindingType` and `MapScalarFormat` are public for the same
+reason.
 
 Reflection is only ever taken from a **linked** program, and that is enforced by
 the type system rather than by documentation. Both alternatives are silently
@@ -273,19 +282,33 @@ parameter category and space swept, so there is no narrowing to be had.
 
 ### Vertex attributes, and the half this cannot fill in
 
-`reflection.VertexAttributes(entryPointIndex)` gives `Location` and `Format` for
-each real varying input of a vertex entry point, struct-typed inputs recursed
-one level with locations accumulating. System values (`SV_VertexID`,
-`SV_InstanceID`, `SV_IsFrontFace`, `SV_Position`) are excluded — without that
-filter an `SV_InstanceID` emits a phantom attribute at location 0 that collides
-with the real `POSITION`.
+`reflection.VertexAttributes(entryPointIndex)` gives the `Location` and the
+declared type — `ScalarType`, `ComponentCount`, `Kind` — for each real varying
+input of a vertex entry point, struct-typed inputs recursed one level with
+locations accumulating. System values (`SV_VertexID`, `SV_InstanceID`,
+`SV_IsFrontFace`, `SV_Position`) are excluded — without that filter an
+`SV_InstanceID` emits a phantom attribute at location 0 that collides with the
+real `POSITION`.
 
-**`Binding` and `Offset` are left at their defaults and the caller must fill
-them.** A shader states its input locations and formats but never how the
-application packs its vertex buffers, so those two fields and every field of
-`VertexBindingDescription` are information reflection does not have. There is
-deliberately no `VertexInputDescription` factory here, and composition does not
-change that.
+`MapVertexAttribute` turns one into a `VertexAttributeDescription`, resolving the
+`VkFormat` from `(ScalarType, ComponentCount)`:
+
+```csharp
+foreach (var attr in reflection.VertexAttributes(entryPointIndex))
+    attributes.Add(attr.MapVertexAttribute(binding: 0, offset: strideSoFar));
+```
+
+**`binding` and `offset` are parameters because reflection cannot know them.** A
+shader states its input locations and formats but never how the application packs
+its vertex buffers, so those two and every field of `VertexBindingDescription`
+are information reflection does not have. They default to `0`, which is right for
+a single tightly-packed buffer and wrong for anything else. There is deliberately
+no `VertexInputDescription` factory here, and composition does not change that.
+
+Note that the two refusals — a matrix-typed vertex input, and a
+`(ScalarType, ComponentCount)` pair with no `VkFormat` — now throw
+`NotSupportedException` from `MapVertexAttribute` rather than from reflection.
+Reflection reports the matrix; only the mapping to Vulkan has to give up on it.
 
 ### Two things reflection refuses rather than guesses
 

@@ -214,25 +214,27 @@ public sealed unsafe class SlangReflection
     /// for any entry point whose stage is not <c>ShaderStages.Vertex</c>.
     /// </summary>
     /// <remarks>
-    /// <para><b><c>Binding</c> and <c>Offset</c> are left at their defaults and
-    /// the caller must fill them.</b> A shader states its input locations and
-    /// formats but not how the application packs its vertex buffers, so
-    /// <c>SlangVertexAttributeDescription.Binding</c> / <c>.Offset</c> and every
-    /// field of <c>VertexBindingDescription</c> are information reflection
-    /// simply does not have. There is deliberately no
-    /// <c>VertexInputDescription</c> factory here; composition does not change
-    /// this, because nothing in a composite says anything about the
-    /// application's buffer layout either.</para>
+    /// <para>This reports the input's <c>Location</c> and its declared Slang
+    /// type. Use <c>SlangVulkanMapping.MapVertexAttribute</c> to resolve that
+    /// into a <c>VertexAttributeDescription</c> with a <c>VkFormat</c>; that is
+    /// also where <c>binding</c> and <c>offset</c> are supplied, because a
+    /// shader states its input locations and formats but not how the
+    /// application packs its vertex buffers. Those two and every field of
+    /// <c>VertexBindingDescription</c> are information reflection simply does
+    /// not have. There is deliberately no <c>VertexInputDescription</c> factory
+    /// here; composition does not change this, because nothing in a composite
+    /// says anything about the application's buffer layout either.</para>
     /// <para>System-value inputs (<c>SV_VertexID</c>, <c>SV_InstanceID</c>,
     /// <c>SV_IsFrontFace</c>, <c>SV_Position</c>) are excluded: they report
     /// parameter category <c>NONE</c>, and emitting them would produce a
     /// phantom attribute at location 0 colliding with the real
     /// <c>POSITION</c>.</para>
+    /// <para>A matrix-typed vertex input is reported here rather than refused;
+    /// it is <c>MapVertexAttribute</c> that throws
+    /// <c>NotSupportedException</c> for it, since only the mapping to a
+    /// <c>VkFormat</c> needs the per-location component count that is not
+    /// derivable.</para>
     /// </remarks>
-    /// <exception cref="NotSupportedException">
-    /// The entry point takes a matrix-typed vertex input, whose per-location
-    /// component count is not derivable — see the exception text.
-    /// </exception>
     public ReadOnlySpan<SlangVertexAttributeDescription> VertexAttributes(int entryPointIndex)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(entryPointIndex);

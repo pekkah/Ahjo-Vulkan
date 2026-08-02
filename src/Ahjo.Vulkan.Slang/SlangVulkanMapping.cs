@@ -148,7 +148,14 @@ public static class SlangVulkanMapping
 
         _ => VkFormat.VK_FORMAT_UNDEFINED,
     };
-    
+
+    /// <summary>
+    /// Maps one reflected Slang descriptor binding to the <c>Ahjo.Vulkan</c>
+    /// description type <c>Device.CreateDescriptorSetLayout</c> takes.
+    /// </summary>
+    /// <exception cref="NotSupportedException">
+    /// The binding's Slang type has no Vulkan descriptor equivalent.
+    /// </exception>
     public static DescriptorBinding MapBinding(this SlangDescriptorBinding binding)
     {
         return new DescriptorBinding
@@ -160,6 +167,10 @@ public static class SlangVulkanMapping
         };
     }
 
+    /// <summary>
+    /// Maps one reflected Slang push-constant range to the <c>Ahjo.Vulkan</c>
+    /// description type <c>Device.CreatePipelineLayout</c> takes.
+    /// </summary>
     public static PushConstantRange MapPushConstantRange(this SlangPushConstantRange range)
     {
         return new PushConstantRange
@@ -170,6 +181,14 @@ public static class SlangVulkanMapping
         };
     }
 
+    /// <summary>
+    /// Maps a reflected descriptor set's bindings — as returned by
+    /// <c>SlangReflection.Bindings</c> — into a <c>DescriptorBinding[]</c>
+    /// suitable for <c>DescriptorSetLayoutDescription.Bindings</c>.
+    /// </summary>
+    /// <exception cref="NotSupportedException">
+    /// A binding's Slang type has no Vulkan descriptor equivalent.
+    /// </exception>
     public static DescriptorBinding[] MapBindings(this ReadOnlySpan<SlangDescriptorBinding> bindings)
     {
         var result = new DescriptorBinding[bindings.Length];
@@ -178,6 +197,12 @@ public static class SlangVulkanMapping
         return result;
     }
 
+    /// <summary>
+    /// Maps a program's reflected push-constant ranges — as returned by
+    /// <c>SlangReflection.PushConstantRanges</c> — into a
+    /// <c>PushConstantRange[]</c> suitable for
+    /// <c>PipelineLayoutDescription.PushConstantRanges</c>.
+    /// </summary>
     public static PushConstantRange[] MapPushConstantRanges(this ReadOnlySpan<SlangPushConstantRange> ranges)
     {
         var result = new PushConstantRange[ranges.Length];

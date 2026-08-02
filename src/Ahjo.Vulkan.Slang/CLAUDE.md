@@ -2,9 +2,11 @@
 
 The idiomatic layer over `Ahjo.Vulkan.Slang.Native`: `SlangCompiler` →
 `SlangSession` → `SlangModule` / `SlangEntryPoint` → `SlangProgram` →
-`SlangReflection`. It references `Ahjo.Vulkan` for its vocabulary —
-`ShaderStages`, and the `Pipelines/` description types reflection produces —
-and nothing in `src/Ahjo.Vulkan/` references it back.
+`SlangReflection`. Reflection produces `Slang*` description types that describe
+what the *shader* declared; `SlangVulkanMapping` is the one place that converts
+them into `Ahjo.Vulkan`'s `Pipelines/` types. It references `Ahjo.Vulkan` for
+its vocabulary — `ShaderStages`, and those `Pipelines/` types — and nothing in
+`src/Ahjo.Vulkan/` references it back.
 
 Design record: `docs/design/specs/2026-08-01-issue-166-slang-support-design.md`
 and its paired plan.
@@ -70,9 +72,12 @@ null-terminated.
 
 ## Boundaries
 
-- **Nothing here edits `src/Ahjo.Vulkan/`.** Reflection maps *onto* the existing
-  `Pipelines/` description types; if a step seems to need a new one, that is a
-  design question, not an edit.
+- **Nothing here edits `src/Ahjo.Vulkan/`.** `SlangVulkanMapping` maps *onto* the
+  existing `Pipelines/` description types; if a step seems to need a new one,
+  that is a design question, not an edit. Keep the mapping confined to that one
+  file — reflection returning `Slang*` types is what makes the Vulkan
+  interpretation replaceable, and scattering `VkDescriptorType` decisions back
+  into the reflection walk undoes it.
 - The integration point with the wrapper is
   `Device.CreateShaderModule(ReadOnlySpan<uint>)` and nothing else. No new
   `Device` overload was added and none should be.
@@ -156,11 +161,14 @@ proves nothing.
    `getDescriptorSetSpaceOffset`.
 
 Two further constraints, both about refusing rather than guessing: more than one
-`[[vk::push_constant]]` block throws (reflection exposes a buffer *index*, not
-the byte offset `VkPushConstantRange.Offset` needs), and a matrix-typed vertex
-input throws (per-location component count depends on the session's matrix
-layout mode, and only column-major was probed). Do not replace either throw with
-a plausible value — both produce a pipeline that builds and then mis-binds.
+`[[vk::push_constant]]` block throws from **reflection** (it exposes a buffer
+*index*, not the byte offset `VkPushConstantRange.Offset` needs), and a
+matrix-typed vertex input throws from **`MapVertexAttribute`** (per-location
+component count depends on the session's matrix layout mode, and only
+column-major was probed). The split is deliberate: reflection can report a
+matrix perfectly well, and only the `VkFormat` mapping has to give up on it. Do
+not replace either throw with a plausible value — both produce a pipeline that
+builds and then mis-binds.
 
 Stage attribution is opt-in (`SlangStageAttribution.PerEntryPointUsage`) because
 it costs a codegen per entry point. Push-constant stages stay the program union

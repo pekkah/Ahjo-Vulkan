@@ -46,9 +46,10 @@ NuGet as six packages:
   — the idiomatic wrapper over the Slang compiler: compile Slang/HLSL source
   to SPIR-V at run time and hand the words straight to
   `Device.CreateShaderModule`, compose a program from N modules and N entry
-  points, and **reflect the linked result into `DescriptorBinding`,
-  `PushConstantRange` and `VertexAttributeDescription`** — the same description
-  types `Device.CreateDescriptorSetLayout` and `Device.CreatePipelineLayout`
+  points, and **reflect the linked result into a described binding surface** that
+  `SlangVulkanMapping` converts into the `DescriptorBinding`,
+  `PushConstantRange` and `VertexAttributeDescription` types
+  `Device.CreateDescriptorSetLayout` and `Device.CreatePipelineLayout`
   already take, so a shader's declared layout stops being restated by hand.
   Compiler diagnostics come back as exceptions carrying Slang's own text —
   there is no path that returns an empty blob on failure. **Standalone**:
