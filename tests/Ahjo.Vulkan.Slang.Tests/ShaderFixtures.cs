@@ -952,6 +952,114 @@ internal static class ShaderFixtures
         """;
 
     /// <summary>
+    /// Issue #183's shape: a zero-length resource array, with two ordinary
+    /// resources behind it so the slot it reserves is observable.
+    /// </summary>
+    /// <remarks>
+    /// <para>Measured on <c>v2026.14.1</c> / win-x64: reflection reports
+    /// <c>(0,0) gTex Fixed(0)</c>, <c>(0,1) gSampler Fixed(1)</c> and
+    /// <c>(0,2) gReal Fixed(1)</c>, while the emitted SPIR-V decorates only
+    /// <c>(0,1)</c> and <c>(0,2)</c> — Slang emits no variable for the empty
+    /// array.</para>
+    /// <para><b>Deleting the array entirely moves <c>gSampler</c> to 0 and
+    /// <c>gReal</c> to 1.</b> That is what makes <c>gTex[0]</c> a reserved slot
+    /// rather than a non-event, and it is why the two other resources are in the
+    /// fixture at all: without them nothing would distinguish "the binding
+    /// number was consumed" from "the declaration vanished".</para>
+    /// </remarks>
+    public const string ReflectionZeroLengthArray = """
+        Texture2D    gTex[0];
+        SamplerState gSampler;
+        Texture2D    gReal;
+
+        [shader("fragment")]
+        float4 fragmentMain(float2 uv : TEXCOORD0) : SV_Target
+        {
+            return gReal.Sample(gSampler, uv);
+        }
+        """;
+
+    /// <summary>
+    /// <see cref="ReflectionZeroLengthArray"/>, character-for-character, except
+    /// that the length comes from a constant.
+    /// </summary>
+    /// <remarks>
+    /// <para>This is <c>Texture2D gMaps[NUM_MAPS];</c> with <c>NUM_MAPS = 0</c> —
+    /// generated or parameterized shader code, not a typo. Measured on
+    /// <c>v2026.14.1</c> / win-x64, reflection reports the identical three
+    /// bindings, so the shape is reachable without anyone typing <c>[0]</c>.
+    /// That is what makes issue #183 worth a fix rather than a note.</para>
+    /// <para>Kept as a near-duplicate on purpose, for the same reason
+    /// <see cref="ReflectionMaterialBlockWidened"/> is: the claim is about two
+    /// spellings producing the same reflection, and only two shaders can carry
+    /// it.</para>
+    /// </remarks>
+    public const string ReflectionZeroLengthArrayFromConstant = """
+        static const int N = 0;
+        Texture2D        gTex[N];
+        SamplerState     gSampler;
+        Texture2D        gReal;
+
+        [shader("fragment")]
+        float4 fragmentMain(float2 uv : TEXCOORD0) : SV_Target
+        {
+            return gReal.Sample(gSampler, uv);
+        }
+        """;
+
+    /// <summary>
+    /// The degenerate set: a zero-length array and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// Measured on <c>v2026.14.1</c> / win-x64: reflection reports one set with
+    /// one binding, <c>(0,0) gTex Fixed(0)</c>, and the emitted SPIR-V decorates
+    /// <b>nothing</b>. Vulkan's layout for that set has zero bindings and
+    /// <c>Device.CreateDescriptorSetLayout</c> cannot make one — it rejects an
+    /// empty <c>Bindings</c> span
+    /// (<c>src/Ahjo.Vulkan/Lifecycle/Device.cs</c>), which is the gap
+    /// <c>src/Ahjo.Vulkan.Slang/CLAUDE.md</c> already documents for a sparse set
+    /// index. Deliberately <b>not</b> a row in
+    /// <c>Reflection_CoversEverySetAndBinding_TheSpirvDecorates</c>: with no
+    /// decoration to iterate, that theory would assert nothing at all.
+    /// </remarks>
+    public const string ReflectionZeroLengthArrayOnly = """
+        Texture2D gTex[0];
+
+        [shader("fragment")]
+        float4 fragmentMain() : SV_Target
+        {
+            return float4(1.0, 0.0, 0.0, 1.0);
+        }
+        """;
+
+    /// <summary>
+    /// One dead set beside a live one: the zero-length array takes a space of
+    /// its own.
+    /// </summary>
+    /// <remarks>
+    /// Measured on <c>v2026.14.1</c> / win-x64: reflection reports
+    /// <c>(0,0) gReal</c>, <c>(0,1) gSampler</c> and <c>(1,0) gTex Fixed(0)</c>,
+    /// and the emitted SPIR-V decorates <c>(0,0)</c> and <c>(0,1)</c>. So one
+    /// dead array does not make the program unmappable — only the set that
+    /// consists entirely of dead arrays, which is the #176 consistency claim.
+    /// The explicit space also shows #180's <c>CollectSpaceCorrections</c> is
+    /// unaffected by a zero count: the binding is keyed to set 1, its declared
+    /// space.
+    /// </remarks>
+    public const string ReflectionZeroLengthArrayInOwnSet = """
+        [[vk::binding(0, 1)]] Texture2D gTex[0];
+
+        Texture2D    gReal;
+        SamplerState gSampler;
+
+        [shader("fragment")]
+        float4 fragmentMain(float2 uv : TEXCOORD0) : SV_Target
+        {
+            return gReal.Sample(gSampler, uv);
+        }
+        """;
+
+    /// <summary>
     /// Two modules each declaring a push-constant block — OPEN-5's guard.
     /// Module 1 of 2.
     /// </summary>

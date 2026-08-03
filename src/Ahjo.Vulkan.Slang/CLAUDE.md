@@ -135,7 +135,7 @@ null-terminated.
   conditional. Spec OPEN-4(b); the report is tracked as #170 and its upstream
   number belongs here once filed.
 
-## Reflection — ten rules Slang does not hand you
+## Reflection — eleven rules Slang does not hand you
 
 Every one of these was measured against `OpDecorate DescriptorSet` / `Binding`
 in the SPIR-V Slang emitted, not read off a header, and every one of them looks
@@ -272,6 +272,34 @@ proves nothing.
     claims slot 0) is the fixture that can tell a reported offset from a
     hard-coded one. Issue #180.
 
+11. **A zero-length resource array is a real descriptor range with a count of
+    literally zero, and the binding number is reserved.** Measured on
+    `v2026.14.1` / win-x64: `Texture2D gTex[0];` compiles, and
+    `getDescriptorSetDescriptorRangeCount` returns `0` — not a sentinel, so
+    `Fixed(0)` is a legitimate report and reflection keeps making it. The slot is
+    consumed exactly as a four-element array's would be (delete the declaration
+    and every following resource moves down one), and the emitted SPIR-V
+    decorates **no variable** at it; nothing can index it (`error[E30029]`
+    statically, `error[E99997]` dynamically). It is reachable without anyone
+    typing `[0]` — `gMaps[NUM_MAPS]` with `NUM_MAPS = 0` — and a
+    struct-of-resources array yields one zero-count range **per member**.
+    **So it is not a Vulkan descriptor binding, and `SlangVulkanMapping` says so
+    at every entry point**: `MapBindings` omits it (the result is therefore not
+    positionally aligned with `reflection.Bindings(i)` — key on `Slot`),
+    `MapBinding` refuses it, and `MapBinding(binding, count)` refuses to size it.
+    The three must keep agreeing: emitting `descriptorCount = 0` and omitting the
+    binding are both legal Vulkan and are **not compatible with each other** — a
+    set allocated from one layout fails
+    `VUID-vkCmdBindDescriptorSets-pDescriptorSets-00358` against a pipeline
+    layout built from the other (measured, NVIDIA + validation layer). Emitting
+    `descriptorCount = 0` is *not* an option here anyway:
+    `DescriptorBinding.Count == 0` is `Ahjo.Vulkan`'s sentinel for a zeroed span
+    element and is rewritten to `1` (`src/Ahjo.Vulkan/Lifecycle/Device.cs`, issue
+    #119) — **do not "fix" that guard**, and do not move this rule into
+    `SlangReflection`: refusing a program there would make two perfectly usable
+    bindings unreachable because of one nobody can reference, which is the
+    failure #176 removed. Issue #183.
+
 Two further constraints, both about refusing rather than guessing: more than one
 `[[vk::push_constant]]` block throws from **reflection** (it exposes a buffer
 *index*, not the byte offset `VkPushConstantRange.Offset` needs), and a
@@ -306,3 +334,10 @@ the XML doc names it. **Do not paper over it here** — synthesizing a stand-in
 binding would put a descriptor in a layout the shader never declared. Closing it
 is a decision about `Ahjo.Vulkan`'s own validity guard, not an edit this project
 gets to make.
+
+A set whose every binding is a zero-length array (rule 11) reaches the same gap
+by a second route, and both `MapBindings` overloads refuse it there with a
+message naming the gap rather than letting `Device` report an empty `Bindings`
+span two frames later from a different package. That refusal is scoped to "input
+non-empty, output empty" and becomes a `return []` the day `Ahjo.Vulkan` accepts
+an empty span.

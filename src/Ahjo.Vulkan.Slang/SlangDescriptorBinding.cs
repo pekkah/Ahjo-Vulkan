@@ -40,6 +40,13 @@ public readonly record struct SlangDescriptorBinding
     public SlangBindingType Type { get; init; }
 
     /// <summary>How many descriptors this binding holds, when Slang can say.</summary>
+    /// <remarks>
+    /// A zero-length resource array (<c>Texture2D gTex[0]</c>) reports
+    /// <see cref="SlangDescriptorCount.IsZero"/>: Slang reserved the binding
+    /// number and emitted no SPIR-V variable, so it is not a Vulkan descriptor
+    /// binding at all — <c>SlangVulkanMapping.MapBindings</c> omits it from the
+    /// layout and <c>MapBinding</c> refuses it (issue #183).
+    /// </remarks>
     public SlangDescriptorCount Count { get; init; }
 
     /// <summary>The stages that reach this binding.</summary>
