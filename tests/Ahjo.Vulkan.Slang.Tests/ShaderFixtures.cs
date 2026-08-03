@@ -339,14 +339,16 @@ internal static class ShaderFixtures
     /// codegen.</para>
     /// <para>The second set is a <c>ParameterBlock</c> rather than the
     /// <c>[[vk::binding(0, 1)]] ConstantBuffer&lt;Xform&gt;</c> the plan
-    /// sketched, because that shape is misreported by reflection today and the
-    /// misreport has nothing to do with bindless arrays: measured on
-    /// <c>v2026.14.1</c> / win-x64, a global-scope <c>ConstantBuffer&lt;T&gt;</c>
-    /// carrying an explicit <c>[[vk::binding(n, space)]]</c> with
-    /// <c>space &gt; 0</c> is reported at set <b>0</b> while the emitted SPIR-V
-    /// decorates it <c>DescriptorSet = space</c> — reproduced with no unbounded
-    /// array anywhere in the module. That is its own defect; this fixture is
-    /// about issue #176 and stays on a shape reflection gets right.</para>
+    /// sketched, because when this fixture was written that shape was
+    /// misreported by reflection and the misreport had nothing to do with
+    /// bindless arrays: a global-scope <c>ConstantBuffer&lt;T&gt;</c> carrying
+    /// an explicit <c>[[vk::binding(n, space)]]</c> with <c>space &gt; 0</c> was
+    /// reported at set <b>0</b> while the emitted SPIR-V decorated it
+    /// <c>DescriptorSet = space</c>. That was its own defect — issue #180, now
+    /// fixed, and <see cref="ReflectionExplicitSpaceConstantBuffer"/> is the
+    /// fixture for that shape. <b>This one stays on the
+    /// <c>ParameterBlock</c></b>: it is issue #176's fixture, it should test one
+    /// thing, and its cross-check row already passes.</para>
     /// </remarks>
     public const string ReflectionBindlessArrays = """
         struct Push  { float4 tint; uint index; };
@@ -693,6 +695,259 @@ internal static class ShaderFixtures
                           * float(gMaterial.Params.Flags);
 
             return mul(gMaterial.Transform, tinted);
+        }
+        """;
+
+    /// <summary>
+    /// Issue #180's own module: a global-scope <c>ConstantBuffer&lt;T&gt;</c>
+    /// carrying an explicit <c>[[vk::binding(0, 1)]]</c>, beside a texture and a
+    /// sampler in space 0.
+    /// </summary>
+    /// <remarks>
+    /// Measured on <c>v2026.14.1</c> / win-x64, the emitted SPIR-V decorates
+    /// <c>gAlbedo (0,0)</c>, <c>gSampler (0,1)</c> and <c>gXform (1,0)</c>.
+    /// Before #180 reflection reported <b>two bindings at <c>(0,0)</c></b> — the
+    /// texture and the constant buffer — no set 1 at all, and the texture
+    /// renamed <c>gXform</c>, because the mis-keyed buffer overwrote it in the
+    /// binding-range facts dictionary.
+    /// </remarks>
+    public const string ReflectionExplicitSpaceConstantBuffer = """
+        struct Xform { float4x4 mvp; };
+
+        [[vk::binding(0, 0)]] Texture2D<float4>     gAlbedo;
+        [[vk::binding(1, 0)]] SamplerState          gSampler;
+        [[vk::binding(0, 1)]] ConstantBuffer<Xform> gXform;
+
+        [shader("vertex")]
+        float4 vertexMain(float3 position : POSITION) : SV_Position
+        {
+            return mul(gXform.mvp, float4(position, 1.0));
+        }
+
+        [shader("fragment")]
+        float4 fragmentMain(float2 uv : TEXCOORD0) : SV_Target
+        {
+            return gAlbedo.Sample(gSampler, uv) * gXform.mvp[0];
+        }
+        """;
+
+    /// <summary>
+    /// The same defect where a descriptor-set record for space 1
+    /// <b>already exists</b>: a texture is declared at
+    /// <c>[[vk::binding(0, 1)]]</c> and the constant buffer at
+    /// <c>[[vk::binding(1, 1)]]</c> is still emitted into space 0's record.
+    /// </summary>
+    /// <remarks>
+    /// This is what proves the defect is not "Slang forgot to make a set
+    /// record". Measured before #180: <c>(0,1)</c> was reported twice — once as
+    /// the sampler and once as the constant buffer, both named
+    /// <c>gSampler</c> — while <c>gOther</c> at <c>(1,0)</c> was correct.
+    /// </remarks>
+    public const string ReflectionExplicitSpaceMixed = """
+        struct Xform { float4x4 mvp; };
+
+        [[vk::binding(0, 0)]] Texture2D<float4>     gAlbedo;
+        [[vk::binding(1, 0)]] SamplerState          gSampler;
+        [[vk::binding(0, 1)]] Texture2D<float4>     gOther;
+        [[vk::binding(1, 1)]] ConstantBuffer<Xform> gXform;
+
+        [shader("fragment")]
+        float4 fragmentMain(float2 uv : TEXCOORD0) : SV_Target
+        {
+            return gAlbedo.Sample(gSampler, uv)
+                 * gOther.Sample(gSampler, uv)
+                 * gXform.mvp[0];
+        }
+        """;
+
+    /// <summary>
+    /// Two constant buffers in two distinct non-zero spaces — the shape where
+    /// the defect loses a whole binding rather than merely misplacing it.
+    /// </summary>
+    /// <remarks>
+    /// Before #180 both folded to <c>(0,0)</c> and reflection reported the
+    /// <em>same</em> binding twice, both named <c>gB</c>: <c>gA</c> was
+    /// unrecoverable through the API entirely, and so was its buffer layout.
+    /// The two members are named differently on purpose so
+    /// <c>TryGetBufferLayout</c> can tell which buffer it returned.
+    /// </remarks>
+    public const string ReflectionExplicitSpaceTwoConstantBuffers = """
+        struct A { float4 a; };
+        struct B { float4 b; };
+
+        [[vk::binding(0, 1)]] ConstantBuffer<A> gA;
+        [[vk::binding(0, 2)]] ConstantBuffer<B> gB;
+
+        [shader("fragment")]
+        float4 fragmentMain() : SV_Target
+        {
+            return gA.a + gB.b;
+        }
+        """;
+
+    /// <summary>
+    /// The same defect one level deeper: a <c>ConstantBuffer&lt;T&gt;</c> inside
+    /// a plain struct global — not a <c>ParameterBlock</c> — placed at
+    /// <c>[[vk::binding(0, 1)]]</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>SPIR-V decorates <c>gAlbedo (0,0)</c>, <c>gBundle.tex (1,0)</c> and
+    /// <c>gBundle.cb (1,1)</c>; before #180 the constant buffer keyed to
+    /// <c>(0,1)</c>.</para>
+    /// <para><b>This is the fixture that pins the span rule</b> of
+    /// <c>CollectSpaceCorrections</c>: <c>gBundle</c> is one field owning
+    /// <em>two</em> binding ranges, so a correction that only ever looked at
+    /// <c>getFieldBindingRangeOffset(f)</c> itself would repair <c>tex</c> and
+    /// leave <c>cb</c> behind.</para>
+    /// </remarks>
+    public const string ReflectionExplicitSpaceStructGlobal = """
+        struct Xform { float4x4 mvp; };
+
+        struct Bundle
+        {
+            Texture2D<float4>     tex;
+            ConstantBuffer<Xform> cb;
+        };
+
+        [[vk::binding(0, 1)]] Bundle            gBundle;
+        [[vk::binding(0, 0)]] Texture2D<float4> gAlbedo;
+
+        [shader("fragment")]
+        float4 fragmentMain() : SV_Target
+        {
+            return gBundle.tex.Load(int3(0, 0, 0)) * gBundle.cb.mvp[0] * gAlbedo.Load(int3(0, 0, 0));
+        }
+        """;
+
+    /// <summary>
+    /// Issue #180's second shape: <b>loose global uniform data</b> beside an
+    /// explicitly-bound texture and constant buffer.
+    /// </summary>
+    /// <remarks>
+    /// <para><c>float4 gTint;</c> is the whole trigger. With it,
+    /// <c>spReflection_getGlobalParamsTypeLayout</c> returns a
+    /// <c>SLANG_TYPE_KIND_CONSTANT_BUFFER</c> wrapper instead of a struct, whose
+    /// descriptor-set records list the element's ranges plus an implicit buffer
+    /// at a bogus index offset. Deleting that one line — or moving it into an
+    /// explicit <c>ConstantBuffer&lt;Tint&gt;</c> — returns the scope to
+    /// <c>SLANG_TYPE_KIND_STRUCT</c>, which is why
+    /// <see cref="ReflectionExplicitSpaceConstantBuffer"/> was unaffected.</para>
+    /// <para>Measured on <c>v2026.14.1</c> / win-x64, the emitted SPIR-V
+    /// decorates <c>gAlbedo (0,0)</c>, <c>globalParams (0,1)</c> and
+    /// <c>gXform (1,0)</c>. Before the unwrap, reflection reported <b>three
+    /// bindings all at slot 0 of set 0</b>, all with an empty <c>Name</c>, and no
+    /// set 1 at all.</para>
+    /// </remarks>
+    public const string ReflectionLooseGlobalsWithExplicitSpace = """
+        struct Xform { float4x4 mvp; };
+
+        float4 gTint;
+
+        [[vk::binding(0, 0)]] Texture2D<float4>     gAlbedo;
+        [[vk::binding(0, 1)]] ConstantBuffer<Xform> gXform;
+
+        [shader("fragment")]
+        float4 fragmentMain() : SV_Target
+        {
+            return gAlbedo.Load(int3(0, 0, 0)) * gXform.mvp[0] * gTint;
+        }
+        """;
+
+    /// <summary>
+    /// The degenerate control: the constant-buffer wrapper with nothing else in
+    /// it.
+    /// </summary>
+    /// <remarks>
+    /// SPIR-V puts <c>globalParams</c> at <c>(0,0)</c>, which is where reflection
+    /// reported it <em>by accident</em> before the unwrap — the wrapper's own
+    /// index offset is 0 in every shape, and here 0 happens to be right. So this
+    /// fixture's assertion is carried by the <b>buffer layout</b>: two members,
+    /// <c>gTint</c> at offset 0 and <c>gScale</c> at 16. That asymmetry is
+    /// deliberate — it is what proves the sibling tests assert the slot Slang
+    /// reports rather than a constant.
+    /// </remarks>
+    public const string ReflectionLooseGlobalsOnly = """
+        float4 gTint;
+        float  gScale;
+
+        [shader("fragment")]
+        float4 fragmentMain() : SV_Target
+        {
+            return gTint * gScale;
+        }
+        """;
+
+    /// <summary>
+    /// Proof that the wrapper defect has nothing to do with
+    /// <c>[[vk::binding]]</c>: <b>no explicit space anywhere</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Measured on <c>v2026.14.1</c> / win-x64:
+    /// <c>globalParams (0,0)</c>, <c>gAlbedo (0,1)</c>, <c>gSampler (0,2)</c>.
+    /// <b>The implicit buffer takes slot 0 and pushes the resources up</b>
+    /// whenever nothing is explicitly bound there — the opposite of
+    /// <see cref="ReflectionLooseGlobalsWithExplicitSpace"/>, where
+    /// <c>[[vk::binding(0, 0)]]</c> pins the texture to 0 and the implicit buffer
+    /// lands at 1. Verified independent of declaration order: moving
+    /// <c>float4 gTint;</c> below the two resources changes nothing.</para>
+    /// <para>So this fixture's discriminating assertion is <b>not</b> the
+    /// implicit buffer's slot — before the unwrap, reflection reported it at
+    /// <c>(0,0)</c>, which is where it belongs. What was broken here is
+    /// everything else: the wrapper's records gave three bindings all at slot 0,
+    /// all unnamed, so the texture and the sampler collided on top of it. That is
+    /// what makes this the fixture proving the wrapper defect is independent of
+    /// <c>[[vk::binding]]</c> — any module with loose global uniform data and at
+    /// least one resource was affected, not just issue #180's original
+    /// explicit-space shape.</para>
+    /// </remarks>
+    public const string ReflectionLooseGlobalsNoExplicitBinding = """
+        float4 gTint;
+
+        Texture2D    gAlbedo;
+        SamplerState gSampler;
+
+        [shader("fragment")]
+        float4 fragmentMain(float2 uv : TEXCOORD0) : SV_Target
+        {
+            return gAlbedo.Sample(gSampler, uv) * gTint;
+        }
+        """;
+
+    /// <summary>
+    /// The combined shape: loose global uniform data <b>and</b> a
+    /// <c>ParameterBlock</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>The one combination worth a fixture of its own, because it is where
+    /// the two mechanisms could interact: unwrapping changes what the top-level
+    /// <c>Walk</c> is handed, while a block's set number comes from an offset
+    /// accumulated <em>separately</em>, on the sub-object range's variable layout.
+    /// A wrapper that shifted the element's own indices — the way a block's
+    /// implicit buffer shifts its listed ranges — would show up here as the block
+    /// landing in the wrong set.</para>
+    /// <para>Measured on <c>v2026.14.1</c> / win-x64, the emitted SPIR-V
+    /// decorates <c>globalParams (0,0)</c>, <c>gAlbedo (0,1)</c> and the block's
+    /// implicit uniform buffer <c>gXform (1,0)</c>. <b>Two implicit buffers, in
+    /// two sets, placed by two different rules</b> — the global one at the slot
+    /// <c>getGlobalParamsVarLayout</c> reports (here 0, because nothing is
+    /// explicitly bound there), the block's at slot 0 of its own space by
+    /// construction — and neither displaces the other. The block still lands in
+    /// set 1: unwrapping the global scope does not disturb the sub-object range
+    /// offset the block's set number accumulates from.</para>
+    /// </remarks>
+    public const string ReflectionLooseGlobalsWithParameterBlock = """
+        struct Xform { float4x4 mvp; };
+
+        float4 gTint;
+
+        Texture2D<float4> gAlbedo;
+
+        ParameterBlock<Xform> gXform;
+
+        [shader("fragment")]
+        float4 fragmentMain() : SV_Target
+        {
+            return gAlbedo.Load(int3(0, 0, 0)) * gXform.mvp[0] * gTint;
         }
         """;
 
