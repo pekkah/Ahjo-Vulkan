@@ -10,7 +10,12 @@ namespace Ahjo.Vulkan;
 /// <remarks>
 /// <para><see cref="Count"/> defaults to 1 (the dominant case). Use
 /// <see cref="DescriptorBindingFlags.VariableDescriptorCount"/> with a
-/// large <see cref="Count"/> for bindless arrays.</para>
+/// large <see cref="Count"/> for bindless arrays. <see cref="Count"/> is
+/// then the <i>maximum</i>: the count this particular set holds in that
+/// binding is chosen at
+/// <c>DescriptorSetPool.Acquire(layout, variableDescriptorCount)</c> and
+/// must not exceed it
+/// (VUID-VkDescriptorSetAllocateInfo-pSetLayouts-09380).</para>
 /// <para><b>Valid-by-default (issue #119):</b> the <see cref="Count"/> field
 /// initializer makes <c>new DescriptorBinding { … }</c> a single-descriptor
 /// binding without the caller restating <c>Count = 1</c>. Note that a

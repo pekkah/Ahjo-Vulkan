@@ -86,7 +86,9 @@ managed-byte count BDN's `MemoryDiagnoser` reports; `-` is zero.
 | `PipelineBarrier.ResetEvent_Single`             |  33.4 ns   |        -  | #155 canary: one `vkCmdResetEvent2` — bare stage-mask pass-through, no dependency marshalling. |
 | `FrameRing.Frame_Begin_Submit_Wait`             |  56.20 µs  |        -  | Full headless frame: BeginFrame → submit no-op cmd → wait fence.          |
 | `PushDescriptors.PushDescriptors_StorageBuffer` |  69.34 ns  |        -  | `vkCmdPushDescriptorSetWithTemplate` × 1024 in one Begin/End scope; bimodal under driver overhead. |
-| `DescriptorSetPool.AcquireReleaseReset_Cycle`   |  39.62 ns  |        -  | #114 canary: per-frame Acquire → Release → Reset; Reset retains the per-layout idle `Stack`s instead of discarding them. |
+| `DescriptorSetPool.AcquireReleaseReset_Cycle`   |  39.62 ns  |        -  | #114 canary: per-frame Acquire → Release → Reset; Reset retains the per-bucket `(layout, count)` idle `Stack`s instead of discarding them. Re-measured for #182 at 38.67 ns after the composite key landed — within noise, so the number is left as captured. |
+| `DescriptorSetPoolVariableCount.AcquireReleaseReset_VariableCount_Cycle` |  88.23 ns  |        -  | #182 canary: `Acquire(layout, count)` chains `VkDescriptorSetVariableDescriptorCountAllocateInfo` from the stack; the `(layout, count)` free-list key must not box. Mean not comparable to the row above — different layout, pool template and per-set descriptor count. |
+| `DescriptorSetPoolVariableCount.AcquireReleaseReset_TwoCounts_Cycle` | 221.69 ns  |        -  | #182 canary: two distinct counts per cycle — the bounded-count case must reuse both retained `Stack`s, not rebuild them (the #114 shape, one key deeper). Mean not comparable to `DescriptorSetPool.AcquireReleaseReset_Cycle` — different layout, pool template and per-set descriptor count. |
 | `HandleOwnership.PassAndReturn_ByValue`         |   3.69 ns  |        -  | #118 canary: `PipelineLayout` (one managed metadata ref) copied through a non-inlined call — stays stack-only, no write barrier, no box. Captured on a Linux container host (driver-free benchmark). |
 | `HandleOwnership.MetadataRead_OwningAndBorrowed` |  0.92 ns  |        -  | Field read replacing the old side-table dictionary lookup + lock.       |
 | `HandleOwnership.OwnershipPredicate`            |   0.47 ns  |        -  | `OwnsHandle` — the Dispose guard / borrow check.                        |
@@ -114,6 +116,12 @@ were already the correct per-call numbers. For
   fail at `[GlobalSetup]` on a host without a Vulkan ICD. That is the
   expected behavior — there is no soft skip in the benchmark project (BDN
   reports the failure and moves on).
+  `DescriptorSetPoolVariableCountBenchmarks` additionally needs a device that
+  advertises `descriptorBindingVariableDescriptorCount` and fails at
+  `[GlobalSetup]` without it; that is why it is a class of its own rather than
+  two more methods on `DescriptorSetPoolBenchmarks`, whose
+  `AcquireReleaseReset_Cycle` (the #114 canary) must keep running on any host
+  with an ICD.
 - **Host reads are a memory-type property, not a wrapper property (#157)**:
   the old `Buffer.Map_AsSpan` row's 166.8 ns was a **host read** from the
   mapped allocation, not the cost of `AsSpan<T>`. The method

@@ -205,6 +205,13 @@ using var layout = device.CreateDescriptorSetLayout(new DescriptorSetLayoutDescr
 });
 ```
 
+When the set's highest binding also carries
+`DescriptorBindingFlags.VariableDescriptorCount`, allocate it with
+`pool.Acquire(layout.Handle, variableDescriptorCount: n)` — the one-argument
+overload gives that binding a count of zero. The pool's `poolSizes` budget is
+then consumed at `n` per set rather than at the layout's declared maximum, so
+size it for the sum of the counts of the live sets.
+
 ### Set-0 push-descriptor migration
 
 Replace each per-pass `vkUpdateDescriptorSets` call site with a

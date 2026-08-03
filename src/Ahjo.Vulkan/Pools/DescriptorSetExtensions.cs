@@ -6,9 +6,9 @@ namespace Ahjo.Vulkan;
 /// <summary>
 /// Non-templated <c>vkUpdateDescriptorSets</c> entry on
 /// <see cref="DescriptorSet"/>. Lives on an extension so the small
-/// <see cref="DescriptorSet"/> struct stays unmanaged-shaped (one
-/// pointer + one layout pointer) without picking up a method that
-/// captures device state.
+/// <see cref="DescriptorSet"/> struct stays unmanaged-shaped (two
+/// pointers plus the allocated variable-descriptor count) without picking
+/// up a method that captures device state.
 /// </summary>
 public static unsafe class DescriptorSetExtensions
 {

@@ -10,7 +10,9 @@ namespace Ahjo.Vulkan;
 /// allocated set in one batch.
 /// </summary>
 /// <remarks>
-/// <c>default(DescriptorSet)</c> is a legal null handle. Distinct from
+/// <c>default(DescriptorSet)</c> is a legal null handle. The struct is two
+/// pointers (the set and the layout it was allocated against) plus the
+/// variable-descriptor count it was allocated with. Distinct from
 /// the dynamic update-template / push-descriptor path (#17 + follow-ups),
 /// which never allocates a <c>VkDescriptorSet</c> at all — those flow
 /// through <c>CommandRecorder.PushDescriptors</c> when that lands.
@@ -25,11 +27,25 @@ public readonly unsafe struct DescriptorSet : IVulkanHandle<DescriptorSet>
     // FromRaw-constructed instances (debug-name attachment etc.) — those
     // shouldn't be passed to Release in the first place.
     internal readonly VkDescriptorSetLayout_T* Layout;
+    // The variable-descriptor count this set was allocated with — the value
+    // that went into VkDescriptorSetVariableDescriptorCountAllocateInfo::
+    // pDescriptorCounts, or 0 when no chain was emitted. Carried for the same
+    // reason as Layout: DescriptorSetPool.Release has to route the set back to
+    // the free-list bucket it came from, and a set physically holds the count
+    // it was allocated with (the driver checks every write against it —
+    // VUID-VkWriteDescriptorSet-dstArrayElement-00321). 0 for FromRaw-
+    // constructed instances, which is indistinguishable from a genuine zero;
+    // that ambiguity is why this stays internal.
+    internal readonly uint VariableDescriptorCount;
 
-    internal DescriptorSet(VkDescriptorSet_T* handle, VkDescriptorSetLayout_T* layout = null)
+    internal DescriptorSet(
+        VkDescriptorSet_T*       handle,
+        VkDescriptorSetLayout_T* layout                  = null,
+        uint                     variableDescriptorCount = 0)
     {
-        Handle = handle;
-        Layout = layout;
+        Handle                  = handle;
+        Layout                  = layout;
+        VariableDescriptorCount = variableDescriptorCount;
     }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_DESCRIPTOR_SET;

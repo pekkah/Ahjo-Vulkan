@@ -388,16 +388,33 @@ with the highest binding number — and a set with three unbounded arrays is the
 shape this exists for. Add `VariableDescriptorCount` / `PartiallyBound` to the
 binding whose count actually varies.
 
-> **This one needs more than the flag, and `DescriptorSetPool` cannot give it to
-> you yet.** It additionally requires `descriptorBindingVariableDescriptorCount`
-> enabled on the device
-> (`VUID-VkDescriptorSetLayoutBindingFlagsCreateInfo-descriptorBindingVariableDescriptorCount-03014`)
-> **and** a `VkDescriptorSetVariableDescriptorCountAllocateInfo` chained onto the
-> allocation, which is where the actual count is stated. `DescriptorSetPool.Acquire`
-> has no overload that chains it, so a set allocated through the pool takes that
-> binding's count as **zero** — every write past element 0 fails and every shader
-> access is out of bounds. Allocate such a set yourself until the wrapper grows
-> the overload.
+This one needs more than the flag. It additionally requires
+`descriptorBindingVariableDescriptorCount` enabled on the device — and without
+it the problem lands at *layout* creation, before any pool is involved: the flag
+violates
+`VUID-VkDescriptorSetLayoutBindingFlagsCreateInfo-descriptorBindingVariableDescriptorCount-03014`
+at `vkCreateDescriptorSetLayout`. Expect the validation layer to report it, not
+the driver to refuse — a VUID violation is undefined behaviour, and hardware
+drivers have been measured returning `VK_SUCCESS` here.
+
+The count itself is stated at allocation time, and the pool has an overload for
+it:
+
+```csharp
+DescriptorSet set = pool.Acquire(layout.Handle, variableDescriptorCount: 1024);
+```
+
+That count says how many descriptors *this set* holds in that binding. It must
+not exceed the layout's declared `Count`
+(`VUID-VkDescriptorSetAllocateInfo-pSetLayouts-09380`), and it is the number the
+driver checks every write against — not the declared maximum.
+
+Allocating such a layout through the one-argument `pool.Acquire(layout.Handle)`
+gives that binding an effective count of **zero**, and every write to it fails.
+The wrapper cannot warn you: Vulkan exposes no way to read a layout's binding
+flags back from the handle, so `Acquire` cannot tell a variable-count layout
+from an ordinary one. `VK_LAYER_KHRONOS_validation` does report it, and its
+message asks the question directly.
 
 There is one thing reflection still refuses outright, and it is not the count: a
 descriptor range whose *index offset*, or a scope whose *space offset*, is a
