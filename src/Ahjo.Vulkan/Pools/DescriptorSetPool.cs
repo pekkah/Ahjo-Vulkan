@@ -489,7 +489,20 @@ public sealed unsafe class DescriptorSetPool : IDisposable
     /// built only when the guard fires (never above the comparison — a hoisted
     /// string would be a per-call allocation on a benchmarked hot path), and
     /// keeping the interpolation out of <c>Acquire</c>'s body is worth ~5 ns per
-    /// cycle, measured. Do not fold it back inline.
+    /// cycle. Do not fold it back inline.
+    /// <para>
+    /// <b>What that 5 ns is measured against:</b> the inline
+    /// <c>throw new … (ternary)</c> this replaced, at 43.82 ns versus 38.01 ns
+    /// for this shape — both captured in the same session on the same machine
+    /// (#191), which is the only comparison `docs/benchmarks.md` considers
+    /// valid. It is <i>not</i> 5 ns against pre-#191 code: the captured
+    /// baseline is 39.62 ns, so against that this is ~4%, inside the file's own
+    /// noise band. The mechanism is IL size — the interpolation handlers were
+    /// locals of <c>Acquire</c>, and the one-arg <c>Acquire</c> forwarder's
+    /// inlining is size-sensitive. <c>NoInlining</c> is what does the work;
+    /// <c>DoesNotReturn</c> is for Roslyn's flow analysis and affects no
+    /// codegen.
+    /// </para>
     /// </summary>
     [DoesNotReturn]
     [MethodImpl(MethodImplOptions.NoInlining)]
