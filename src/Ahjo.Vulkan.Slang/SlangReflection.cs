@@ -998,6 +998,18 @@ public sealed unsafe class SlangReflection
     /// — the only declarations <c>[[vk::image_format]]</c> applies to — loses
     /// nothing: every other binding type reported
     /// <c>SLANG_IMAGE_FORMAT_unknown</c>, which is what this returns for them.
+    /// <para>
+    /// <b>Traced (#181):</b> upstream dereferences
+    /// <c>BindingRangeInfo::leafVariable</c> without a null check, and that
+    /// field is null for an <c>EXISTENTIAL_VALUE</c> range — which describes a
+    /// synthesized value buffer, not a declared variable. <b>The trigger is the
+    /// null leaf variable, not the binding-type kind</b>, so widening this
+    /// predicate to admit a kind nobody has measured is not a safe trade; the
+    /// crash also reproduces on linux-x64 (<c>SIGSEGV</c>), so it is not a
+    /// win-x64 quirk. Repro and drafted report live in
+    /// <c>docs/upstream/</c>. Once a fixed Slang is pinned, this guard can go —
+    /// keep a test that calls the format getter on an existential range.
+    /// </para>
     /// </remarks>
     private static SlangImageFormat ImageFormatOf(
         SlangReflectionTypeLayout* structTypeLayout,
