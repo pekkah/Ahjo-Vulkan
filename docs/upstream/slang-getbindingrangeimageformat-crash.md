@@ -14,11 +14,16 @@
 > Duplicate check (2026-08-03): searched shader-slang/slang issues and PRs for
 > `getBindingRangeImageFormat`, `image format reflection`, `leafVariable`,
 > `reflection crash` / `reflection segfault` / `access violation reflection`,
-> `existential`, `ParameterBlock crash`, `interface ParameterBlock reflection`.
-> Nothing matching. The only existential-plus-reflection issue open is
-> [#12092](https://github.com/shader-slang/slang/issues/12092) (existential
-> element *size* under-reported), which is a different defect in a different
-> accessor. Treat this as a new report.
+> `existential`, `ParameterBlock crash`, `interface ParameterBlock reflection`,
+> `binding range crash`. No issue matching. The only existential-plus-reflection
+> issue open is [#12092](https://github.com/shader-slang/slang/issues/12092)
+> (existential element *size* under-reported), which is a different defect in a
+> different accessor.
+>
+> **There is, however, an open PR that fixes this incidentally — see
+> "Prior art upstream" below. Read that section before filing: it changes the
+> ask from "here is a one-line fix" to "please land #11344, or apply the
+> one-liner meanwhile, and add a regression test either way."**
 
 ---
 
@@ -103,6 +108,66 @@ type anyway.
 A regression test would fit naturally alongside
 `tools/slang-unit-test/unit-test-image-format-reflection.cpp`, which currently
 only exercises ranges that do have a leaf variable.
+
+## Prior art upstream
+
+Searched 2026-08-03. **No issue reports this crash**, but an open PR already
+fixes it as a side effect of unrelated work.
+
+[**shader-slang/slang#11344**](https://github.com/shader-slang/slang/pull/11344),
+"Add texture format descriptor types" (`csyonghe`, opened 2026-05-28), rewrites
+the accessor to delegate to a new helper:
+
+```cpp
+    auto leafVar = bindingRange.leafVariable;
+    return _getImageFormat(leafVar, bindingRange.leafTypeLayout);
+```
+
+and the helper null-checks the variable, which is precisely the guard proposed
+above:
+
+```cpp
+static SlangImageFormat _getImageFormat(VarDeclBase* varDecl, TypeLayout* typeLayout)
+{
+    if (typeLayout)
+    {
+        auto format = _getImageFormatFromType(typeLayout->getType());
+        if (format != SLANG_IMAGE_FORMAT_unknown)
+            return format;
+    }
+
+    if (!varDecl)                                // <-- the fix, arrived at incidentally
+        return SLANG_IMAGE_FORMAT_unknown;
+    ...
+}
+```
+
+Both paths are safe for the range in this report: `leafTypeLayout` is non-null
+but is an `INTERFACE` layout, so `_getImageFormatFromType`'s
+`as<TextureTypeBase>` fails and returns unknown, and control reaches the null
+check. The same helper appeared in the closed predecessor PR
+[#11163](https://github.com/shader-slang/slang/pull/11163), so it has survived
+one respin — it reads as part of the design rather than an artifact of a single
+draft.
+
+### Why this does not retire our guard
+
+1. **It has not landed.** As of 2026-08-03 #11344 is `CONFLICTING` with
+   `REVIEW_REQUIRED` and was last updated 2026-06-22. Its predecessor #11163 was
+   closed unmerged. Nothing about it is imminent.
+2. **`master` is still unfixed.** Verified at `master` HEAD on 2026-08-03: the
+   unguarded dereference quoted under "Root cause" is present verbatim.
+3. **The fix is incidental and unprotected.** Upstream does not know the current
+   code crashes. `unit-test-image-format-reflection.cpp` has no existential
+   coverage on `master`, and #11344 adds none, so a later refactor of the format
+   path could reintroduce the dereference with no test to catch it. This is the
+   strongest argument for filing the report even though a fix exists in flight:
+   the *test* is what is missing, not the guard.
+
+The guard in `SlangReflection.ImageFormatOf` comes out when a Slang release
+containing the fix is **pinned** in `Directory.Build.props` and this repro stops
+crashing against it — not when #11344 merges. Re-run the repro to decide; that
+is what it is kept for.
 
 ## Reproducer
 
@@ -279,8 +344,29 @@ platform-dependent code on the path.
 
 Any host-side tool that walks binding ranges generically and asks each one for
 its image format will die the first time it meets an interface-typed
-`ParameterBlock`. The only workaround available to a caller is to never ask:
-guard the call on the binding type (`TEXTURE` / `TYPED_BUFFER`, ± the mutable
-flag), since those are the only declarations `[[vk::image_format]]` applies to.
-That is what we ship today. It is a guard against a crash, though, not against a
-wrong answer — there is no result code to check and no way to recover.
+`ParameterBlock`. There is no result code to check and no way to recover, so a
+caller cannot handle this — it can only avoid it.
+
+**A caller-side workaround does exist, and it is exact.** Ask
+`spReflectionTypeLayout_getBindingRangeLeafVariable` for the same `(scope,
+index)` first and skip the format call when it returns null:
+
+```c
+if (spReflectionTypeLayout_getBindingRangeLeafVariable(scope, i) == NULL)
+    format = SLANG_IMAGE_FORMAT_unknown;   /* what the fixed code would return */
+else
+    format = spReflectionTypeLayout_getBindingRangeImageFormat(scope, i);
+```
+
+That accessor reads the very field the crash dereferences, from the same
+`BindingRangeInfo`, and is safe by construction: identical prologue, then a
+plain `convert` with no dereference. It keys on the actual trigger rather than
+on the binding-type kind, so it does not depend on having enumerated the kinds
+that happen to produce a null. We ship this, plus the narrower kind test in
+front of it, and a regression test that makes the previously fatal call on
+purpose.
+
+This is offered as evidence about the defect, not as a reason to leave it: a
+workaround that every caller must discover independently — after a process
+death with no diagnostic — is not a substitute for the null check, and the
+regression test upstream is missing either way.
