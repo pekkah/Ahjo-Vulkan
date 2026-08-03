@@ -48,8 +48,9 @@ public enum SlangDescriptorCountKind
 /// (<see cref="Value"/>) and one that forces a branch
 /// (<see cref="TryGetValue"/>).</para>
 /// <para><c>default(SlangDescriptorCount)</c> is <c>Fixed(0)</c> — no
-/// descriptors. The type callers actually construct,
-/// <see cref="SlangDescriptorBinding"/>, supplies
+/// descriptors, which is what <see cref="IsZero"/> names and what
+/// <c>SlangVulkanMapping</c> omits from a layout rather than emitting. The type
+/// callers actually construct, <see cref="SlangDescriptorBinding"/>, supplies
 /// <see cref="Fixed(uint)">Fixed(1)</see> from its parameterless constructor, so
 /// the valid-by-default rule (issue #119) still holds there.</para>
 /// </remarks>
@@ -94,6 +95,23 @@ public readonly record struct SlangDescriptorCount
     /// <see langword="true"/> when this is an unsized (bindless) array.
     /// </summary>
     public bool IsUnbounded => Kind == SlangDescriptorCountKind.Unbounded;
+
+    /// <summary>
+    /// <see langword="true"/> when Slang stated a count and that count is
+    /// <c>0</c> — a zero-length resource array (<c>Texture2D gTex[0]</c>, or
+    /// <c>gTex[N]</c> with <c>N = 0</c>).
+    /// </summary>
+    /// <remarks>
+    /// <para>Slang reserves a binding number for such a declaration and emits no
+    /// SPIR-V variable for it, and no shader code can index it, so it is not a
+    /// Vulkan descriptor binding: <c>SlangVulkanMapping.MapBindings</c> omits it
+    /// from the layout and <c>MapBinding</c> refuses it. Measured on
+    /// <c>v2026.14.1</c> / win-x64 — issue #183.</para>
+    /// <para><c>default(SlangDescriptorCount)</c> satisfies this, which is why
+    /// <see cref="SlangDescriptorBinding"/>'s parameterless constructor supplies
+    /// <see cref="Fixed(uint)">Fixed(1)</see> instead (issue #119).</para>
+    /// </remarks>
+    public bool IsZero => Kind == SlangDescriptorCountKind.Fixed && _value == 0;
 
     /// <summary>A stated descriptor count.</summary>
     public static SlangDescriptorCount Fixed(uint count) => new(SlangDescriptorCountKind.Fixed, count);

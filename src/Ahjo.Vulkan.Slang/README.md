@@ -422,6 +422,46 @@ sentinel throws `NotSupportedException` from reflection. A binding with no
 binding number and a scope with no set number leave no layout to report at all,
 so there is nothing to hand back.
 
+### A zero-length array is a binding that isn't
+
+`Texture2D gTex[0];` is the other end of the same axis, and it compiles.
+Reflection reports it — Slang states a count and the count is `0` — but Slang
+also reserves the binding number for it and emits no SPIR-V variable, and no
+shader code can index it (`error[E30029]` statically, `error[E99997]`
+dynamically). So it is not a Vulkan descriptor binding, and it is reachable
+without anyone typing `[0]`: `Texture2D gMaps[NUM_MAPS];` with `NUM_MAPS = 0` is
+the same shape.
+
+`MapBindings()` **omits** such a binding, leaving a hole at the reserved number —
+which Vulkan permits, since
+`VUID-VkDescriptorSetLayoutCreateInfo-binding-00279` requires binding numbers to
+be *distinct*, not contiguous. **The result is therefore not positionally
+aligned with the span it came from**: correlate the two on `Slot`, never on
+index. `MapBinding()` has no return value meaning "nothing", so it refuses with
+`NotSupportedException` and names the batch call; `MapBinding(binding, count)`
+refuses too, because the shader did state a count. The three agree on purpose —
+a layout that omits the binding and one that emits it with `descriptorCount = 0`
+are both legal and are *not* compatible with each other at
+`vkCmdBindDescriptorSets`.
+
+If you build `DescriptorBinding`s yourself, name the case rather than
+rediscovering it:
+
+```csharp
+foreach (var binding in reflection.Bindings(i))
+{
+    if (binding.Count.IsZero)                         // Texture2D gTex[0]
+        continue;                                     // reserved slot, no descriptor
+    …
+}
+```
+
+A set whose bindings are *all* zero-length arrays wants a descriptor set layout
+with zero bindings, and `Device.CreateDescriptorSetLayout` cannot make one — so
+both `MapBindings` overloads throw `NotSupportedException` naming that gap
+instead. Give the set a binding the shader can reference, or build its
+`VkDescriptorSetLayout` directly.
+
 ### What is inside a buffer
 
 A binding says *where* a resource lives. `TryGetBufferLayout` says what is in

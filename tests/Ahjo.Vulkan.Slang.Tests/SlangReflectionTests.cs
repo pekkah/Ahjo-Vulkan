@@ -71,6 +71,15 @@ public sealed class SlangReflectionTests
     [InlineData("xcheckLooseOnly", ShaderFixtures.ReflectionLooseGlobalsOnly)]
     [InlineData("xcheckLoosePlain", ShaderFixtures.ReflectionLooseGlobalsNoExplicitBinding)]
     [InlineData("xcheckLooseBlock", ShaderFixtures.ReflectionLooseGlobalsWithParameterBlock)]
+
+    // Issue #183's fixtures. These rows are NOT discriminating — the theory is
+    // one-way, so it passes whether or not the zero-count binding is reported —
+    // and are here only so the new fixtures are covered by the standing
+    // cross-check. ReflectionZeroLengthArrayOnly is deliberately absent: its
+    // SPIR-V decorates nothing, so the row would iterate zero times.
+    [InlineData("xcheckZeroArray", ShaderFixtures.ReflectionZeroLengthArray)]
+    [InlineData("xcheckZeroArrayConst", ShaderFixtures.ReflectionZeroLengthArrayFromConstant)]
+    [InlineData("xcheckZeroArraySet1", ShaderFixtures.ReflectionZeroLengthArrayInOwnSet)]
     public void Reflection_CoversEverySetAndBinding_TheSpirvDecorates(string moduleName, string source)
     {
         using var compiler = SlangCompiler.Create();
@@ -266,6 +275,278 @@ public sealed class SlangReflectionTests
 
         Assert.Equal(1u, fixedBindings[0].Count);
         Assert.Equal(3, asked);
+    }
+
+    /// <summary>
+    /// Issue #183: a zero-length resource array is a real descriptor range whose
+    /// count is literally zero, and its binding number is reserved.
+    /// </summary>
+    /// <remarks>
+    /// <para>The SPIR-V assertion is the load-bearing one and it runs in the
+    /// direction the suite's standing cross-check cannot:
+    /// <c>Reflection_CoversEverySetAndBinding_TheSpirvDecorates</c> is one-way
+    /// (declared ⊇ used), so it passes whether or not slot 0 is reported. Here
+    /// the claim is that the emitted module decorates <b>no</b> variable at
+    /// binding 0 while reflection still reports one — which is exactly why the
+    /// mapper, not reflection, is where the binding gets dropped.</para>
+    /// </remarks>
+    [Fact]
+    public void Reflection_ZeroLengthArray_ReportsFixedZeroAndReservesTheSlot()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile("zeroArray", ShaderFixtures.ReflectionZeroLengthArray);
+
+        Assert.True(reflected.Reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> bindings));
+        Assert.Equal(3, bindings.Length);
+
+        Assert.Equal(0u, bindings[0].Slot);
+        Assert.Equal("gTex", bindings[0].Name);
+        Assert.Equal(SlangDescriptorCountKind.Fixed, bindings[0].Count.Kind);
+        Assert.Equal(0u, bindings[0].Count.Value);
+        Assert.True(bindings[0].Count.IsZero);
+
+        // The slot is reserved: the survivors keep the numbers Slang gave them.
+        Assert.Equal(1u, bindings[1].Slot);
+        Assert.Equal(2u, bindings[2].Slot);
+
+        List<(uint Set, uint Binding, string Name)> spirv =
+            SpirvDecorations.ReadDescriptorBindings(reflected.Program.Spirv(0));
+
+        foreach ((uint set, uint binding, string name) in spirv)
+        {
+            _output.WriteLine($"SPIR-V set={set} binding={binding} '{name}'");
+        }
+
+        Assert.Contains(spirv, d => d.Set == 0 && d.Binding == 1);
+        Assert.Contains(spirv, d => d.Set == 0 && d.Binding == 2);
+        Assert.DoesNotContain(spirv, d => d.Binding == 0);
+    }
+
+    /// <summary>
+    /// The same shape reached without anyone typing <c>[0]</c>:
+    /// <c>gMaps[NUM_MAPS]</c> with <c>NUM_MAPS = 0</c>, which is generated or
+    /// parameterized shader code rather than a typo.
+    /// </summary>
+    [Fact]
+    public void Reflection_ZeroLengthArrayFromConstant_IsTheSameShape()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile(
+            "zeroArrayConst", ShaderFixtures.ReflectionZeroLengthArrayFromConstant);
+
+        Assert.True(reflected.Reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> bindings));
+        Assert.Equal(3, bindings.Length);
+
+        Assert.Equal(0u, bindings[0].Slot);
+        Assert.Equal("gTex", bindings[0].Name);
+        Assert.Equal(SlangDescriptorCountKind.Fixed, bindings[0].Count.Kind);
+        Assert.Equal(0u, bindings[0].Count.Value);
+        Assert.True(bindings[0].Count.IsZero);
+
+        Assert.Equal(1u, bindings[1].Slot);
+        Assert.Equal(2u, bindings[2].Slot);
+    }
+
+    /// <summary>
+    /// The layout that matches the emitted SPIR-V is the one <b>without</b> the
+    /// zero-count binding: a hole at the reserved number, which Vulkan permits.
+    /// </summary>
+    [Fact]
+    public void MapBindings_ZeroCountBinding_IsOmittedFromTheLayout()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile("zeroArrayMap", ShaderFixtures.ReflectionZeroLengthArray);
+
+        Assert.True(reflected.Reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> bindings));
+
+        DescriptorBinding[] mapped = bindings.MapBindings();
+
+        Assert.Equal(2, mapped.Length);
+
+        Assert.Equal(1u, mapped[0].Slot);
+        Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_SAMPLER, mapped[0].Type);
+        Assert.Equal(2u, mapped[1].Slot);
+        Assert.Equal(VkDescriptorType.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, mapped[1].Type);
+
+        foreach (DescriptorBinding binding in mapped)
+        {
+            Assert.NotEqual(0u, binding.Count);
+            Assert.NotEqual(0u, binding.Slot);
+        }
+    }
+
+    /// <summary>
+    /// The single-binding path has no return value meaning "nothing", so it
+    /// refuses and names the batch call. It must agree with
+    /// <c>MapBindings</c>: emitting <c>descriptorCount = 0</c> here and omitting
+    /// the binding there are both legal Vulkan and are not compatible with each
+    /// other at <c>vkCmdBindDescriptorSets</c>
+    /// (<c>VUID-vkCmdBindDescriptorSets-pDescriptorSets-00358</c>).
+    /// </summary>
+    [Fact]
+    public void MapBinding_ZeroCountBinding_Throws()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile("zeroArrayOne", ShaderFixtures.ReflectionZeroLengthArray);
+
+        Assert.True(reflected.Reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> bindings));
+
+        SlangDescriptorBinding binding = bindings[0];
+        var ex = Assert.Throws<NotSupportedException>(() => binding.MapBinding());
+
+        _output.WriteLine(ex.Message);
+
+        Assert.Contains("binding 0", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("gTex", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("zero descriptors", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("MapBindings", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The capacity overload will not size a zero-length array either: reserving
+    /// descriptors there would put descriptors in the layout that no shader code
+    /// can index.
+    /// </summary>
+    /// <remarks>
+    /// <b>The message assertion is load-bearing.</b> The pre-existing
+    /// "already has a descriptor count" branch throws the same exception type
+    /// for the same input, so a type-only assertion here could not go red when
+    /// the zero clause is deleted.
+    /// </remarks>
+    [Fact]
+    public void MapBinding_WithCapacity_OnZeroCountBinding_Throws()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile("zeroArrayCap", ShaderFixtures.ReflectionZeroLengthArray);
+
+        Assert.True(reflected.Reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> bindings));
+
+        SlangDescriptorBinding binding = bindings[0];
+        var ex = Assert.Throws<ArgumentException>(() => binding.MapBinding(64));
+
+        _output.WriteLine(ex.Message);
+
+        Assert.Contains("zero descriptors", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("E30029", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The resolver overload omits the same bindings, and never asks the
+    /// resolver about one — it never did, since a zero count is
+    /// <see cref="SlangDescriptorCountKind.Fixed"/>.
+    /// </summary>
+    [Fact]
+    public void MapBindings_WithResolver_OmitsZeroCountWithoutAskingTheResolver()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile(
+            "zeroArrayResolver", ShaderFixtures.ReflectionZeroLengthArray);
+
+        int asked = 0;
+        SlangUnboundedCapacity capacity = _ =>
+        {
+            asked++;
+
+            return 1u;
+        };
+
+        Assert.True(reflected.Reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> bindings));
+
+        DescriptorBinding[] mapped = bindings.MapBindings(capacity);
+
+        Assert.Equal(2, mapped.Length);
+        Assert.Equal(1u, mapped[0].Slot);
+        Assert.Equal(2u, mapped[1].Slot);
+        Assert.Equal(0, asked);
+    }
+
+    /// <summary>
+    /// A set whose every binding is a zero-length array reaches the
+    /// zero-binding-layout gap, and the refusal names it rather than letting
+    /// <c>Device.CreateDescriptorSetLayout</c> report an empty span two frames
+    /// later from a different package.
+    /// </summary>
+    [Fact]
+    public void MapBindings_EverythingZeroCount_ThrowsNamingTheGap()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile(
+            "zeroArrayOnly", ShaderFixtures.ReflectionZeroLengthArrayOnly);
+
+        // Reflection still reports the binding — that is its job.
+        Assert.True(reflected.Reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> bindings));
+        Assert.Equal(1, bindings.Length);
+        Assert.True(bindings[0].Count.IsZero);
+
+        SlangDescriptorBinding[] copy = bindings.ToArray();
+        var ex = Assert.Throws<NotSupportedException>(() => ((ReadOnlySpan<SlangDescriptorBinding>)copy).MapBindings());
+
+        _output.WriteLine(ex.Message);
+
+        Assert.Contains("gTex", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("zero bindings", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("CreateDescriptorSetLayout", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// One dead array does not make a program unmappable — only the set that
+    /// consists entirely of dead arrays. This is the #176 consistency claim.
+    /// </summary>
+    [Fact]
+    public void MapBindings_ZeroCountInItsOwnSet_StillMapsTheOtherSet()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile(
+            "zeroArraySet1", ShaderFixtures.ReflectionZeroLengthArrayInOwnSet);
+
+        Assert.True(reflected.Reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> live));
+
+        DescriptorBinding[] mapped = live.MapBindings();
+
+        Assert.Equal(2, mapped.Length);
+        Assert.Equal(0u, mapped[0].Slot);
+        Assert.Equal(1u, mapped[1].Slot);
+
+        Assert.True(reflected.Reflection.TryGetSet(1, out ReadOnlySpan<SlangDescriptorBinding> dead));
+        Assert.Equal(1, dead.Length);
+        Assert.True(dead[0].Count.IsZero);
+
+        SlangDescriptorBinding[] copy = dead.ToArray();
+
+        var ex = Assert.Throws<NotSupportedException>(() => ((ReadOnlySpan<SlangDescriptorBinding>)copy).MapBindings());
+
+        _output.WriteLine(ex.Message);
+
+        // The whole-set refusal, not the per-binding one: the message that names
+        // the zero-binding-layout gap. Asserting on it is what makes this test
+        // discriminate between "MapBindings omits" and "MapBindings still maps
+        // every binding and MapBinding happens to refuse this one".
+        Assert.Contains("zero bindings", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("CreateDescriptorSetLayout", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Provenance does not matter: a hand-built <c>Fixed(0)</c> and a zeroed
+    /// span element are treated exactly like a reflected zero-length array. No
+    /// shader and no compiler here.
+    /// </summary>
+    [Fact]
+    public void MapBinding_HandBuiltZeroCount_BehavesLikeAReflectedOne()
+    {
+        var handBuilt = new SlangDescriptorBinding
+        {
+            Slot = 4,
+            Name = "hand",
+            Type = SlangBindingType.SLANG_BINDING_TYPE_TEXTURE,
+            Count = SlangDescriptorCount.Fixed(0),
+            Stages = ShaderStages.Fragment,
+        };
+
+        var ex = Assert.Throws<NotSupportedException>(() => handBuilt.MapBinding());
+
+        _output.WriteLine(ex.Message);
+
+        Assert.Contains("binding 4", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("hand", ex.Message, StringComparison.Ordinal);
+
+        // A zeroed span element is a zero-count binding …
+        Assert.True(default(SlangDescriptorBinding).Count.IsZero);
+
+        // … while the parameterless constructor still supplies Fixed(1), which
+        // is the valid-by-default rule issue #119 exists for.
+        Assert.False(new SlangDescriptorBinding().Count.IsZero);
     }
 
     [Fact]
@@ -1540,6 +1821,108 @@ public sealed class SlangReflectionTests
                 $"The layers rejected descriptions derived from reflection:{Environment.NewLine}" +
                 string.Join(Environment.NewLine, errors));
         }
+    }
+
+    /// <summary>
+    /// The layout issue #183 produces — binding numbers 1 and 2, with a hole
+    /// where the zero-length array reserved 0 — is one a driver and the
+    /// validation layer accept, alongside the SPIR-V it was derived from.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>This test is corroboration, not the guard.</b> Measured: revert
+    /// this whole change — <c>MapBindings</c> maps every binding and
+    /// <c>MapBinding</c> refuses nothing — and it still passes, because the
+    /// resulting layout carries a surplus <c>descriptorCount = 1</c> at binding
+    /// 0 (<c>Ahjo.Vulkan</c> normalizes the mapper's <c>0</c>, issue #119) and
+    /// that is a perfectly valid descriptor set layout. <b>That is exactly why
+    /// the defect was invisible</b>, and it is why the discriminating tests are
+    /// the ones above, none of which needs a device.</para>
+    /// <para>It does go red under a <em>partial</em> revert, but never on its
+    /// own assertions: with the omission removed and
+    /// <c>MapBinding</c>'s refusal left in place, <c>MapBindings</c> throws
+    /// before a device is touched. Do not read that as this test guarding the
+    /// behaviour.</para>
+    /// <para>What it does prove is the half reasoning cannot: that a
+    /// <b>non-contiguous</b> binding list — 1 and 2, with a hole where the
+    /// zero-length array reserved 0 — is accepted by a real driver and by the
+    /// validation layer, which is what makes omission a legal answer at all.
+    /// <c>VUID-VkDescriptorSetLayoutCreateInfo-binding-00279</c> requires
+    /// binding numbers to be distinct, not contiguous.</para>
+    /// </remarks>
+    [Fact]
+    public void MapBindings_ZeroLengthArray_BuildsALayoutValidationAccepts()
+    {
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer();
+
+        using ReflectedProgram reflected = ReflectedProgram.Compile(
+            "zeroArrayDevice", ShaderFixtures.ReflectionZeroLengthArray);
+
+        Assert.True(reflected.Reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> bindings));
+
+        // Deliberately no assertion on the mapped array's shape — that is
+        // MapBindings_ZeroCountBinding_IsOmittedFromTheLayout's job, and making
+        // it here would turn this test into a second copy of that one that
+        // needs a GPU to run.
+        DescriptorBinding[] mapped = bindings.MapBindings();
+
+        int errorCount = 0;
+        var errors = new ConcurrentQueue<string>();
+        Action<DebugMessage> sink = msg =>
+        {
+            if ((msg.Severity & VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0)
+            {
+                Interlocked.Increment(ref errorCount);
+                errors.Enqueue(msg.Message);
+            }
+        };
+
+        using var instance = Instance.Create(new InstanceDescription
+        {
+            EnableValidation = true,
+            DebugCallback = sink,
+        });
+
+        uint family = uint.MaxValue;
+        var gpu = instance.PickPhysicalDevice((in PhysicalDeviceInfo info) =>
+        {
+            for (int i = 0; i < info.QueueFamilies.Length; i++)
+            {
+                if (info.QueueFamilies[i].SupportsGraphics)
+                {
+                    family = info.QueueFamilies[i].Index;
+
+                    return true;
+                }
+            }
+
+            return false;
+        });
+
+        using Device device = gpu.CreateDevice(new DeviceDescription
+        {
+            Queues = [new QueueRequest(family, count: 1, priority: 1.0f)],
+        });
+
+        using DescriptorSetLayout layout = device.CreateDescriptorSetLayout(
+            new DescriptorSetLayoutDescription { Bindings = mapped });
+
+        using PipelineLayout pipelineLayout = device.CreatePipelineLayout(new PipelineLayoutDescription
+        {
+            SetLayouts = [layout],
+            PushConstantRanges = reflected.Reflection.PushConstantRanges.MapPushConstantRanges(),
+        });
+
+        Assert.False(pipelineLayout.IsNull);
+
+        using ShaderModule fragment = device.CreateShaderModule(reflected.Program.Spirv(0));
+
+        Assert.False(fragment.IsNull);
+
+        Assert.True(
+            Volatile.Read(ref errorCount) == 0,
+            $"The layers rejected the layout derived from a zero-length array:{Environment.NewLine}" +
+            string.Join(Environment.NewLine, errors));
     }
 
     private static ShaderStages StagesOf(SlangReflection reflection, uint set, uint slot)
