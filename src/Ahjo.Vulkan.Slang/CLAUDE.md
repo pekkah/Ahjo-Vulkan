@@ -205,6 +205,21 @@ proves nothing.
    do not assume the rest of this call family is total either — the member walk
    checks `SLANG_TYPE_KIND_STRUCT` before `GetFieldCount` for the same reason.
 
+   **Root cause, traced (#181).** `slang-reflection-api.cpp`'s
+   `getBindingRangeImageFormat` null-checks the type layout and bounds-checks the
+   index, then dereferences `BindingRangeInfo::leafVariable` — a raw
+   `VarDeclBase*` — with no null check. That field is **null** for an
+   `EXISTENTIAL_VALUE` range, which describes a synthesized value buffer rather
+   than a declared variable. So **the hazard is a null leaf variable, not the
+   binding-type kind as such**: that is the condition to reason about if this
+   guard is ever revisited, and it is why a kind-based predicate must stay
+   narrow rather than enumerate the kinds someone has happened to measure.
+   **Reproduces on win-x64 (`0xC0000005`) *and* linux-x64 (`SIGSEGV`)** — unlike
+   #170, this one is not platform-specific, which the unconditional dereference
+   predicts. Standalone C repro and the drafted upstream report:
+   `docs/upstream/slang-getbindingrangeimageformat-crash.md` and `.cpp`. Tracked
+   as #181; the upstream number belongs here once filed.
+
 8. **Member offsets come from `SLANG_PARAMETER_CATEGORY_UNIFORM`, and the test
    asserts them against `OpMemberDecorate … Offset`.** A default or wrong
    category produces offsets that look plausible and are silently wrong — the
