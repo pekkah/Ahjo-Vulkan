@@ -43,7 +43,7 @@ Use this table to look up the expected benchmark for each changed file. If a fil
 | `Pools/FrameRing.cs`                   | `FrameRingBenchmarks.cs`                               |
 | `Pools/FencePool.cs`                   | `SyncPoolBenchmarks.cs`                                |
 | `Pools/SemaphorePool.cs`               | `SyncPoolBenchmarks.cs`                                |
-| `Pools/DescriptorSetPool.cs`           | `DescriptorSetPoolBenchmarks.cs`                      |
+| `Pools/DescriptorSetPool.cs`           | `DescriptorSetPoolBenchmarks.cs` **and** `DescriptorSetPoolVariableCountBenchmarks.cs` — both, always. The variable-count class is split out because its `[GlobalSetup]` requires a device advertising `descriptorBindingVariableDescriptorCount` and would otherwise take the #114 canary down on a host without it. Listing only the first lets the second rot unnoticed. |
 | `Pools/DescriptorTemplate.cs`          | `PushDescriptorsBenchmarks.cs`                         |
 | `Pools/DescriptorWrite*.cs`            | `PushDescriptorsBenchmarks.cs`                         |
 | `Sync/Fence.cs`                        | `SyncPoolBenchmarks.cs`                                |
@@ -56,6 +56,7 @@ Use this table to look up the expected benchmark for each changed file. If a fil
 | `Pipelines/SpecializationInfo.cs`      | `SpecializationInfoBenchmarks.cs`                      |
 | `Pipelines/PushConstantRange.cs`       | `PushConstantsBenchmarks.cs`                           |
 | `Pipelines/PipelineLayout.cs`          | `PushConstantsBenchmarks.cs` + `HandleOwnershipBenchmarks.cs` (metadata field) |
+| `Pipelines/DescriptorSet.cs`           | `DescriptorSetPoolBenchmarks.cs` — hot-path type: returned from every `Acquire` and passed by value as `ReadOnlySpan<DescriptorSet>` into `CommandRecorder.BindDescriptorSets`, so its size and copy cost matter |
 | `Internal/IVulkanHandle.cs`            | `HandleOwnershipBenchmarks.cs`                         |
 | `Diagnostics/DebugMarker.cs`           | `HandleOwnershipBenchmarks.cs` (constrained dispatch)  |
 | `Internal/ResultPolicy*`               | `ResultPolicyBenchmarks.cs`                            |

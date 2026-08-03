@@ -111,6 +111,25 @@ internal static unsafe class VulkanDriverProbe
         }
     }
 
+    /// <summary>
+    /// <see langword="true"/> when the first enumerated GPU advertises the bits
+    /// needed to allocate a variable-descriptor-count storage-buffer heap:
+    /// <c>descriptorBindingPartiallyBound</c>,
+    /// <c>descriptorBindingVariableDescriptorCount</c> and
+    /// <c>descriptorBindingStorageBufferUpdateAfterBind</c>. Issue #182's
+    /// allocation tests gate on this.
+    /// </summary>
+    public static bool SupportsBindlessVariableCountStorageBuffer
+    {
+        get
+        {
+            var f12 = _features12.Value;
+            return f12.descriptorBindingPartiallyBound != 0
+                && f12.descriptorBindingVariableDescriptorCount != 0
+                && f12.descriptorBindingStorageBufferUpdateAfterBind != 0;
+        }
+    }
+
     // Per-extension cache. Used by surface-extension tests so they can
     // skip cleanly when the ICD doesn't expose the platform extension
     // they target — e.g. SwiftShader on Linux ships VK_KHR_wayland_surface
