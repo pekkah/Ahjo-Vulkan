@@ -154,8 +154,17 @@ internal static unsafe class DescriptorTemplateBuilder
         Span<VkDescriptorUpdateTemplateEntry> dst)
         where T : unmanaged
     {
+        // NOT the symmetric twin of the empty-Bindings guard issue #191 deleted
+        // from Device.CreateDescriptorSetLayout — this one is a real VUID, so do
+        // not remove it by analogy.
         if (bindings.IsEmpty)
-            throw new ArgumentException("DescriptorTemplate<T> requires at least one binding.", nameof(bindings));
+            throw new ArgumentException(
+                "DescriptorTemplate<T> requires at least one binding: Vulkan requires "
+                + "descriptorUpdateEntryCount > 0 "
+                + "(VUID-VkDescriptorUpdateTemplateCreateInfo-descriptorUpdateEntryCount-arraylength). "
+                + "A descriptor set layout with zero bindings is legal (issue #191) but has nothing "
+                + "for a template to update.",
+                nameof(bindings));
 
         nuint structSize    = (nuint)Unsafe.SizeOf<T>();
         nuint runningOffset = 0;

@@ -455,13 +455,14 @@ public sealed class SlangReflectionTests
     }
 
     /// <summary>
-    /// A set whose every binding is a zero-length array reaches the
-    /// zero-binding-layout gap, and the refusal names it rather than letting
-    /// <c>Device.CreateDescriptorSetLayout</c> report an empty span two frames
-    /// later from a different package.
+    /// A set whose every binding is a zero-length array maps to <b>no</b>
+    /// bindings at all. That is the layout matching the emitted SPIR-V, which
+    /// decorates nothing, and since issue #191
+    /// <c>Device.CreateDescriptorSetLayout</c> accepts an empty <c>Bindings</c>
+    /// span and produces exactly it. The gap #183 recorded here is closed.
     /// </summary>
     [Fact]
-    public void MapBindings_EverythingZeroCount_ThrowsNamingTheGap()
+    public void MapBindings_EverythingZeroCount_ReturnsEmpty()
     {
         using ReflectedProgram reflected = ReflectedProgram.Compile(
             "zeroArrayOnly", ShaderFixtures.ReflectionZeroLengthArrayOnly);
@@ -472,13 +473,8 @@ public sealed class SlangReflectionTests
         Assert.True(bindings[0].Count.IsZero);
 
         SlangDescriptorBinding[] copy = bindings.ToArray();
-        var ex = Assert.Throws<NotSupportedException>(() => ((ReadOnlySpan<SlangDescriptorBinding>)copy).MapBindings());
 
-        _output.WriteLine(ex.Message);
-
-        Assert.Contains("gTex", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("zero bindings", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("CreateDescriptorSetLayout", ex.Message, StringComparison.Ordinal);
+        Assert.Empty(((ReadOnlySpan<SlangDescriptorBinding>)copy).MapBindings());
     }
 
     /// <summary>
@@ -505,16 +501,36 @@ public sealed class SlangReflectionTests
 
         SlangDescriptorBinding[] copy = dead.ToArray();
 
-        var ex = Assert.Throws<NotSupportedException>(() => ((ReadOnlySpan<SlangDescriptorBinding>)copy).MapBindings());
+        // Zero bindings, not one. That count is what discriminates "MapBindings
+        // omits the dead array" from "MapBindings maps every binding" — the
+        // latter would produce one binding here (of count 0, which Ahjo.Vulkan
+        // then normalizes to 1, issue #119).
+        Assert.Empty(((ReadOnlySpan<SlangDescriptorBinding>)copy).MapBindings());
+    }
 
-        _output.WriteLine(ex.Message);
+    /// <summary>
+    /// The resolver overload agrees, and reaches the same answer without asking
+    /// the resolver anything — the second of the two refusal sites issue #191
+    /// deleted, which nothing else covers.
+    /// </summary>
+    [Fact]
+    public void MapBindings_WithResolver_EverythingZeroCount_ReturnsEmptyWithoutAsking()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile(
+            "zeroArrayOnlyResolver", ShaderFixtures.ReflectionZeroLengthArrayOnly);
 
-        // The whole-set refusal, not the per-binding one: the message that names
-        // the zero-binding-layout gap. Asserting on it is what makes this test
-        // discriminate between "MapBindings omits" and "MapBindings still maps
-        // every binding and MapBinding happens to refuse this one".
-        Assert.Contains("zero bindings", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("CreateDescriptorSetLayout", ex.Message, StringComparison.Ordinal);
+        int asked = 0;
+        SlangUnboundedCapacity capacity = _ =>
+        {
+            asked++;
+
+            return 1u;
+        };
+
+        Assert.True(reflected.Reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> bindings));
+
+        Assert.Empty(bindings.MapBindings(capacity));
+        Assert.Equal(0, asked);
     }
 
     /// <summary>
@@ -1819,6 +1835,113 @@ public sealed class SlangReflectionTests
             Assert.True(
                 Volatile.Read(ref errorCount) == 0,
                 $"The layers rejected descriptions derived from reflection:{Environment.NewLine}" +
+                string.Join(Environment.NewLine, errors));
+        }
+    }
+
+    /// <summary>
+    /// Issue #191's end-to-end acceptance test: a program declaring sets 0 and 2
+    /// becomes a complete <c>PipelineLayout</c>, with set 1 — the hole — filled
+    /// by a descriptor set layout that has zero bindings.
+    /// </summary>
+    /// <remarks>
+    /// No <c>shaderDrawParameters</c> here, unlike
+    /// <see cref="Reflection_BuildsAWorkingPipelineLayout"/>: this fixture is
+    /// fragment-only and declares no <c>SV_VertexID</c>, so the module never
+    /// emits the <c>DrawParameters</c> capability.
+    /// </remarks>
+    [Fact]
+    public void Reflection_SparseSets_BuildsAPipelineLayoutWithAHole()
+    {
+        TestGate.RequireDriver();
+
+        using ReflectedProgram reflected = ReflectedProgram.Compile(
+            "sparseSetsLayout", ShaderFixtures.ReflectionSparseSets);
+
+        SlangReflection reflection = reflected.Reflection;
+
+        Assert.Equal(3u, reflection.SetLayoutSlotCount);
+
+        int errorCount = 0;
+        var errors = new ConcurrentQueue<string>();
+        Action<DebugMessage> sink = msg =>
+        {
+            if ((msg.Severity & VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0)
+            {
+                Interlocked.Increment(ref errorCount);
+                errors.Enqueue(msg.Message);
+            }
+        };
+
+        bool validating = VulkanEnvironment.HasValidationLayer;
+
+        using var instance = Instance.Create(new InstanceDescription
+        {
+            EnableValidation = validating,
+            DebugCallback = validating ? sink : null,
+        });
+
+        uint family = uint.MaxValue;
+        var gpu = instance.PickPhysicalDevice((in PhysicalDeviceInfo info) =>
+        {
+            for (int i = 0; i < info.QueueFamilies.Length; i++)
+            {
+                if (info.QueueFamilies[i].SupportsGraphics)
+                {
+                    family = info.QueueFamilies[i].Index;
+
+                    return true;
+                }
+            }
+
+            return false;
+        });
+
+        using Device device = gpu.CreateDevice(new DeviceDescription
+        {
+            Queues = [new QueueRequest(family, count: 1, priority: 1.0f)],
+        });
+
+        var layouts = new DescriptorSetLayout[(int)reflection.SetLayoutSlotCount];
+
+        try
+        {
+            for (uint set = 0; set < reflection.SetLayoutSlotCount; set++)
+            {
+                layouts[set] = reflection.TryGetSet(set, out ReadOnlySpan<SlangDescriptorBinding> bindings)
+                    ? device.CreateDescriptorSetLayout(
+                        new DescriptorSetLayoutDescription { Bindings = bindings.MapBindings() })
+                    : device.CreateDescriptorSetLayout(default);   // the hole
+            }
+
+            // The hole is a real layout, not VK_NULL_HANDLE.
+            Assert.False(layouts[1].IsNull);
+
+            using PipelineLayout pipelineLayout = device.CreatePipelineLayout(new PipelineLayoutDescription
+            {
+                SetLayouts = layouts,
+                PushConstantRanges = reflection.PushConstantRanges.MapPushConstantRanges(),
+            });
+
+            Assert.False(pipelineLayout.IsNull);
+
+            using ShaderModule fragment = device.CreateShaderModule(reflected.Program.Spirv(0));
+
+            Assert.False(fragment.IsNull);
+        }
+        finally
+        {
+            foreach (DescriptorSetLayout layout in layouts)
+            {
+                layout.Dispose();
+            }
+        }
+
+        if (validating)
+        {
+            Assert.True(
+                Volatile.Read(ref errorCount) == 0,
+                $"The layers rejected a pipeline layout with a zero-binding set:{Environment.NewLine}" +
                 string.Join(Environment.NewLine, errors));
         }
     }

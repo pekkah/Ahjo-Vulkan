@@ -181,6 +181,28 @@ public sealed unsafe class DescriptorTemplateTests
         Assert.Throws<ArgumentException>(() => setLayout.CreateUpdateTemplate<UniformWrites>(bindings));
     }
 
+    /// <summary>
+    /// Issue #191 made a zero-binding descriptor set layout legal, but a
+    /// template over it is not: Vulkan requires
+    /// <c>descriptorUpdateEntryCount &gt; 0</c>. The guard stays, and its message
+    /// names the VUID so nobody removes it by analogy with the layout guard.
+    /// </summary>
+    [Fact]
+    public void DescriptorTemplate_EmptyBindings_Throws()
+    {
+        TestGate.RequireDriver();
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out _);
+
+        using var setLayout = device.CreateDescriptorSetLayout(default);
+
+        DescriptorBinding[] empty = [];
+        var ex = Assert.Throws<ArgumentException>(
+            () => setLayout.CreateUpdateTemplate<UniformWrites>(empty));
+        Assert.Contains("descriptorUpdateEntryCount", ex.Message, StringComparison.Ordinal);
+    }
+
     private static uint GetSet<T>(in DescriptorTemplate<T> tmpl) where T : unmanaged
     {
         // Reach the internal Set field via reflection-free struct copy +

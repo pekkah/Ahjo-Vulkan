@@ -188,16 +188,36 @@ public sealed unsafe class Device : IDisposable
     /// chains a <c>VkDescriptorSetLayoutBindingFlagsCreateInfo</c>.
     /// </summary>
     /// <exception cref="ArgumentException">
-    /// <paramref name="desc"/> has no bindings, or a binding carrying
-    /// <see cref="DescriptorBindingFlags.VariableDescriptorCount"/> is not the
-    /// one with the highest binding number in the set
+    /// A binding carrying <see cref="DescriptorBindingFlags.VariableDescriptorCount"/>
+    /// is not the one with the highest binding number in the set
     /// (VUID-VkDescriptorSetLayoutBindingFlagsCreateInfo-pBindingFlags-03004).
     /// </exception>
+    /// <remarks>
+    /// <para><b>An empty <see cref="DescriptorSetLayoutDescription.Bindings"/>
+    /// span is legal</b> and produces a layout with zero bindings. Vulkan
+    /// contemplates it:
+    /// <c>VUID-VkDescriptorSetLayoutCreateInfo-pBindings-parameter</c> excuses
+    /// <c>pBindings</c> "if <c>bindingCount</c> is not 0", and there is no
+    /// <c>bindingCount-arraylength</c> VUID. Measured: <c>VK_SUCCESS</c>, and the
+    /// validation layer silent (issue #183 §E7, NVIDIA RTX 4070 Ti, layer
+    /// 1.4.341).</para>
+    /// <para>It is the layout Vulkan wants for an unpopulated set index in a
+    /// sparse-set program — a <c>PipelineLayout</c> needs a handle at that index
+    /// — and for a set whose every binding is a zero-length resource array
+    /// (issues #191, #183).</para>
+    /// <para><b>Not to be confused with
+    /// <see cref="DescriptorBinding.Count"/> == 0</b>, which is issue #119's
+    /// sentinel for a zeroed span element and is still normalized to <c>1</c>
+    /// below. An empty span is <i>zero bindings</i>; a one-element span holding
+    /// <c>default(DescriptorBinding)</c> is <i>one binding of one
+    /// descriptor</i>. The two are adjacent and mean opposite things.</para>
+    /// <para>A layout with zero bindings cannot carry a
+    /// <c>DescriptorTemplate&lt;T&gt;</c>: Vulkan requires
+    /// <c>descriptorUpdateEntryCount &gt; 0</c>
+    /// (VUID-VkDescriptorUpdateTemplateCreateInfo-descriptorUpdateEntryCount-arraylength).</para>
+    /// </remarks>
     public DescriptorSetLayout CreateDescriptorSetLayout(in DescriptorSetLayoutDescription desc)
     {
-        if (desc.Bindings.IsEmpty)
-            throw new ArgumentException("DescriptorSetLayoutDescription.Bindings must contain at least one entry.");
-
         ValidateVariableDescriptorCountOrdering(desc.Bindings);
 
         Span<VkDescriptorSetLayoutBinding> nativeBindings =

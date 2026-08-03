@@ -299,6 +299,11 @@ proves nothing.
     `SlangReflection`: refusing a program there would make two perfectly usable
     bindings unreachable because of one nobody can reference, which is the
     failure #176 removed. Issue #183.
+    A set whose *every* binding is zero-count therefore maps to an **empty**
+    `DescriptorBinding[]`, which `Device.CreateDescriptorSetLayout` accepts as a
+    layout with zero bindings (issue #191) — the three entry points still agree:
+    `MapBindings` omits, `MapBinding` refuses, `MapBinding(binding, count)`
+    refuses.
 
 Two further constraints, both about refusing rather than guessing: more than one
 `[[vk::push_constant]]` block throws from **reflection** (it exposes a buffer
@@ -313,31 +318,12 @@ builds and then mis-binds.
 A *third* refusal was considered for #180 and deliberately not added (that
 issue's OPEN-1): `Group` does not check for two bindings sharing a `(set, slot)`,
 so should one ever survive rule 9's correction it still reaches
-`Device.CreateDescriptorSetLayout` — which validates only that the `Bindings`
-span is non-empty — silently.
+`Device.CreateDescriptorSetLayout` — which validates only the
+variable-descriptor-count ordering
+(VUID-VkDescriptorSetLayoutBindingFlagsCreateInfo-pBindingFlags-03004) and
+nothing about slot uniqueness — silently.
 
 Stage attribution is opt-in (`SlangStageAttribution.PerEntryPointUsage`) because
 it costs a codegen per entry point. Push-constant stages stay the program union
 in **both** modes: `isParameterLocationUsed` reports a push constant as unused
 even for a stage whose SPIR-V provably reads it.
-
-### Known gap: no zero-binding descriptor set layout
-
-A reflected program may leave a set index unused (rule 4). Vulkan fills such a
-hole with a descriptor set layout that has zero bindings, but
-`Device.CreateDescriptorSetLayout` rejects an empty `Bindings` span
-(`src/Ahjo.Vulkan/Lifecycle/Device.cs`), so a sparse program cannot currently be
-turned into a complete `PipelineLayout` through this API.
-
-`SlangReflection.SetLayoutSlotCount` and `TryGetSet` make the hole visible and
-the XML doc names it. **Do not paper over it here** — synthesizing a stand-in
-binding would put a descriptor in a layout the shader never declared. Closing it
-is a decision about `Ahjo.Vulkan`'s own validity guard, not an edit this project
-gets to make.
-
-A set whose every binding is a zero-length array (rule 11) reaches the same gap
-by a second route, and both `MapBindings` overloads refuse it there with a
-message naming the gap rather than letting `Device` report an empty `Bindings`
-span two frames later from a different package. That refusal is scoped to "input
-non-empty, output empty" and becomes a `return []` the day `Ahjo.Vulkan` accepts
-an empty span.

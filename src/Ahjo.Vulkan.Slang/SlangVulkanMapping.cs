@@ -1,5 +1,4 @@
 using System;
-using System.Text;
 using Ahjo.Vulkan.Native;
 using Ahjo.Vulkan.Slang.Native;
 
@@ -293,28 +292,21 @@ public static class SlangVulkanMapping
     /// <c>reflection.Bindings(i)</c> span it came from</b> — it can be shorter.
     /// Correlate the two on
     /// <see cref="SlangDescriptorBinding.Slot"/>, never on index.</para>
-    /// <para>When <em>every</em> binding of a non-empty set is zero-count, the
-    /// layout Vulkan wants has no bindings at all and
-    /// <c>Device.CreateDescriptorSetLayout</c> cannot express one, so this
-    /// throws rather than returning an empty array — see the "no zero-binding
-    /// descriptor set layout" note in
-    /// <c>src/Ahjo.Vulkan.Slang/CLAUDE.md</c>. An empty input span still returns
-    /// an empty array.</para>
+    /// <para><b>The result may be empty</b> — when every binding of the set is
+    /// zero-count, nothing is kept. That is the correct layout for a set whose
+    /// every binding is a zero-length resource array: the emitted SPIR-V
+    /// decorates nothing, so the matching descriptor set layout has no bindings.
+    /// <c>Device.CreateDescriptorSetLayout</c> accepts an empty
+    /// <c>Bindings</c> span and produces exactly that layout (issue #191).</para>
     /// </remarks>
     /// <exception cref="NotSupportedException">
-    /// A binding's Slang type has no Vulkan descriptor equivalent, Slang
+    /// A binding's Slang type has no Vulkan descriptor equivalent, or Slang
     /// reported no descriptor count for one of them — see
-    /// <see cref="MapBindings(ReadOnlySpan{SlangDescriptorBinding}, SlangUnboundedCapacity)"/>
-    /// — or every binding of a non-empty set declares zero descriptors.
+    /// <see cref="MapBindings(ReadOnlySpan{SlangDescriptorBinding}, SlangUnboundedCapacity)"/>.
     /// </exception>
     public static DescriptorBinding[] MapBindings(this ReadOnlySpan<SlangDescriptorBinding> bindings)
     {
         int kept = CountMappable(bindings);
-
-        if (bindings.Length != 0 && kept == 0)
-        {
-            throw new NotSupportedException(EmptySetMessage(bindings));
-        }
 
         var result = new DescriptorBinding[kept];
         int n = 0;
@@ -360,21 +352,20 @@ public static class SlangVulkanMapping
     /// <c>reflection.Bindings(i)</c> span it came from</b> — it can be shorter.
     /// Correlate the two on
     /// <see cref="SlangDescriptorBinding.Slot"/>, never on index.</para>
-    /// <para>When <em>every</em> binding of a non-empty set is zero-count, the
-    /// layout Vulkan wants has no bindings at all and
-    /// <c>Device.CreateDescriptorSetLayout</c> cannot express one, so this
-    /// throws rather than returning an empty array — see the "no zero-binding
-    /// descriptor set layout" note in
-    /// <c>src/Ahjo.Vulkan.Slang/CLAUDE.md</c>. An empty input span still returns
-    /// an empty array.</para>
+    /// <para><b>The result may be empty</b> — when every binding of the set is
+    /// zero-count, nothing is kept and <paramref name="capacity"/> is never
+    /// asked. That is the correct layout for a set whose every binding is a
+    /// zero-length resource array: the emitted SPIR-V decorates nothing, so the
+    /// matching descriptor set layout has no bindings.
+    /// <c>Device.CreateDescriptorSetLayout</c> accepts an empty
+    /// <c>Bindings</c> span and produces exactly that layout (issue #191).</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="capacity"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="capacity"/> returned zero.
     /// </exception>
     /// <exception cref="NotSupportedException">
-    /// A binding's Slang type has no Vulkan descriptor equivalent, or every
-    /// binding of a non-empty set declares zero descriptors.
+    /// A binding's Slang type has no Vulkan descriptor equivalent.
     /// </exception>
     public static DescriptorBinding[] MapBindings(
         this ReadOnlySpan<SlangDescriptorBinding> bindings,
@@ -383,11 +374,6 @@ public static class SlangVulkanMapping
         ArgumentNullException.ThrowIfNull(capacity);
 
         int kept = CountMappable(bindings);
-
-        if (bindings.Length != 0 && kept == 0)
-        {
-            throw new NotSupportedException(EmptySetMessage(bindings));
-        }
 
         var result = new DescriptorBinding[kept];
         int n = 0;
@@ -487,33 +473,5 @@ public static class SlangVulkanMapping
         }
 
         return kept;
-    }
-
-    /// <summary>
-    /// The refusal both <c>MapBindings</c> overloads raise when every binding of
-    /// a non-empty set declares zero descriptors.
-    /// </summary>
-    private static string EmptySetMessage(ReadOnlySpan<SlangDescriptorBinding> bindings)
-    {
-        // A span cannot be closed over, and this is setup-time — the allocation
-        // posture note in src/Ahjo.Vulkan.Slang/CLAUDE.md applies.
-        var list = new StringBuilder();
-
-        for (int i = 0; i < bindings.Length; i++)
-        {
-            if (i != 0)
-            {
-                list.Append(", ");
-            }
-
-            list.Append("binding ").Append(bindings[i].Slot).Append(" ('").Append(bindings[i].Name).Append("')");
-        }
-
-        return $"All {bindings.Length} binding(s) of this descriptor set declare zero descriptors ({list}), so a "
-            + "layout for it would have no bindings at all. Vulkan's answer is a descriptor set layout with zero "
-            + "bindings, but Device.CreateDescriptorSetLayout rejects an empty Bindings span, so there is nothing "
-            + "this call can return — see the \"no zero-binding descriptor set layout\" note in "
-            + "src/Ahjo.Vulkan.Slang/CLAUDE.md. Give the set a binding the shader can reference, or build the "
-            + "VkDescriptorSetLayout for it directly.";
     }
 }
