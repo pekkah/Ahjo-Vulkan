@@ -86,6 +86,8 @@ managed-byte count BDN's `MemoryDiagnoser` reports; `-` is zero.
 | `PipelineBarrier.ResetEvent_Single`             |  33.4 ns   |        -  | #155 canary: one `vkCmdResetEvent2` — bare stage-mask pass-through, no dependency marshalling. |
 | `FrameRing.Frame_Begin_Submit_Wait`             |  56.20 µs  |        -  | Full headless frame: BeginFrame → submit no-op cmd → wait fence.          |
 | `PushDescriptors.PushDescriptors_StorageBuffer` |  69.34 ns  |        -  | `vkCmdPushDescriptorSetWithTemplate` × 1024 in one Begin/End scope; bimodal under driver overhead. |
+| `BindDescriptorSets.Bind_1Set`                  | n/m        |        -  | #188 canary: `vkCmdBindDescriptorSets` with one set × 1024 in one Begin/End scope — the common per-draw bind. The single handle is copied into a `stackalloc nint[1]` (the recorder's `<= 32` branch), so no managed allocation. **Mean not yet captured** — the authoring host had no Vulkan ICD; the `-` is from static analysis of the stackalloc branch and must be confirmed on the first measured run. |
+| `BindDescriptorSets.Bind_4Sets`                 | n/m        |        -  | #188 canary: same call with 4 sets — still on the `<= 32` stackalloc branch, so the per-element copy grows but stays allocation-free. 4 is the guaranteed `maxBoundDescriptorSets` floor, so the bind is portable on every conformant device. The gap to `Bind_1Set` is the copy cost, proportional to `sizeof(DescriptorSet)` (24 B since #182); an unrelated change to that struct moves this number, which is why the row exists. **Mean not yet captured** — same as the row above. |
 | `DescriptorSetPool.AcquireReleaseReset_Cycle`   |  39.62 ns  |        -  | #114 canary: per-frame Acquire → Release → Reset; Reset retains the per-bucket `(layout, count)` idle `Stack`s instead of discarding them. Re-measured for #182 at 38.67 ns after the composite key landed — within noise, so the number is left as captured. Re-measured for #191 at 38.01 ns after the empty-`poolSizes` relaxation — also within noise, number again left as captured. The pre-flight guard's message was extracted into a `NoInlining` throw helper because the inline ternary form measured 43.82 ns in that same session; `DescriptorSetPool.cs` carries a standing "do not fold it back inline" for that reason. |
 | `DescriptorSetPoolVariableCount.AcquireReleaseReset_VariableCount_Cycle` |  88.23 ns  |        -  | #182 canary: `Acquire(layout, count)` chains `VkDescriptorSetVariableDescriptorCountAllocateInfo` from the stack; the `(layout, count)` free-list key must not box. Mean not comparable to the row above — different layout, pool template and per-set descriptor count. |
 | `DescriptorSetPoolVariableCount.AcquireReleaseReset_TwoCounts_Cycle` | 221.69 ns  |        -  | #182 canary: two distinct counts per cycle — the bounded-count case must reuse both retained `Stack`s, not rebuild them (the #114 shape, one key deeper). Mean not comparable to `DescriptorSetPool.AcquireReleaseReset_Cycle` — different layout, pool template and per-set descriptor count. |
@@ -112,7 +114,8 @@ were already the correct per-call numbers. For
 - **Variance**: timings on a desktop host vary 5-15% run-to-run. Treat
   changes < 20% as noise; investigate larger swings.
 - **Driver dependency**: the FrameRing / `BufferBenchmarks` / CommandRecorder /
-  PipelineBarrier / PushDescriptors / StagingUploader / SyncPool benchmarks
+  PipelineBarrier / PushDescriptors / BindDescriptorSets / StagingUploader /
+  SyncPool benchmarks
   fail at `[GlobalSetup]` on a host without a Vulkan ICD. That is the
   expected behavior — there is no soft skip in the benchmark project (BDN
   reports the failure and moves on).
