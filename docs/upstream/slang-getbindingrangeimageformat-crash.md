@@ -344,8 +344,29 @@ platform-dependent code on the path.
 
 Any host-side tool that walks binding ranges generically and asks each one for
 its image format will die the first time it meets an interface-typed
-`ParameterBlock`. The only workaround available to a caller is to never ask:
-guard the call on the binding type (`TEXTURE` / `TYPED_BUFFER`, ± the mutable
-flag), since those are the only declarations `[[vk::image_format]]` applies to.
-That is what we ship today. It is a guard against a crash, though, not against a
-wrong answer — there is no result code to check and no way to recover.
+`ParameterBlock`. There is no result code to check and no way to recover, so a
+caller cannot handle this — it can only avoid it.
+
+**A caller-side workaround does exist, and it is exact.** Ask
+`spReflectionTypeLayout_getBindingRangeLeafVariable` for the same `(scope,
+index)` first and skip the format call when it returns null:
+
+```c
+if (spReflectionTypeLayout_getBindingRangeLeafVariable(scope, i) == NULL)
+    format = SLANG_IMAGE_FORMAT_unknown;   /* what the fixed code would return */
+else
+    format = spReflectionTypeLayout_getBindingRangeImageFormat(scope, i);
+```
+
+That accessor reads the very field the crash dereferences, from the same
+`BindingRangeInfo`, and is safe by construction: identical prologue, then a
+plain `convert` with no dereference. It keys on the actual trigger rather than
+on the binding-type kind, so it does not depend on having enumerated the kinds
+that happen to produce a null. We ship this, plus the narrower kind test in
+front of it, and a regression test that makes the previously fatal call on
+purpose.
+
+This is offered as evidence about the defect, not as a reason to leave it: a
+workaround that every caller must discover independently — after a process
+death with no diagnostic — is not a substitute for the null check, and the
+regression test upstream is missing either way.

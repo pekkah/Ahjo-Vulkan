@@ -1413,6 +1413,75 @@ public sealed class SlangReflectionTests
     }
 
     /// <summary>
+    /// The call that used to kill the test host, made on purpose: the
+    /// <c>EXISTENTIAL_VALUE</c> range that a <c>ParameterBlock&lt;ISurface&gt;</c>
+    /// element scope reports comes back <c>unknown</c> instead of taking the
+    /// process down (#181).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The second assertion is the test.</b> The first one passes the
+    /// range's real binding type, which <see cref="SlangReflection.ImageFormatOf"/>
+    /// rejects on kind before it reaches the guard — true, worth stating, and
+    /// vacuous as a test of the guard. So the second one passes
+    /// <c>SLANG_BINDING_TYPE_TEXTURE</c> for the same range, which is a
+    /// deliberate lie about its kind: it is exactly what a future widening of
+    /// the kind predicate would do, and it drives the call through to the null
+    /// check that stands behind it. Passing means widening is survivable;
+    /// before the guard existed this argument was fatal.</para>
+    /// <para><b>A regression here does not fail — it vanishes.</b> If the null
+    /// check is removed or reordered after the native call, this test takes the
+    /// whole run down with <c>0xC0000005</c> rather than reporting red. That is
+    /// the nature of the defect (see the class remarks on measuring against
+    /// SPIR-V: the same "no result code to check" problem), and it is why the
+    /// precondition below is asserted rather than assumed — the day upstream
+    /// populates <c>leafVariable</c> for this range, the guard stops being
+    /// exercised and this test would quietly prove nothing.</para>
+    /// </remarks>
+    [Fact]
+    public unsafe void ImageFormat_ExistentialRange_IsUnknownRatherThanFatal()
+    {
+        using var compiler = SlangCompiler.Create();
+        using SlangSession session = compiler.CreateSession(default);
+        using SlangModule module = session.LoadModuleFromSource("surfaceFormat", "surfaceFormat.slang", ShaderFixtures.InterfaceSurfaceModule);
+        using SlangEntryPoint fragment = module.DefinedEntryPoint(0);
+
+        using SlangProgram program = session.CreateProgram()
+            .Add(module)
+            .Add(fragment)
+            .AddTypeConformance("Glossy", "ISurface")
+            .Link();
+
+        SlangProgramLayout* layout = SlangReflection.GetLayout(program.LinkedComponent);
+
+        // Global range 0 is the ParameterBlock itself; the existential value
+        // buffer lives one level down, in the block's element scope.
+        SlangReflectionTypeLayout* element = SlangApi.spReflectionTypeLayout_GetElementTypeLayout(
+            SlangApi.spReflectionTypeLayout_getBindingRangeLeafTypeLayout(
+                SlangApi.spReflection_getGlobalParamsTypeLayout(layout), 0));
+
+        Assert.Equal(1, SlangApi.spReflectionTypeLayout_getBindingRangeCount(element));
+
+        SlangBindingType type = SlangApi.spReflectionTypeLayout_getBindingRangeType(element, 0);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_EXISTENTIAL_VALUE, type);
+
+        // The precondition the guard keys on. Null here is what upstream
+        // dereferences; see ImageFormatOf's remarks.
+        Assert.True(
+            SlangApi.spReflectionTypeLayout_getBindingRangeLeafVariable(element, 0) == null,
+            "leafVariable is no longer null for an EXISTENTIAL_VALUE range — the guard below is untested, and #181 needs re-measuring.");
+
+        Assert.Equal(
+            SlangImageFormat.SLANG_IMAGE_FORMAT_unknown,
+            SlangReflection.ImageFormatOf(element, 0, type));
+
+        // Reached only because of the null check: the kind test admits this,
+        // and the native call underneath it is the one that crashes.
+        Assert.Equal(
+            SlangImageFormat.SLANG_IMAGE_FORMAT_unknown,
+            SlangReflection.ImageFormatOf(element, 0, SlangBindingType.SLANG_BINDING_TYPE_TEXTURE));
+    }
+
+    /// <summary>
     /// The SPIR-V oracle for the binding-range join: every name reflection
     /// reports for a <c>(set, slot)</c> is the <c>OpName</c> the emitted module
     /// gives the variable it decorates at that very <c>(set, binding)</c>.

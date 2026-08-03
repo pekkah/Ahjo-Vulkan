@@ -199,11 +199,22 @@ proves nothing.
    `ParameterBlock<ISurface>`'s element scope reports, it takes the process down
    with `0xC0000005` — no result code, no exception, just a dead test host.
    Every *other* call on that same range returns normally, so nothing about the
-   range looks dangerous until this one is made. `SlangReflection.ImageFormatOf`
-   asks it only of texture and typed-buffer ranges, which are the only
-   declarations `[[vk::image_format]]` applies to. Do not widen that guard, and
-   do not assume the rest of this call family is total either — the member walk
-   checks `SLANG_TYPE_KIND_STRUCT` before `GetFieldCount` for the same reason.
+   range looks dangerous until this one is made. Do not assume the rest of this
+   call family is total either — the member walk checks
+   `SLANG_TYPE_KIND_STRUCT` before `GetFieldCount` for the same reason.
+
+   **`SlangReflection.ImageFormatOf` guards it in two layers, and only the
+   second one is the crash guard.** The kind test (texture / typed buffer, the
+   only declarations `[[vk::image_format]]` applies to) is *narrowing*; behind
+   it, a null check on
+   `spReflectionTypeLayout_getBindingRangeLeafVariable` refuses the call for
+   exactly the condition upstream dereferences. That accessor reads the same
+   field and is safe by construction — same prologue, then a plain `convert` —
+   and is measured returning null on the crashing range. So widening the kind
+   test is no longer fatal, which it was before;
+   `ImageFormat_ExistentialRange_IsUnknownRatherThanFatal` pins that by passing
+   `SLANG_BINDING_TYPE_TEXTURE` for the existential range on purpose, and
+   removing the null check makes it crash the run rather than fail (verified).
 
    **Root cause, traced (#181).** `slang-reflection-api.cpp`'s
    `getBindingRangeImageFormat` null-checks the type layout and bounds-checks the
@@ -219,6 +230,15 @@ proves nothing.
    predicts. Standalone C repro and the drafted upstream report:
    `docs/upstream/slang-getbindingrangeimageformat-crash.md` and `.cpp`. Tracked
    as #181; the upstream number belongs here once filed.
+
+   **Upstream already fixes this incidentally, in unmerged PR
+   [#11344](https://github.com/shader-slang/slang/pull/11344)** — it routes both
+   format getters through a helper that null-checks the variable first, which is
+   the same guard by the same reasoning. Our null check therefore mirrors the
+   fix rather than working around it, but only the null-safety half: #11344 also
+   reads a format off the texture *type*, which `v2026.14.1` has no notion of.
+   Both layers come out when a Slang carrying that fix is **pinned** — not when
+   it merges — and the repro in `docs/upstream/` is how you decide.
 
 8. **Member offsets come from `SLANG_PARAMETER_CATEGORY_UNIFORM`, and the test
    asserts them against `OpMemberDecorate … Offset`.** A default or wrong

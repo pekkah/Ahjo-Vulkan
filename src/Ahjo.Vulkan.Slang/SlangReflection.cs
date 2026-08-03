@@ -1003,22 +1003,57 @@ public sealed unsafe class SlangReflection
     /// <c>BindingRangeInfo::leafVariable</c> without a null check, and that
     /// field is null for an <c>EXISTENTIAL_VALUE</c> range — which describes a
     /// synthesized value buffer, not a declared variable. <b>The trigger is the
-    /// null leaf variable, not the binding-type kind</b>, so widening this
-    /// predicate to admit a kind nobody has measured is not a safe trade; the
-    /// crash also reproduces on linux-x64 (<c>SIGSEGV</c>), so it is not a
-    /// win-x64 quirk. Repro and drafted report live in
-    /// <c>docs/upstream/</c>. Once a fixed Slang is pinned, this guard can go —
-    /// keep a test that calls the format getter on an existential range.
+    /// null leaf variable, not the binding-type kind</b>, and the crash
+    /// reproduces on linux-x64 (<c>SIGSEGV</c>) as well, so it is not a win-x64
+    /// quirk. Repro and drafted report live in <c>docs/upstream/</c>.
+    /// </para>
+    /// <para>
+    /// <b>So the guard is the null check, and it is asked of the field upstream
+    /// is about to dereference.</b>
+    /// <c>spReflectionTypeLayout_getBindingRangeLeafVariable</c> reads the same
+    /// <c>leafVariable</c> and is safe by construction — verified at the pinned
+    /// <c>v2026.14.1</c>: identical prologue (null type layout, <c>index &lt;
+    /// 0</c>, <c>index &gt;=</c> count), then a plain <c>convert</c> with no
+    /// dereference — and it is *measured* returning null on the crashing range,
+    /// one call before the process dies. This mirrors the fix in upstream PR
+    /// <see href="https://github.com/shader-slang/slang/pull/11344">#11344</see>,
+    /// which routes both format getters through a helper whose first act is
+    /// <c>if (!varDecl) return SLANG_IMAGE_FORMAT_unknown</c>. It mirrors only
+    /// that half: #11344 also reads a format off the texture <i>type</i>, a
+    /// feature <c>v2026.14.1</c> does not have, where formats come from
+    /// <c>FormatAttribute</c> alone — so on the pinned version the two agree.
+    /// </para>
+    /// <para>
+    /// The kind test is kept, but it is now <i>narrowing</i> rather than the
+    /// crash guard: only textures and typed buffers can carry a format, and
+    /// every other kind reported <c>SLANG_IMAGE_FORMAT_unknown</c> anyway.
+    /// Widening it is no longer the landmine it was, because the null check
+    /// stands behind it — but the reason to widen it still has to be a real one.
+    /// Once a Slang carrying #11344 is <i>pinned</i> (not merely merged), both
+    /// layers can go; re-run the repro to decide, and keep
+    /// <c>ImageFormat_ExistentialRange_IsUnknownRatherThanFatal</c> either way.
     /// </para>
     /// </remarks>
-    private static SlangImageFormat ImageFormatOf(
+    internal static SlangImageFormat ImageFormatOf(
         SlangReflectionTypeLayout* structTypeLayout,
         long bindingRange,
         SlangBindingType type)
-        => (type & SlangBindingType.SLANG_BINDING_TYPE_BASE_MASK) is
-            SlangBindingType.SLANG_BINDING_TYPE_TEXTURE or SlangBindingType.SLANG_BINDING_TYPE_TYPED_BUFFER
-            ? SlangApi.spReflectionTypeLayout_getBindingRangeImageFormat(structTypeLayout, bindingRange)
-            : SlangImageFormat.SLANG_IMAGE_FORMAT_unknown;
+    {
+        if ((type & SlangBindingType.SLANG_BINDING_TYPE_BASE_MASK) is not
+            (SlangBindingType.SLANG_BINDING_TYPE_TEXTURE or SlangBindingType.SLANG_BINDING_TYPE_TYPED_BUFFER))
+        {
+            return SlangImageFormat.SLANG_IMAGE_FORMAT_unknown;
+        }
+
+        // Ask for the pointer upstream is about to dereference. A null here is
+        // the exact condition that kills the process one call later.
+        if (SlangApi.spReflectionTypeLayout_getBindingRangeLeafVariable(structTypeLayout, bindingRange) == null)
+        {
+            return SlangImageFormat.SLANG_IMAGE_FORMAT_unknown;
+        }
+
+        return SlangApi.spReflectionTypeLayout_getBindingRangeImageFormat(structTypeLayout, bindingRange);
+    }
 
     /// <summary>
     /// Spec D4(c) — a buffer layout for every binding whose leaf type has an
@@ -1689,7 +1724,14 @@ public sealed unsafe class SlangReflection
         }
     }
 
-    private static SlangProgramLayout* GetLayout(IComponentType* linked)
+    /// <remarks>
+    /// <c>internal</c> rather than <c>private</c> so
+    /// <c>ImageFormat_ExistentialRange_IsUnknownRatherThanFatal</c> can reach
+    /// the one binding range that cannot be arrived at through the public
+    /// surface — the walk skips it (rule 6) before
+    /// <see cref="ImageFormatOf"/> ever sees it.
+    /// </remarks>
+    internal static SlangProgramLayout* GetLayout(IComponentType* linked)
     {
         ISlangBlob* diagnostics = null;
         var layout = (SlangProgramLayout*)linked->getLayout(0, &diagnostics);
