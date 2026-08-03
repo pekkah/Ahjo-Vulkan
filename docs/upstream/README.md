@@ -21,7 +21,7 @@ needed.
 
 | File | Upstream | Status |
 |---|---|---|
-| `slang-getbindingrangeimageformat-crash.{md,cpp}` | shader-slang/slang | Not filed. Tracked as #181. Guard: `SlangReflection.ImageFormatOf`. |
+| `slang-getbindingrangeimageformat-crash.{md,cpp}` | shader-slang/slang | Not filed. Tracked as #181. Guard: `SlangReflection.ImageFormatOf`. Fixed incidentally by open PR [#11344](https://github.com/shader-slang/slang/pull/11344), unmerged — see "Prior art upstream" in the report. Repro last re-run 2026-08-03 against the pinned `v2026.14.1`: still crashes (`0xC0000005`). |
 
 ## Re-testing after a version bump
 
