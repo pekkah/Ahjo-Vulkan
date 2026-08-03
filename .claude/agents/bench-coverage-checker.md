@@ -33,7 +33,7 @@ Use this table to look up the expected benchmark for each changed file. If a fil
 | `Memory/StagingBatch.cs`               | `StagingUploaderBenchmarks.cs`                         |
 | `Memory/Allocator.cs`                  | `BufferBenchmarks.cs` (covers allocation path)         |
 | `Memory/MappedRegion.cs`               | `BufferBenchmarks.cs`                                  |
-| `Recording/CommandRecorder.cs`         | `CommandRecorderBenchmarks.cs` **plus the class matching the changed command family** — barriers/split barriers → `PipelineBarrierBenchmarks.cs`, push constants → `PushConstantsBenchmarks.cs`, descriptors → `PushDescriptorsBenchmarks.cs`. Applied literally to `CommandRecorderBenchmarks.cs` alone this row yields false "gaps". |
+| `Recording/CommandRecorder.cs`         | `CommandRecorderBenchmarks.cs` **plus the class matching the changed command family** — barriers/split barriers → `PipelineBarrierBenchmarks.cs`, push constants → `PushConstantsBenchmarks.cs`, push descriptors → `PushDescriptorsBenchmarks.cs`, bind descriptor sets → `BindDescriptorSetsBenchmarks.cs`. Applied literally to `CommandRecorderBenchmarks.cs` alone this row yields false "gaps". |
 | `Recording/BufferCopyRegion.cs`        | `CommandRecorderBenchmarks.cs`                         |
 | `Recording/ImmediateRecord.cs`         | `CommandRecorderBenchmarks.cs`                         |
 | `Recording/*Barrier.cs`                | `PipelineBarrierBenchmarks.cs`                         |
@@ -56,7 +56,7 @@ Use this table to look up the expected benchmark for each changed file. If a fil
 | `Pipelines/SpecializationInfo.cs`      | `SpecializationInfoBenchmarks.cs`                      |
 | `Pipelines/PushConstantRange.cs`       | `PushConstantsBenchmarks.cs`                           |
 | `Pipelines/PipelineLayout.cs`          | `PushConstantsBenchmarks.cs` + `HandleOwnershipBenchmarks.cs` (metadata field) |
-| `Pipelines/DescriptorSet.cs`           | `DescriptorSetPoolBenchmarks.cs` — hot-path type: returned from every `Acquire` and passed by value as `ReadOnlySpan<DescriptorSet>` into `CommandRecorder.BindDescriptorSets`, so its size and copy cost matter |
+| `Pipelines/DescriptorSet.cs`           | `BindDescriptorSetsBenchmarks.cs` — hot-path type: returned from every `Acquire` and passed by value as `ReadOnlySpan<DescriptorSet>` into `CommandRecorder.BindDescriptorSets`, which copies each `Handle` into a `stackalloc` — so its size drives that copy's cost (#188). `DescriptorSetPoolBenchmarks.cs` also acquires it, but the bind benchmark is the one that measures the per-value copy the struct size governs. |
 | `Internal/IVulkanHandle.cs`            | `HandleOwnershipBenchmarks.cs`                         |
 | `Diagnostics/DebugMarker.cs`           | `HandleOwnershipBenchmarks.cs` (constrained dispatch)  |
 | `Internal/ResultPolicy*`               | `ResultPolicyBenchmarks.cs`                            |
