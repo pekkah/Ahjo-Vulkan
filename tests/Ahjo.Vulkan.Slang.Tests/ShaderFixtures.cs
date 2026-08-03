@@ -1013,12 +1013,11 @@ internal static class ShaderFixtures
     /// <remarks>
     /// Measured on <c>v2026.14.1</c> / win-x64: reflection reports one set with
     /// one binding, <c>(0,0) gTex Fixed(0)</c>, and the emitted SPIR-V decorates
-    /// <b>nothing</b>. Vulkan's layout for that set has zero bindings and
-    /// <c>Device.CreateDescriptorSetLayout</c> cannot make one — it rejects an
-    /// empty <c>Bindings</c> span
-    /// (<c>src/Ahjo.Vulkan/Lifecycle/Device.cs</c>), which is the gap
-    /// <c>src/Ahjo.Vulkan.Slang/CLAUDE.md</c> already documents for a sparse set
-    /// index. Deliberately <b>not</b> a row in
+    /// <b>nothing</b>. Vulkan's layout for that set has zero bindings, and
+    /// <c>Device.CreateDescriptorSetLayout</c> makes one from an empty
+    /// <c>Bindings</c> span (<c>src/Ahjo.Vulkan/Lifecycle/Device.cs</c>, issue
+    /// #191) — so <c>MapBindings</c> returns an empty array here rather than
+    /// refusing. Deliberately <b>not</b> a row in
     /// <c>Reflection_CoversEverySetAndBinding_TheSpirvDecorates</c>: with no
     /// decoration to iterate, that theory would assert nothing at all.
     /// </remarks>

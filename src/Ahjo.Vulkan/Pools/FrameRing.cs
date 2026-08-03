@@ -54,6 +54,12 @@ public sealed unsafe class FrameRing : IDisposable
     {
         ArgumentNullException.ThrowIfNull(device);
         if (framesInFlight == 0) throw new ArgumentOutOfRangeException(nameof(framesInFlight));
+        // "Pass both or neither" is FrameRing's OWN contract, deliberately
+        // independent of DescriptorSetPool's relaxed poolSizes guard (issue
+        // #191): an empty span means "this ring wants no descriptor pools", not
+        // "give every slot a budget-less pool". Redefining it would be a
+        // behaviour change on a per-frame path for a use case nobody has asked
+        // for — do not "harmonize" the two.
         if (!descriptorPoolSizes.IsEmpty && descriptorMaxSets == 0)
             throw new ArgumentOutOfRangeException(nameof(descriptorMaxSets),
                 "descriptorMaxSets must be > 0 when descriptorPoolSizes is non-empty.");
@@ -249,6 +255,12 @@ public sealed unsafe class FrameRing : IDisposable
                 fencePool = new FencePool(device);
                 imgAcq    = semPool.AcquireBinary();
                 inFlight  = fencePool.Acquire(initiallySignaled: true);
+                // FrameRing's own opt-out sentinel: an empty span means this
+                // slot gets NO descriptor pool. DescriptorSetPool itself accepts
+                // an empty poolSizes template since issue #191 (a budget-less
+                // pool serving zero-binding layouts), but that is a different
+                // meaning at a different layer and this branch stays — see the
+                // matching comment on the constructor's argument guards.
                 descSets  = descriptorPoolSizes.IsEmpty
                     ? null
                     : new DescriptorSetPool(device, descriptorMaxSets, descriptorPoolSizes);

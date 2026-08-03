@@ -457,10 +457,11 @@ foreach (var binding in reflection.Bindings(i))
 ```
 
 A set whose bindings are *all* zero-length arrays wants a descriptor set layout
-with zero bindings, and `Device.CreateDescriptorSetLayout` cannot make one — so
-both `MapBindings` overloads throw `NotSupportedException` naming that gap
-instead. Give the set a binding the shader can reference, or build its
-`VkDescriptorSetLayout` directly.
+with zero bindings, so both `MapBindings` overloads return an **empty** array for
+it and `device.CreateDescriptorSetLayout(default)` builds exactly that layout
+(issue #191). Do not give the set a stand-in binding to avoid the empty case —
+that puts a descriptor in the layout the emitted SPIR-V never declared, which is
+the mismatch rule 11 exists to prevent.
 
 ### What is inside a buffer
 
@@ -595,13 +596,24 @@ The reflected set numbers are baked into the emitted SPIR-V. Renumbering them to
 be dense produces a pipeline layout that builds and then binds to the wrong
 slots at draw time.
 
-> **Open gap.** Vulkan fills a hole in a pipeline layout with a descriptor set
-> layout that has zero bindings, but `Device.CreateDescriptorSetLayout` rejects
-> an empty `Bindings` span, so there is currently no way to obtain one through
-> this API. A reflected program that leaves a set index unused therefore cannot
-> be turned into a complete `PipelineLayout` yet. Closing that is a decision in
-> `Ahjo.Vulkan` itself; this package deliberately does not work around it with
-> an invented binding.
+A hole is filled with a descriptor set layout that has zero bindings —
+`device.CreateDescriptorSetLayout(default)`, which is what Vulkan wants at an
+unpopulated set index and which `Ahjo.Vulkan` accepts (issue #191). So the loop
+has two branches and no gap:
+
+```csharp
+var layouts = new DescriptorSetLayout[(int)reflection.SetLayoutSlotCount];
+
+for (uint set = 0; set < reflection.SetLayoutSlotCount; set++)
+{
+    layouts[set] = reflection.TryGetSet(set, out ReadOnlySpan<SlangDescriptorBinding> bindings)
+        ? device.CreateDescriptorSetLayout(
+              new DescriptorSetLayoutDescription { Bindings = bindings.MapBindings() })
+        : device.CreateDescriptorSetLayout(default);   // the hole
+}
+```
+
+No stand-in binding is invented for the hole; there is nothing there to declare.
 
 ### Stage flags: two modes, and one of them compiles
 

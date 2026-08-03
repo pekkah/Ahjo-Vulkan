@@ -179,21 +179,18 @@ public sealed unsafe class SlangReflection
     ///
     /// for (uint set = 0; set &lt; reflection.SetLayoutSlotCount; set++)
     /// {
-    ///     if (reflection.TryGetSet(set, out ReadOnlySpan&lt;SlangDescriptorBinding&gt; bindings))
-    ///         layouts[set] = device.CreateDescriptorSetLayout(
-    ///             new DescriptorSetLayoutDescription { Bindings = bindings });
+    ///     layouts[set] = reflection.TryGetSet(set, out ReadOnlySpan&lt;SlangDescriptorBinding&gt; bindings)
+    ///         ? device.CreateDescriptorSetLayout(
+    ///               new DescriptorSetLayoutDescription { Bindings = bindings.MapBindings() })
+    ///         : device.CreateDescriptorSetLayout(default);   // the hole: a layout with zero bindings
     /// }
     /// </code>
-    /// <para><b>A <see langword="false"/> from <see cref="TryGetSet"/> has no
-    /// answer in the wrapper today.</b> Vulkan fills such a hole with a
-    /// descriptor set layout that has zero bindings, but
-    /// <c>Device.CreateDescriptorSetLayout</c> rejects an empty
-    /// <c>Bindings</c> span outright, so there is no way to obtain one through
-    /// this API — a reflected program that leaves a set index unused cannot
-    /// currently be turned into a complete <c>PipelineLayout</c>. Closing that
-    /// needs a decision in <c>Ahjo.Vulkan</c> itself and is deliberately not
-    /// worked around here; producing a stand-in layout with an invented binding
-    /// in it would be worse than the gap.</para>
+    /// <para><b>A <see langword="false"/> from <see cref="TryGetSet"/> is filled
+    /// by a descriptor set layout with zero bindings</b> — which is what Vulkan
+    /// wants at an unpopulated set index, and which
+    /// <c>Device.CreateDescriptorSetLayout</c> produces from an empty
+    /// <c>Bindings</c> span (issue #191). No stand-in binding is invented for
+    /// the hole; there is nothing there to declare.</para>
     /// <para>The reflected set numbers are baked into the emitted SPIR-V.
     /// Renumbering them to be dense produces a pipeline layout that builds and
     /// then binds to the wrong slots at draw time.</para>
@@ -246,7 +243,9 @@ public sealed unsafe class SlangReflection
     /// </summary>
     /// <remarks>
     /// A <see langword="false"/> here is a gap the caller fills with an empty
-    /// descriptor set layout; see <see cref="SetLayoutSlotCount"/>.
+    /// descriptor set layout — <c>device.CreateDescriptorSetLayout(default)</c>,
+    /// which is legal Vulkan and legal here (issue #191). See
+    /// <see cref="SetLayoutSlotCount"/> for the loop.
     /// </remarks>
     public bool TryGetSet(uint setIndex, out ReadOnlySpan<SlangDescriptorBinding> bindings)
     {

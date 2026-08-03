@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using Ahjo.Vulkan.Native;
 
 namespace Ahjo.Vulkan;
@@ -116,6 +118,24 @@ public sealed unsafe class DescriptorSetPool : IDisposable
     /// the biggest per-type total makes
     /// <see cref="Acquire(VkDescriptorSetLayout_T*, uint)"/> throw before it
     /// reaches Vulkan.
+    /// <para>An <b>empty</b> span is legal and creates a pool with no descriptor
+    /// budget at all (<c>poolSizeCount = 0</c>, which Vulkan permits — there is
+    /// no <c>poolSizeCount-arraylength</c> VUID, and
+    /// <c>VUID-VkDescriptorPoolCreateInfo-pPoolSizes-parameter</c> excuses the
+    /// array "if <c>poolSizeCount</c> is not 0"). Such a pool can allocate
+    /// <paramref name="maxSets"/> descriptor sets whose layouts have <b>zero
+    /// bindings</b> — issue #191's sparse-set hole, where a
+    /// <c>PipelineLayout</c> needs a set at an index the program declares
+    /// nothing in — and nothing else. <b>The pool cannot check this</b>: a
+    /// layout's bindings are not readable back from a
+    /// <c>VkDescriptorSetLayout</c> handle, so passing a layout that <i>does</i>
+    /// have bindings is not diagnosable here. On a driver that enforces per-type
+    /// pool accounting it fails with <c>VK_ERROR_OUT_OF_POOL_MEMORY</c>, having
+    /// chained one wasted sub-pool <i>per failed call</i> — the auto-grow retry
+    /// builds it and nothing rolls it back, so they accumulate until
+    /// <see cref="Dispose"/> (issue #187, widened by this route, not closed by
+    /// it). On a driver that enforces only <c>maxSets</c> — which is what this
+    /// repo's hardware was measured doing — it may simply succeed.</para>
     /// </param>
     /// <param name="updateAfterBind">
     /// Set <see langword="true"/> to create the pool with
@@ -135,8 +155,6 @@ public sealed unsafe class DescriptorSetPool : IDisposable
     {
         ArgumentNullException.ThrowIfNull(device);
         ArgumentOutOfRangeException.ThrowIfZero(maxSets, nameof(maxSets));
-        if (poolSizes.IsEmpty)
-            throw new ArgumentException("poolSizes must contain at least one entry.", nameof(poolSizes));
         // Per-type totals, not per-entry maxima: vkCreateDescriptorPool sums
         // duplicate same-type entries ("if multiple VkDescriptorPoolSize
         // structures containing the same descriptor type appear in pPoolSizes
@@ -145,6 +163,17 @@ public sealed unsafe class DescriptorSetPool : IDisposable
         // repeats (VUID-VkDescriptorPoolCreateInfo-pPoolSizes-04787). A
         // template of [{STORAGE_BUFFER, 64}, {STORAGE_BUFFER, 64}] therefore
         // holds 128 of them. O(n²) over a handful of entries, once, at setup.
+        //
+        // An EMPTY poolSizes span is legal (issue #191) and leaves this loop
+        // running zero times, so the total stays at its 0 seed — a value no
+        // non-empty template can produce, since
+        // VUID-VkDescriptorPoolSize-descriptorCount-00302 requires every entry's
+        // descriptorCount to be > 0. The Acquire pre-flight guard is *correct*
+        // at 0 rather than merely tolerant: it then rejects every variable
+        // descriptor count >= 1, which is the right answer for a pool that holds
+        // no descriptors of any type, and lets a count of 0 (i.e. the plain
+        // Acquire(layout) overload) through, which is the right answer for the
+        // zero-binding layout such a pool exists to serve.
         uint maxPerTypeTotal = 0;
         for (int i = 0; i < poolSizes.Length; i++)
         {
@@ -264,13 +293,7 @@ public sealed unsafe class DescriptorSetPool : IDisposable
         // "tighten" this into a per-type check — the type is not knowable here,
         // and a sufficient-condition check would reject legal requests.
         if (variableDescriptorCount > _maxPerTypeDescriptorTotal)
-            throw new ArgumentOutOfRangeException(
-                nameof(variableDescriptorCount), variableDescriptorCount,
-                $"This pool's poolSizes template holds at most " +
-                $"{_maxPerTypeDescriptorTotal} descriptors of any single descriptor type, so no " +
-                $"sub-pool built from it can satisfy a variable-descriptor count of " +
-                $"{variableDescriptorCount}. Size poolSizes for the sum, over the live sets, of " +
-                $"all descriptors of that type.");
+            ThrowVariableCountExceedsBudget(variableDescriptorCount);
 
         var key = new IdleKey((nint)layout, variableDescriptorCount);
         if (_idle.TryGetValue(key, out Stack<nint>? stack) && stack.Count > 0)
@@ -400,6 +423,11 @@ public sealed unsafe class DescriptorSetPool : IDisposable
 
     private nint CreatePool()
     {
+        // `fixed` over a zero-length array yields null, so a pool created with
+        // an empty poolSizes template (issue #191) emits
+        // poolSizeCount = 0, pPoolSizes = null — exactly the shape
+        // VUID-VkDescriptorPoolCreateInfo-pPoolSizes-parameter excuses ("if
+        // poolSizeCount is not 0, pPoolSizes must be a valid pointer …").
         fixed (VkDescriptorPoolSize* pSizes = _poolSizes)
         {
             var ci = new VkDescriptorPoolCreateInfo
@@ -451,6 +479,38 @@ public sealed unsafe class DescriptorSetPool : IDisposable
         VkDescriptorSet_T* raw = null;
         result = Vk.vkAllocateDescriptorSets(_device.Handle, &ai, &raw);
         return result == VkResult.VK_SUCCESS ? raw : null;
+    }
+
+    /// <summary>
+    /// The pre-flight budget guard's message, in the two shapes it takes. A
+    /// separate, deliberately non-inlined method rather than a
+    /// <c>throw new … ($"…")</c> expression inside
+    /// <see cref="Acquire(VkDescriptorSetLayout_T*, uint)"/>: the message is
+    /// built only when the guard fires (never above the comparison — a hoisted
+    /// string would be a per-call allocation on a benchmarked hot path), and
+    /// keeping the interpolation out of <c>Acquire</c>'s body is worth ~5 ns per
+    /// cycle, measured. Do not fold it back inline.
+    /// </summary>
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void ThrowVariableCountExceedsBudget(uint variableDescriptorCount)
+    {
+        // A pool created with no poolSizes holds no descriptors of any type, so
+        // _maxPerTypeDescriptorTotal is 0 and quoting it explains nothing.
+        string reason = _poolSizes.Length == 0
+            ? $"This pool was created with no poolSizes, so it holds no descriptors of any type and " +
+              $"can serve only descriptor set layouts with zero bindings (issue #191). No sub-pool " +
+              $"built from an empty template can satisfy a variable-descriptor count of " +
+              $"{variableDescriptorCount}. Pass a poolSizes template sized for the descriptors the " +
+              $"layout actually declares."
+            : $"This pool's poolSizes template holds at most " +
+              $"{_maxPerTypeDescriptorTotal} descriptors of any single descriptor type, so no " +
+              $"sub-pool built from it can satisfy a variable-descriptor count of " +
+              $"{variableDescriptorCount}. Size poolSizes for the sum, over the live sets, of " +
+              $"all descriptors of that type.";
+
+        throw new ArgumentOutOfRangeException(
+            nameof(variableDescriptorCount), variableDescriptorCount, reason);
     }
 
     private static bool IsExhaustion(VkResult result) =>
