@@ -63,6 +63,14 @@ public sealed class SlangReflectionTests
     [InlineData("xcheckCompute", ShaderFixtures.ReflectionComputeStorageImage)]
     [InlineData("xcheckMaterial", ShaderFixtures.ReflectionMaterialBlock)]
     [InlineData("xcheckMaterialWide", ShaderFixtures.ReflectionMaterialBlockWidened)]
+    [InlineData("xcheckExplicitSpaceCb", ShaderFixtures.ReflectionExplicitSpaceConstantBuffer)]
+    [InlineData("xcheckExplicitSpaceMixed", ShaderFixtures.ReflectionExplicitSpaceMixed)]
+    [InlineData("xcheckExplicitSpaceTwoCbs", ShaderFixtures.ReflectionExplicitSpaceTwoConstantBuffers)]
+    [InlineData("xcheckExplicitSpaceStruct", ShaderFixtures.ReflectionExplicitSpaceStructGlobal)]
+    [InlineData("xcheckLooseSpace", ShaderFixtures.ReflectionLooseGlobalsWithExplicitSpace)]
+    [InlineData("xcheckLooseOnly", ShaderFixtures.ReflectionLooseGlobalsOnly)]
+    [InlineData("xcheckLoosePlain", ShaderFixtures.ReflectionLooseGlobalsNoExplicitBinding)]
+    [InlineData("xcheckLooseBlock", ShaderFixtures.ReflectionLooseGlobalsWithParameterBlock)]
     public void Reflection_CoversEverySetAndBinding_TheSpirvDecorates(string moduleName, string source)
     {
         using var compiler = SlangCompiler.Create();
@@ -487,6 +495,459 @@ public sealed class SlangReflectionTests
     }
 
     /// <summary>
+    /// Issue #180: a global-scope <c>ConstantBuffer&lt;T&gt;</c> with an
+    /// explicit <c>[[vk::binding(0, 1)]]</c> is reported in set <b>1</b>, the
+    /// space it declares and the one the emitted SPIR-V decorates.
+    /// </summary>
+    /// <remarks>
+    /// <para>Before the fix, Slang's descriptor-set view put the buffer's range
+    /// in the record for space 0 with its binding index intact, so reflection
+    /// reported <em>two</em> bindings at <c>(0,0)</c> — the texture and the
+    /// constant buffer — no set 1 at all, and the texture renamed
+    /// <c>gXform</c>. The <c>bindings.Length == 2</c> assertion on set 0 is the
+    /// one that catches the duplicate; <c>DescriptorSetCount == 2</c> is the one
+    /// that catches the missing set.</para>
+    /// <para>Both halves of the <c>TryGetBufferLayout</c> pair are required:
+    /// buffer layouts are keyed off the same facts dictionary as the names, so
+    /// before the fix <c>Xform</c>'s member layout hung off the
+    /// <em>texture</em>'s slot.</para>
+    /// <para><b>Stage attribution across a corrected set was measured, not
+    /// assumed</b> (spec's bounded uncertainty).
+    /// <c>IMetadata::isParameterLocationUsed</c> is queried with the reported —
+    /// i.e. corrected — set number. <b>Observed on <c>v2026.14.1</c> / win-x64:
+    /// <c>Vertex | Fragment</c> for <c>gXform</c> at set 1 slot 0.</b> That is
+    /// the same value as this fixture's program union, so it was measured a
+    /// second time with the union fallback temporarily removed from
+    /// <c>ApplyStages</c> — the value did not change, so the query genuinely
+    /// answers <see langword="true"/> for a corrected set number in both entry
+    /// points rather than falling back. Both stages do read
+    /// <c>gXform.mvp</c>, so <c>Vertex | Fragment</c> is also the correct narrow
+    /// answer.</para>
+    /// <para>The assertion is deliberately only "not <c>None</c>": a failed or
+    /// <see langword="false"/> query falls back to the program union, which is
+    /// always a legal <c>stageFlags</c>, so a wide answer would be acceptable
+    /// here too and pinning the exact mask would pin Slang's metadata behaviour
+    /// rather than this correction.</para>
+    /// </remarks>
+    [Fact]
+    public void Reflection_ExplicitVkBindingConstantBuffer_LandsInTheDeclaredSpace()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile(
+            "explicitSpaceCb", ShaderFixtures.ReflectionExplicitSpaceConstantBuffer);
+        SlangReflection reflection = reflected.Reflection;
+
+        Assert.Equal(2, reflection.DescriptorSetCount);
+        Assert.Equal(0u, reflection.SetIndex(0));
+        Assert.Equal(1u, reflection.SetIndex(1));
+        Assert.Equal(2u, reflection.SetLayoutSlotCount);
+
+        Assert.True(reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> zero));
+
+        // Two, not three: the constant buffer must not also be in here.
+        Assert.Equal(2, zero.Length);
+        Assert.Equal(0u, zero[0].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_TEXTURE, zero[0].Type);
+        Assert.Equal("gAlbedo", zero[0].Name);
+        Assert.Equal(1u, zero[1].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_SAMPLER, zero[1].Type);
+        Assert.Equal("gSampler", zero[1].Name);
+
+        Assert.True(reflection.TryGetSet(1, out ReadOnlySpan<SlangDescriptorBinding> one));
+
+        Assert.Equal(1, one.Length);
+        Assert.Equal(0u, one[0].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER, one[0].Type);
+        Assert.Equal("gXform", one[0].Name);
+
+        // The buffer layout moved with the binding, and did not stay behind on
+        // the texture's slot.
+        Assert.True(reflection.TryGetBufferLayout(1, 0, out SlangBufferLayout? layout));
+        Assert.Equal(1, layout.Members.Length);
+        Assert.Equal("mvp", layout.Members[0].Name);
+        Assert.False(reflection.TryGetBufferLayout(0, 0, out _));
+
+        // Stage attribution against the corrected set number — measured.
+        SlangReflection narrowed = reflected.Program.GetReflection(SlangStageAttribution.PerEntryPointUsage);
+        ShaderStages stages = StagesOf(narrowed, set: 1, slot: 0);
+
+        _output.WriteLine($"PerEntryPointUsage stages for gXform at set 1 slot 0: {stages}");
+
+        Assert.NotEqual(ShaderStages.None, stages);
+
+        AssertReflectionCoversSpirv(reflected.Program, reflection, _output);
+    }
+
+    /// <summary>
+    /// Issue #180: two constant buffers in two distinct non-zero spaces stay two
+    /// bindings, in the two sets they declare.
+    /// </summary>
+    /// <remarks>
+    /// Before the fix both folded to <c>(0,0)</c> and reflection reported the
+    /// same binding twice, both named <c>gB</c> — <c>gA</c> and its buffer
+    /// layout were unreachable through the API entirely. The
+    /// <c>TryGetBufferLayout</c> pair at the end is the point of the fixture:
+    /// each key must yield the buffer that declares it.
+    /// </remarks>
+    [Fact]
+    public void Reflection_TwoConstantBuffersInDistinctSpaces_StayDistinct()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile(
+            "explicitSpaceTwoCbs", ShaderFixtures.ReflectionExplicitSpaceTwoConstantBuffers);
+        SlangReflection reflection = reflected.Reflection;
+
+        Assert.Equal(2, reflection.DescriptorSetCount);
+        Assert.Equal(1u, reflection.SetIndex(0));
+        Assert.Equal(2u, reflection.SetIndex(1));
+
+        // Set 0 is a hole — the same shape Reflection_ExplicitVkBinding_
+        // ReportsSparseSets documents, and SetLayoutSlotCount says the
+        // positional SetLayouts span still needs three entries.
+        Assert.Equal(3u, reflection.SetLayoutSlotCount);
+        Assert.False(reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> gap));
+        Assert.True(gap.IsEmpty);
+
+        Assert.True(reflection.TryGetSet(1, out ReadOnlySpan<SlangDescriptorBinding> one));
+        Assert.Equal(1, one.Length);
+        Assert.Equal(0u, one[0].Slot);
+        Assert.Equal("gA", one[0].Name);
+
+        Assert.True(reflection.TryGetSet(2, out ReadOnlySpan<SlangDescriptorBinding> two));
+        Assert.Equal(1, two.Length);
+        Assert.Equal(0u, two[0].Slot);
+        Assert.Equal("gB", two[0].Name);
+
+        Assert.True(reflection.TryGetBufferLayout(1, 0, out SlangBufferLayout? first));
+        Assert.Equal(1, first.Members.Length);
+        Assert.Equal("a", first.Members[0].Name);
+
+        Assert.True(reflection.TryGetBufferLayout(2, 0, out SlangBufferLayout? second));
+        Assert.Equal(1, second.Members.Length);
+        Assert.Equal("b", second.Members[0].Name);
+
+        AssertReflectionCoversSpirv(reflected.Program, reflection, _output);
+    }
+
+    /// <summary>
+    /// Issue #180, with a descriptor-set record for space 1 that
+    /// <b>already exists</b>: the constant buffer still lands in space 1, and
+    /// nothing in either set borrows a neighbour's name.
+    /// </summary>
+    /// <remarks>
+    /// This is the shape that proves the defect was not "Slang forgot to make a
+    /// set record" — <c>gOther</c> at <c>(1,0)</c> was always correct while
+    /// <c>gXform</c> at <c>(1,1)</c> was emitted into space 0's record and
+    /// reported as <c>(0,1)</c>, overwriting the sampler's name.
+    /// </remarks>
+    [Fact]
+    public void Reflection_ExplicitSpaceMixed_DoesNotBorrowANeighbourName()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile(
+            "explicitSpaceMixed", ShaderFixtures.ReflectionExplicitSpaceMixed);
+        SlangReflection reflection = reflected.Reflection;
+
+        Assert.True(reflection.TryGetSet(1, out ReadOnlySpan<SlangDescriptorBinding> one));
+
+        Assert.Equal(2, one.Length);
+        Assert.Equal(0u, one[0].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_TEXTURE, one[0].Type);
+        Assert.Equal("gOther", one[0].Name);
+        Assert.Equal(1u, one[1].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER, one[1].Type);
+        Assert.Equal("gXform", one[1].Name);
+
+        Assert.True(reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> zero));
+
+        // Exactly two: no third entry, and no CONSTANT_BUFFER in set 0.
+        Assert.Equal(2, zero.Length);
+        Assert.Equal(0u, zero[0].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_TEXTURE, zero[0].Type);
+        Assert.Equal("gAlbedo", zero[0].Name);
+        Assert.Equal(1u, zero[1].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_SAMPLER, zero[1].Type);
+        Assert.Equal("gSampler", zero[1].Name);
+
+        AssertReflectionCoversSpirv(reflected.Program, reflection, _output);
+    }
+
+    /// <summary>
+    /// Issue #180 one level deeper: a plain struct global placed at
+    /// <c>[[vk::binding(0, 1)]]</c> puts <b>both</b> of its binding ranges in
+    /// space 1.
+    /// </summary>
+    /// <remarks>
+    /// This is the fixture that pins the span rule — one field owning two
+    /// binding ranges. A correction that read only
+    /// <c>getFieldBindingRangeOffset(f)</c> and applied it to that one range
+    /// would repair <c>tex</c> and leave <c>cb</c> in set 0, which is what this
+    /// test's set-0 assertion catches.
+    /// </remarks>
+    [Fact]
+    public void Reflection_ExplicitSpaceStructGlobal_PlacesBothRangesInTheFieldsSpace()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile(
+            "explicitSpaceStruct", ShaderFixtures.ReflectionExplicitSpaceStructGlobal);
+        SlangReflection reflection = reflected.Reflection;
+
+        Assert.True(reflection.TryGetSet(1, out ReadOnlySpan<SlangDescriptorBinding> one));
+
+        Assert.Equal(2, one.Length);
+        Assert.Equal(0u, one[0].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_TEXTURE, one[0].Type);
+        Assert.Equal(1u, one[1].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER, one[1].Type);
+
+        Assert.True(reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> zero));
+
+        Assert.Equal(1, zero.Length);
+        Assert.Equal(0u, zero[0].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_TEXTURE, zero[0].Type);
+
+        AssertReflectionCoversSpirv(reflected.Program, reflection, _output);
+    }
+
+    /// <summary>
+    /// Issue #180's second shape: a module with <b>loose global uniform data</b>
+    /// reports the implicit <c>globalParams</c> buffer <em>and</em> everything
+    /// else, each in the set the emitted SPIR-V decorates.
+    /// </summary>
+    /// <remarks>
+    /// <para>One <c>float4 gTint;</c> at file scope makes
+    /// <c>spReflection_getGlobalParamsTypeLayout</c> hand back a
+    /// <c>SLANG_TYPE_KIND_CONSTANT_BUFFER</c> wrapper instead of a struct. Before
+    /// <c>UnwrapGlobalScope</c>, reflection reported <b>three bindings all at slot
+    /// 0 of set 0</b>, all with an empty <c>Name</c>, and no set 1 — three
+    /// <c>VkDescriptorSetLayoutBinding.binding = 0</c> entries into
+    /// <c>vkCreateDescriptorSetLayout</c>
+    /// (<c>VUID-VkDescriptorSetLayoutCreateInfo-binding-00279</c>). The
+    /// <c>zero.Length == 2</c> assertion is what catches that pile-up; the set 1
+    /// assertion is what proves the space correction resumes working once the
+    /// scope is unwrapped, since the wrapper's kind short-circuits it.</para>
+    /// <para><b>Stage attribution for a synthesized binding was measured, not
+    /// assumed</b> (the spec's bounded uncertainty).
+    /// <c>IMetadata::isParameterLocationUsed</c> had never been asked about a
+    /// binding that no descriptor range backs. <b>Observed on <c>v2026.14.1</c> /
+    /// win-x64: <c>Fragment</c> for <c>globalParams</c> at set 0 slot 1.</b> That
+    /// is also this single-entry-point program's whole union, so it was measured
+    /// a second time with the union fallback temporarily removed from
+    /// <c>ApplyStages</c> — the value did not change, so the query genuinely
+    /// answers <see langword="true"/> for a synthesized binding rather than
+    /// falling back. The assertion is deliberately only "not <c>None</c>": a
+    /// failed or
+    /// <see langword="false"/> query falls back to the program union, which is
+    /// always a legal <c>stageFlags</c>, so a wide answer is acceptable and only
+    /// <c>ShaderStages.None</c> would be a bug.</para>
+    /// </remarks>
+    [Fact]
+    public void Reflection_LooseGlobalUniforms_ReportTheImplicitBufferAndTheRest()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile(
+            "looseSpace", ShaderFixtures.ReflectionLooseGlobalsWithExplicitSpace);
+        SlangReflection reflection = reflected.Reflection;
+
+        Assert.Equal(2, reflection.DescriptorSetCount);
+        Assert.Equal(0u, reflection.SetIndex(0));
+        Assert.Equal(1u, reflection.SetIndex(1));
+        Assert.Equal(2u, reflection.SetLayoutSlotCount);
+
+        Assert.True(reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> zero));
+
+        // Two, not three: the texture's slot is not also the implicit buffer's,
+        // and the constant buffer is not in this set at all.
+        Assert.Equal(2, zero.Length);
+        Assert.Equal(0u, zero[0].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_TEXTURE, zero[0].Type);
+        Assert.Equal("gAlbedo", zero[0].Name);
+        Assert.Equal(1u, zero[1].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER, zero[1].Type);
+        Assert.Equal("globalParams", zero[1].Name);
+
+        Assert.True(reflection.TryGetSet(1, out ReadOnlySpan<SlangDescriptorBinding> one));
+
+        Assert.Equal(1, one.Length);
+        Assert.Equal(0u, one[0].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER, one[0].Type);
+        Assert.Equal("gXform", one[0].Name);
+
+        // The loose data is reachable: this layout is the only way a caller finds
+        // out where to write gTint. gAlbedo and gXform are fields of the same
+        // element scope and report GetSize(UNIFORM) = 0, so they are not members.
+        Assert.True(reflection.TryGetBufferLayout(0, 1, out SlangBufferLayout? loose));
+        Assert.Equal(1, loose.Members.Length);
+        Assert.Equal("gTint", loose.Members[0].Name);
+        Assert.Equal(0u, loose.Members[0].Offset);
+
+        Assert.True(reflection.TryGetBufferLayout(1, 0, out SlangBufferLayout? xform));
+        Assert.Equal("mvp", xform.Members[0].Name);
+
+        // The texture's slot owns no buffer — the layout did not stay behind on
+        // it the way the pre-#180 mis-key left Xform's members there.
+        Assert.False(reflection.TryGetBufferLayout(0, 0, out _));
+
+        // Stage attribution for a binding no descriptor range backs — measured.
+        SlangReflection narrowed = reflected.Program.GetReflection(SlangStageAttribution.PerEntryPointUsage);
+        ShaderStages stages = StagesOf(narrowed, set: 0, slot: 1);
+
+        _output.WriteLine($"PerEntryPointUsage stages for globalParams at set 0 slot 1: {stages}");
+
+        Assert.NotEqual(ShaderStages.None, stages);
+
+        AssertReflectionCoversSpirv(reflected.Program, reflection, _output);
+    }
+
+    /// <summary>
+    /// The degenerate control: a module whose global scope is nothing but loose
+    /// uniform data reports one binding, and its <b>member layout</b> is what
+    /// carries the assertion.
+    /// </summary>
+    /// <remarks>
+    /// SPIR-V puts <c>globalParams</c> at <c>(0,0)</c> here, which is exactly
+    /// where the un-unwrapped wrapper reported it by accident — so the set and
+    /// slot prove nothing in this fixture and the member offsets prove
+    /// everything. That asymmetry is deliberate and load-bearing: hard-coding the
+    /// synthesized slot to <c>0</c> leaves this test green while turning the
+    /// explicit-space one red, which is what shows the sibling tests assert the
+    /// offset Slang reports rather than a constant.
+    /// </remarks>
+    [Fact]
+    public void Reflection_LooseGlobalUniformsOnly_ReportOneBufferWithBothMembers()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile(
+            "looseOnly", ShaderFixtures.ReflectionLooseGlobalsOnly);
+        SlangReflection reflection = reflected.Reflection;
+
+        Assert.Equal(1, reflection.DescriptorSetCount);
+        Assert.Equal(0u, reflection.SetIndex(0));
+
+        ReadOnlySpan<SlangDescriptorBinding> bindings = reflection.Bindings(0);
+
+        Assert.Equal(1, bindings.Length);
+        Assert.Equal(0u, bindings[0].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER, bindings[0].Type);
+        Assert.Equal("globalParams", bindings[0].Name);
+
+        Assert.True(reflection.TryGetBufferLayout(0, 0, out SlangBufferLayout? layout));
+
+        _output.WriteLine($"globalParams layout: size {layout.Size}, {layout.Members.Length} member(s)");
+
+        // 32, not 20: Slang rounds the implicit buffer's UNIFORM size up.
+        Assert.Equal(32u, layout.Size);
+        Assert.Equal(2, layout.Members.Length);
+        Assert.Equal("gTint", layout.Members[0].Name);
+        Assert.Equal(0u, layout.Members[0].Offset);
+        Assert.Equal("gScale", layout.Members[1].Name);
+        Assert.Equal(16u, layout.Members[1].Offset);
+
+        AssertReflectionCoversSpirv(reflected.Program, reflection, _output);
+    }
+
+    /// <summary>
+    /// The wrapper defect is not about <c>[[vk::binding]]</c>: a module with no
+    /// explicit binding anywhere is affected too.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Measured on <c>v2026.14.1</c> / win-x64, and it contradicts what
+    /// the plan predicted for this shape.</b> With nothing explicitly bound, the
+    /// implicit buffer takes slot <b>0</b> and pushes the two resources to 1 and
+    /// 2 — <c>globalParams (0,0)</c>, <c>gAlbedo (0,1)</c>, <c>gSampler (0,2)</c>
+    /// — not <c>globalParams (0,2)</c>. Re-measured with <c>float4 gTint;</c>
+    /// moved below both resources: unchanged, so it is not declaration order. The
+    /// implicit buffer is therefore only pushed off slot 0 when something else
+    /// claims it, which is what
+    /// <see cref="ShaderFixtures.ReflectionLooseGlobalsWithExplicitSpace"/>
+    /// does.</para>
+    /// <para>What this fixture pins is consequently the <em>collision</em>, not
+    /// the slot: before the unwrap all three bindings were reported at slot 0 of
+    /// set 0 with empty names, in a module containing no <c>[[vk::binding]]</c>
+    /// at all. The <c>bindings.Length == 3</c> plus ascending-slot assertions are
+    /// what catch that.</para>
+    /// </remarks>
+    [Fact]
+    public void Reflection_LooseGlobalUniforms_DoNotNeedAnExplicitBinding()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile(
+            "loosePlain", ShaderFixtures.ReflectionLooseGlobalsNoExplicitBinding);
+        SlangReflection reflection = reflected.Reflection;
+
+        Assert.Equal(1, reflection.DescriptorSetCount);
+        Assert.Equal(0u, reflection.SetIndex(0));
+
+        Assert.True(reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> zero));
+
+        Assert.Equal(3, zero.Length);
+        Assert.Equal(0u, zero[0].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER, zero[0].Type);
+        Assert.Equal("globalParams", zero[0].Name);
+        Assert.Equal(1u, zero[1].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_TEXTURE, zero[1].Type);
+        Assert.Equal("gAlbedo", zero[1].Name);
+        Assert.Equal(2u, zero[2].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_SAMPLER, zero[2].Type);
+        Assert.Equal("gSampler", zero[2].Name);
+
+        Assert.True(reflection.TryGetBufferLayout(0, 0, out SlangBufferLayout? loose));
+        Assert.Equal(1, loose.Members.Length);
+        Assert.Equal("gTint", loose.Members[0].Name);
+
+        AssertReflectionCoversSpirv(reflected.Program, reflection, _output);
+    }
+
+    /// <summary>
+    /// Loose global uniform data <b>and</b> a <c>ParameterBlock</c>: two implicit
+    /// buffers, in two sets, placed by two different rules, neither displacing
+    /// the other.
+    /// </summary>
+    /// <remarks>
+    /// The one combined shape worth its own fixture. Unwrapping changes what the
+    /// top-level walk is handed, while a block's set number comes from an offset
+    /// accumulated separately off the sub-object range's variable layout — so if
+    /// the unwrap disturbed the element's own index space, or if the synthesized
+    /// global buffer were placed by the block rule (slot 0 of its space, listed
+    /// ranges shifted up), this is where it would show. Measured on
+    /// <c>v2026.14.1</c> / win-x64: <c>globalParams (0,0)</c>,
+    /// <c>gAlbedo (0,1)</c>, <c>gXform (1,0)</c>.
+    /// </remarks>
+    [Fact]
+    public void Reflection_LooseGlobalsWithParameterBlock_PlaceBothImplicitBuffers()
+    {
+        using ReflectedProgram reflected = ReflectedProgram.Compile(
+            "looseBlock", ShaderFixtures.ReflectionLooseGlobalsWithParameterBlock);
+        SlangReflection reflection = reflected.Reflection;
+
+        Assert.Equal(2, reflection.DescriptorSetCount);
+        Assert.Equal(0u, reflection.SetIndex(0));
+        Assert.Equal(1u, reflection.SetIndex(1));
+
+        Assert.True(reflection.TryGetSet(0, out ReadOnlySpan<SlangDescriptorBinding> zero));
+
+        Assert.Equal(2, zero.Length);
+        Assert.Equal(0u, zero[0].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER, zero[0].Type);
+        Assert.Equal("globalParams", zero[0].Name);
+        Assert.Equal(1u, zero[1].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_TEXTURE, zero[1].Type);
+        Assert.Equal("gAlbedo", zero[1].Name);
+
+        // The block still lands in set 1, at slot 0 of its own space: the
+        // sub-object range offset it accumulates from is untouched by the unwrap.
+        Assert.True(reflection.TryGetSet(1, out ReadOnlySpan<SlangDescriptorBinding> one));
+
+        Assert.Equal(1, one.Length);
+        Assert.Equal(0u, one[0].Slot);
+        Assert.Equal(SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER, one[0].Type);
+        Assert.Equal("gXform", one[0].Name);
+
+        // Two distinct buffer layouts, one per implicit buffer.
+        Assert.True(reflection.TryGetBufferLayout(0, 0, out SlangBufferLayout? loose));
+        Assert.Equal(1, loose.Members.Length);
+        Assert.Equal("gTint", loose.Members[0].Name);
+
+        Assert.True(reflection.TryGetBufferLayout(1, 0, out SlangBufferLayout? block));
+        Assert.Equal("mvp", block.Members[0].Name);
+
+        AssertReflectionCoversSpirv(reflected.Program, reflection, _output);
+    }
+
+    /// <summary>
     /// The guard against anyone "optimizing" reflection back onto a single
     /// module: composition changes the layout.
     /// </summary>
@@ -691,15 +1152,40 @@ public sealed class SlangReflectionTests
     /// <c>ReflectionSparseSets</c> puts <c>gSamp</c> in space 2 at loop index 1,
     /// and a wrong read names a binding in a set that does not exist.</para>
     /// <para>Only fixtures whose bindings are declared at global scope are
-    /// listed. A resource declared <em>inside</em> a <c>ParameterBlock</c> is
-    /// named <c>maps</c> by reflection and <c>gWith.maps</c> by SPIR-V — a
-    /// qualification difference, not a join failure, and asserting on it would
-    /// pin Slang's naming convention rather than the join.</para>
+    /// listed. A resource declared <em>inside</em> a <c>ParameterBlock</c> — or
+    /// inside the plain struct global of
+    /// <c>ReflectionExplicitSpaceStructGlobal</c>, which is why that one is not
+    /// a row here — is named <c>maps</c> / <c>cb</c> by reflection and
+    /// <c>gWith.maps</c> / <c>gBundle.cb</c> by SPIR-V: a qualification
+    /// difference, not a join failure, and asserting on it would pin Slang's
+    /// naming convention rather than the join.</para>
+    /// <para><b>The three explicit-space rows are what catch a name
+    /// transplant.</b> Before issue #180 the mis-keyed constant buffer
+    /// overwrote whatever legitimately owned its key, so <c>(0,0)</c> was named
+    /// <c>gXform</c> in the first row and <c>(0,1)</c> was named
+    /// <c>gSampler</c> in the second.</para>
+    /// <para><b>The four loose-globals rows are what pin the implicit global
+    /// buffer's name.</b> Slang supplies none for it —
+    /// <c>spReflectionVariableLayout_GetVariable</c> on the global params var
+    /// layout is <see langword="null"/> — so <c>SlangReflection</c> chooses
+    /// <c>globalParams</c>, and this theory is what says that choice is the
+    /// <c>OpName</c> the emitted module actually uses. Pinning it is a
+    /// rename-detector, not a correctness assertion: unlike a set or a slot, this
+    /// name is cosmetic and nothing a driver sees depends on it. These rows also
+    /// catch the empty names every binding in these modules had before the
+    /// wrapper was unwrapped.</para>
     /// </remarks>
     [Theory]
     [InlineData("namesGlobals", ShaderFixtures.ReflectionGlobals)]
     [InlineData("namesTwoBlocks", ShaderFixtures.ReflectionTwoBlocks)]
     [InlineData("namesSparse", ShaderFixtures.ReflectionSparseSets)]
+    [InlineData("namesExplicitSpaceCb", ShaderFixtures.ReflectionExplicitSpaceConstantBuffer)]
+    [InlineData("namesExplicitSpaceMixed", ShaderFixtures.ReflectionExplicitSpaceMixed)]
+    [InlineData("namesExplicitSpaceTwoCbs", ShaderFixtures.ReflectionExplicitSpaceTwoConstantBuffers)]
+    [InlineData("namesLooseSpace", ShaderFixtures.ReflectionLooseGlobalsWithExplicitSpace)]
+    [InlineData("namesLooseOnly", ShaderFixtures.ReflectionLooseGlobalsOnly)]
+    [InlineData("namesLoosePlain", ShaderFixtures.ReflectionLooseGlobalsNoExplicitBinding)]
+    [InlineData("namesLooseBlock", ShaderFixtures.ReflectionLooseGlobalsWithParameterBlock)]
     public void Reflection_BindingNames_MatchTheSpirvVariableNames(string moduleName, string source)
     {
         using ReflectedProgram reflected = ReflectedProgram.Compile(moduleName, source);

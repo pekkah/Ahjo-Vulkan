@@ -135,7 +135,7 @@ null-terminated.
   conditional. Spec OPEN-4(b); the report is tracked as #170 and its upstream
   number belongs here once filed.
 
-## Reflection — eight rules Slang does not hand you
+## Reflection — ten rules Slang does not hand you
 
 Every one of these was measured against `OpDecorate DescriptorSet` / `Binding`
 in the SPIR-V Slang emitted, not read off a header, and every one of them looks
@@ -216,6 +216,47 @@ proves nothing.
    layouts must differ. It cannot be made green by editing a constant, which is
    the whole point of keeping a near-duplicate shader in the fixture file.
 
+9. **Slang's descriptor-set view loses the space of a global `ConstantBuffer<T>`
+   that carries an explicit `[[vk::binding(n, space)]]`.** Measured on
+   `v2026.14.1` / win-x64: the range is emitted into the record for space 0 with
+   its binding index intact, so both the walk and the binding-range join key it
+   to the wrong set — and, when something else already owns that key, silently
+   rename it. `CollectSpaceCorrections` repairs the space from the declaring
+   field's `spReflectionVariableLayout_GetSpace(field, DESCRIPTOR_TABLE_SLOT)`,
+   which agreed with `OpDecorate DescriptorSet` in all 19 shapes probed and was
+   a no-op in the 13 Slang already gets right. **The correction is deliberately
+   inert whenever Slang agrees with itself**, so it retires when upstream fixes
+   the view — do not "simplify" it into an unconditional override, and do not
+   call `GetFieldCount` on a scope whose kind is not `SLANG_TYPE_KIND_STRUCT`
+   (rule 7's family is not total; a conformance-linked
+   `ParameterBlock<ISurface>`'s element scope is `SLANG_TYPE_KIND_INTERFACE`).
+   Issue #180.
+
+10. **The global scope is not always a struct.** Measured on `v2026.14.1` /
+    win-x64: as soon as a module declares loose ordinary data at file scope
+    (`float4 gTint;`), `spReflection_getGlobalParamsTypeLayout` returns a
+    **`SLANG_TYPE_KIND_CONSTANT_BUFFER`** wrapper whose element is the real
+    struct scope. **The wrapper's descriptor-set records are unusable** — they
+    list the element's ranges *plus* the implicit buffer, with no constant offset
+    between the two index spaces (`+1` for one record and `+0` for another in the
+    same module), and they report the implicit buffer's index offset as `0` where
+    SPIR-V decorates `1`. `UnwrapGlobalScope` therefore discards them, walks the
+    element, and synthesizes the implicit buffer from
+    `spReflection_getGlobalParamsVarLayout`'s `GetSpace`/`GetOffset` under
+    `DESCRIPTOR_TABLE_SLOT`, which matched `OpDecorate` in every shape probed.
+    `spReflection_getGlobalConstantBufferBinding` does **not** work — it returns
+    `0` and is wrong wherever the implicit buffer is not at slot 0. **Test for
+    `== CONSTANT_BUFFER`, never for `!= STRUCT`**: rule 7's call family is not
+    total and issue #181 is still open, so an unmeasured kind must fall through
+    to the ordinary path rather than into a `GetFieldCount`. Widening it to
+    `!= STRUCT` leaves the suite green — the narrow test is the one that is
+    *safe*, not the one that is *necessary*, and that is exactly why it must not
+    be "simplified". Note also that the implicit buffer takes **slot 0 and pushes
+    the resources up** unless something is explicitly bound there, which is why
+    `ReflectionLooseGlobalsWithExplicitSpace` (where `[[vk::binding(0, 0)]]`
+    claims slot 0) is the fixture that can tell a reported offset from a
+    hard-coded one. Issue #180.
+
 Two further constraints, both about refusing rather than guessing: more than one
 `[[vk::push_constant]]` block throws from **reflection** (it exposes a buffer
 *index*, not the byte offset `VkPushConstantRange.Offset` needs), and a
@@ -225,6 +266,12 @@ column-major was probed). The split is deliberate: reflection can report a
 matrix perfectly well, and only the `VkFormat` mapping has to give up on it. Do
 not replace either throw with a plausible value — both produce a pipeline that
 builds and then mis-binds.
+
+A *third* refusal was considered for #180 and deliberately not added (that
+issue's OPEN-1): `Group` does not check for two bindings sharing a `(set, slot)`,
+so should one ever survive rule 9's correction it still reaches
+`Device.CreateDescriptorSetLayout` — which validates only that the `Bindings`
+span is non-empty — silently.
 
 Stage attribution is opt-in (`SlangStageAttribution.PerEntryPointUsage`) because
 it costs a codegen per entry point. Push-constant stages stay the program union

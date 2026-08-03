@@ -52,6 +52,22 @@ public sealed unsafe class SlangReflection
     /// </summary>
     private const int MaxMemberDepth = 16;
 
+    /// <summary>
+    /// The name reported for the implicit constant buffer Slang synthesizes around a
+    /// global scope that carries loose ordinary data.
+    /// </summary>
+    /// <remarks>
+    /// <b>Chosen here, not read from Slang.</b> Measured on <c>v2026.14.1</c> /
+    /// win-x64: <c>spReflectionVariableLayout_GetVariable</c> on the global params
+    /// var layout is <see langword="null"/> and both the wrapper's and the element's
+    /// type names are <see langword="null"/>, so Slang supplies no name at all — but
+    /// the emitted SPIR-V decorates the variable <c>OpName "globalParams"</c> in
+    /// every shape probed, so matching it is what lets a caller correlate the binding
+    /// with a disassembly. Unlike a set or a slot, this name is cosmetic: nothing a
+    /// driver sees depends on it.
+    /// </remarks>
+    private const string ImplicitGlobalParamsName = "globalParams";
+
     private readonly uint[] _setIndices;
     private readonly int[] _setStarts;
     private readonly SlangDescriptorBinding[] _bindings;
@@ -107,8 +123,13 @@ public sealed unsafe class SlangReflection
         // setOf(global scope) = 0. Not "the global scope owns set 0" — a
         // program whose global scope declares only ParameterBlocks has no
         // descriptors of its own, and its first block lands in set 0.
+        //
+        // UnwrapGlobalScope is what makes the argument a struct scope in every
+        // case: once a module declares loose ordinary data at file scope, Slang
+        // hands back a constant-buffer *wrapper* whose descriptor-set records are
+        // unusable (issue #180).
         Walk(
-            SlangApi.spReflection_getGlobalParamsTypeLayout(layout),
+            UnwrapGlobalScope(layout, SlangApi.spReflection_getGlobalParamsTypeLayout(layout), state),
             absoluteSet: 0,
             isParameterBlockElement: false,
             scopeName: string.Empty,
@@ -423,8 +444,16 @@ public sealed unsafe class SlangReflection
         bool scopeIsSpecializable,
         WalkState state)
     {
+        // ---- Step 0a: the per-scope descriptor space correction (issue #180).
+        //
+        // Scope-local and passed down, deliberately NOT a member of WalkState:
+        // (s, r) are indices *into this scope's* descriptor-set records, so one
+        // shared map would alias a block's range 0 onto the global scope's
+        // range 0.
+        Dictionary<(long Set, long Range), uint>? corrections = CollectSpaceCorrections(structTypeLayout);
+
         // ---- Step 0: the additive binding-range pass. ----
-        CollectBindingRangeFacts(structTypeLayout, absoluteSet, state.Facts);
+        CollectBindingRangeFacts(structTypeLayout, absoluteSet, corrections, state.Facts);
 
         // ---- Step 1: this scope's own descriptor sets. ----
         long setCount = SlangApi.spReflectionTypeLayout_getDescriptorSetCount(structTypeLayout);
@@ -445,11 +474,15 @@ public sealed unsafe class SlangReflection
                     + "unresolved generic parameters or link-time constants; reflect a fully specialized program.");
             }
 
-            uint vkSet = absoluteSet + (uint)spaceOffset;
             long rangeCount = SlangApi.spReflectionTypeLayout_getDescriptorSetDescriptorRangeCount(structTypeLayout, s);
 
             for (long r = 0; r < rangeCount; r++)
             {
+                // Per range, not per set: the space is a property of the record
+                // only until step 0a has something to say about one of its
+                // ranges (issue #180).
+                uint vkSet = absoluteSet + SpaceOf(corrections, s, r, spaceOffset);
+
                 SlangParameterCategory category =
                     SlangApi.spReflectionTypeLayout_getDescriptorSetDescriptorRangeCategory(structTypeLayout, s, r);
 
@@ -527,6 +560,13 @@ public sealed unsafe class SlangReflection
         // The global scope does NOT share this asymmetry: its implicit constant
         // buffer *is* listed, as a CONSTANT_BUFFER range at index 0, so
         // applying this there would double-count binding 0.
+        //
+        // A *wrapped* global scope is a third case again: its implicit buffer is
+        // listed nowhere the walk can use, so UnwrapGlobalScope synthesizes it
+        // before the walk starts, at the slot getGlobalParamsVarLayout reports —
+        // measured as 1 or 2, not 0, and with the element's own indices not
+        // shifted. That is why the constructor passes isParameterBlockElement:
+        // false for it (issue #180).
         if (isParameterBlockElement
             && SlangApi.spReflectionTypeLayout_GetSize(
                 structTypeLayout, SlangParameterCategory.SLANG_PARAMETER_CATEGORY_UNIFORM) > 0)
@@ -602,6 +642,254 @@ public sealed unsafe class SlangReflection
     }
 
     /// <summary>
+    /// The scope <see cref="Walk"/> should actually be given for a program's
+    /// global parameters: the scope Slang reported, or — when Slang wrapped it in
+    /// an implicit constant buffer — that wrapper's element, with the wrapper's
+    /// own binding and buffer layout synthesized into
+    /// <paramref name="state"/> on the way past.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The global scope is not always a struct.</b> Measured on
+    /// <c>v2026.14.1</c> / win-x64: as soon as a module declares loose ordinary
+    /// data at file scope (<c>float4 gTint;</c>),
+    /// <c>spReflection_getGlobalParamsTypeLayout</c> returns a
+    /// <c>SLANG_TYPE_KIND_CONSTANT_BUFFER</c> wrapper whose element is the real
+    /// struct scope (issue #180, and
+    /// <c>docs/design/specs/2026-08-03-issue-180-constantbuffer-space-design.md</c>
+    /// §E7).</para>
+    /// <para><b>The wrapper's descriptor-set records are discarded, not
+    /// translated.</b> They list the element's ranges <em>plus</em> the implicit
+    /// buffer with no constant offset between the two index spaces — <c>+1</c> for
+    /// one record and <c>+0</c> for another in the same module — and they report
+    /// the implicit buffer's own index offset as <c>0</c> where SPIR-V decorates
+    /// <c>1</c> or <c>2</c> (§E8). Walking the element instead keeps every
+    /// <c>(s, r)</c>, every field offset and step 0a's whole correction map
+    /// self-consistent within one scope, which is the invariant the rest of
+    /// <see cref="Walk"/> was written against.</para>
+    /// <para>The one number the element scope cannot produce — where the implicit
+    /// buffer itself goes — is stated outright by
+    /// <c>spReflection_getGlobalParamsVarLayout</c> under
+    /// <c>DESCRIPTOR_TABLE_SLOT</c>, which matched <c>OpDecorate</c> in <b>7 of
+    /// 7</b> shapes (§E9). <c>spReflection_getGlobalConstantBufferBinding</c> does
+    /// <b>not</b> work: it returned <c>0</c> in all seven and is wrong in six.</para>
+    /// </remarks>
+    private static SlangReflectionTypeLayout* UnwrapGlobalScope(
+        SlangProgramLayout* layout,
+        SlangReflectionTypeLayout* globalScope,
+        WalkState state)
+    {
+        // Test for == CONSTANT_BUFFER, never for != STRUCT. The narrow test is
+        // the one that is *safe*, not the one that is *necessary*: mutating it
+        // to != STRUCT leaves the suite green, because §E7 measured that no
+        // other kind occurs as a global scope and that an interface scope is
+        // never one. It stays narrow so that a future Slang returning some third
+        // kind falls through to today's path rather than into the field and
+        // binding-range call family, which is not total — see ImageFormatOf, and
+        // issue #181, still open and unfixed. That crash was since traced to
+        // slang-reflection-api.cpp's getBindingRangeImageFormat dereferencing
+        // BindingRangeInfo::leafVariable without a null check, and that field is
+        // null for an EXISTENTIAL_VALUE range: the hazard is a null leaf
+        // variable, not the kind as such, which is precisely why admitting
+        // unmeasured kinds here is not a risk worth taking.
+        if (SlangApi.spReflectionTypeLayout_getKind(globalScope) != SlangTypeKind.SLANG_TYPE_KIND_CONSTANT_BUFFER)
+        {
+            return globalScope;
+        }
+
+        SlangReflectionTypeLayout* element = SlangApi.spReflectionTypeLayout_GetElementTypeLayout(globalScope);
+
+        if (element == null)
+        {
+            throw new NotSupportedException(
+                "Slang reports the global scope as a constant buffer but exposes no element type layout for it, so "
+                + "the parameters inside it cannot be reflected at all. Reflect a fully specialized program.");
+        }
+
+        SlangReflectionVariableLayout* globalVar = SlangApi.spReflection_getGlobalParamsVarLayout(layout);
+
+        if (globalVar == null)
+        {
+            throw new NotSupportedException(
+                "Slang reports the global scope as a constant buffer but spReflection_getGlobalParamsVarLayout "
+                + "returns null for the same program. The implicit global constant buffer's descriptor location is "
+                + "not derivable without it, and the emitted SPIR-V binds that buffer. Reflect a fully specialized "
+                + "program.");
+        }
+
+        nuint rawSpace = SlangApi.spReflectionVariableLayout_GetSpace(
+            globalVar, SlangParameterCategory.SLANG_PARAMETER_CATEGORY_DESCRIPTOR_TABLE_SLOT);
+        nuint rawSlot = SlangApi.spReflectionVariableLayout_GetOffset(
+            globalVar, SlangParameterCategory.SLANG_PARAMETER_CATEGORY_DESCRIPTOR_TABLE_SLOT);
+
+        // All-or-nothing, the same posture step 1 takes for an index offset: a
+        // binding with no binding number has no layout to report, and falling
+        // back to 0 would place this buffer on top of whatever owns slot 0.
+        if (rawSpace > uint.MaxValue || rawSlot > uint.MaxValue)
+        {
+            throw new NotSupportedException(
+                $"The implicit global constant buffer reports descriptor space {rawSpace} and binding {rawSlot}; one "
+                + "of these is Slang's sentinel for a value that depends on unresolved generic parameters or "
+                + "link-time constants rather than a descriptor location. Reflect a fully specialized program.");
+        }
+
+        state.Pending.Add(new PendingBinding(
+            (uint)rawSpace,
+            new SlangDescriptorBinding
+            {
+                Slot = (uint)rawSlot,
+                Name = ImplicitGlobalParamsName,
+                Count = SlangDescriptorCount.Fixed(1),
+
+                // By construction, like step 2's: there is no binding range for
+                // a buffer Slang reports no descriptor range for. Stages is left
+                // unset for the same reason and ApplyStages fills it in, and
+                // IsSpecializable stays false — there is no binding range to ask
+                // isBindingRangeSpecializable about.
+                Type = SlangBindingType.SLANG_BINDING_TYPE_CONSTANT_BUFFER,
+            }));
+
+        // BuildBufferLayout drops the resource fields on its own: gAlbedo /
+        // gXform report GetSize(UNIFORM) = 0 and the zero-size rule in
+        // AppendMembers skips them, so this comes out as the loose members only.
+        state.BufferLayouts.Add(
+            ((uint)rawSpace, (uint)rawSlot, BuildBufferLayout(element, ImplicitGlobalParamsName)));
+
+        return element;
+    }
+
+    /// <summary>
+    /// Step 0a — the per-scope descriptor space correction, keyed by the
+    /// <c>(descriptor set index, descriptor range index)</c> pair both readers
+    /// of a descriptor-set record resolve a binding to.
+    /// </summary>
+    /// <remarks>
+    /// <para>This exists because <b>Slang's descriptor-set view places a
+    /// global-scope <c>ConstantBuffer&lt;T&gt;</c> that carries an explicit
+    /// <c>[[vk::binding(n, space)]]</c> into the record for space 0</b>, while
+    /// keeping its binding index intact — so both the walk and the binding-range
+    /// join key it to set 0, and silently rename whatever legitimately owns that
+    /// key (issue #180, and
+    /// <c>docs/design/specs/2026-08-03-issue-180-constantbuffer-space-design.md</c>).</para>
+    /// <para>The repair source is the <em>declaring field's</em>
+    /// <c>spReflectionVariableLayout_GetSpace(field, DESCRIPTOR_TABLE_SLOT)</c>,
+    /// which is a different accessor and does carry the space.</para>
+    /// <para>Measured on <c>v2026.14.1</c> / win-x64 across 19 shapes: it agreed
+    /// with <c>OpDecorate DescriptorSet</c> in every one of them, and this
+    /// correction was a <b>no-op in all 13 that Slang already gets right</b> —
+    /// including <c>ReflectionSparseSets</c>' <c>(2, 7)</c>, where the record's
+    /// own space offset is already 2. An entry is recorded only where the two
+    /// disagree, so the correction retires itself if upstream fixes the
+    /// descriptor-set view: the predicate simply stops firing.</para>
+    /// </remarks>
+    /// <returns>
+    /// <see langword="null"/> when there is nothing to correct, which is the
+    /// common case and allocates nothing beyond the calls it already makes.
+    /// </returns>
+    private static Dictionary<(long Set, long Range), uint>? CollectSpaceCorrections(
+        SlangReflectionTypeLayout* structTypeLayout)
+    {
+        // Load-bearing, not tidiness. The element scope of a conformance-linked
+        // ParameterBlock<ISurface> is SLANG_TYPE_KIND_INTERFACE, and this call
+        // family is not total — see ImageFormatOf for the member of it that
+        // takes the process down with 0xC0000005 on exactly that scope's
+        // existential range. BuildBufferLayout guards the same way.
+        if (SlangApi.spReflectionTypeLayout_getKind(structTypeLayout) != SlangTypeKind.SLANG_TYPE_KIND_STRUCT)
+        {
+            return null;
+        }
+
+        uint fieldCount = SlangApi.spReflectionTypeLayout_GetFieldCount(structTypeLayout);
+        long bindingRangeCount = SlangApi.spReflectionTypeLayout_getBindingRangeCount(structTypeLayout);
+        Dictionary<(long Set, long Range), uint>? result = null;
+
+        for (uint f = 0; f < fieldCount; f++)
+        {
+            SlangReflectionVariableLayout* field = SlangApi.spReflectionTypeLayout_GetFieldByIndex(structTypeLayout, f);
+
+            // getFieldBindingRangeOffset is monotone non-decreasing, and a field
+            // that owns no binding ranges reports the *next* field's offset — so
+            // a uniform member yields an empty span rather than a stolen one.
+            // A field that owns several (a struct-typed global) yields all of
+            // them, which is the case that needs the span rather than a single
+            // index.
+            long spanStart = SlangApi.spReflectionTypeLayout_getFieldBindingRangeOffset(structTypeLayout, f);
+            long spanEnd = f + 1 < fieldCount
+                ? SlangApi.spReflectionTypeLayout_getFieldBindingRangeOffset(structTypeLayout, (long)f + 1)
+                : bindingRangeCount;
+
+            if (spanStart < 0 || spanEnd <= spanStart)
+            {
+                continue;
+            }
+
+            nuint rawSpace = SlangApi.spReflectionVariableLayout_GetSpace(
+                field, SlangParameterCategory.SLANG_PARAMETER_CATEGORY_DESCRIPTOR_TABLE_SLOT);
+
+            // The same sentinel posture as every other quantity in this file: a
+            // field whose space is unresolved has no correction to offer, and
+            // the uncorrected walk still refuses the record above if it matters.
+            if (rawSpace > uint.MaxValue)
+            {
+                continue;
+            }
+
+            for (long br = spanStart; br < spanEnd && br < bindingRangeCount; br++)
+            {
+                SlangBindingType type = SlangApi.spReflectionTypeLayout_getBindingRangeType(structTypeLayout, br);
+
+                // The same three skips as CollectBindingRangeFacts, for the same
+                // reasons — see its remarks: a block is step 3's, a push
+                // constant joins to slot 0 of somebody else's set, and an
+                // existential value joins to the block's own synthesized
+                // binding. Correcting any of their spaces would move a key that
+                // this walk never emits a binding for.
+                if (type is SlangBindingType.SLANG_BINDING_TYPE_PARAMETER_BLOCK
+                         or SlangBindingType.SLANG_BINDING_TYPE_PUSH_CONSTANT
+                         or SlangBindingType.SLANG_BINDING_TYPE_EXISTENTIAL_VALUE)
+                {
+                    continue;
+                }
+
+                long s = SlangApi.spReflectionTypeLayout_getBindingRangeDescriptorSetIndex(structTypeLayout, br);
+                long r = SlangApi.spReflectionTypeLayout_getBindingRangeFirstDescriptorRangeIndex(structTypeLayout, br);
+
+                if (s < 0 || r < 0)
+                {
+                    continue;
+                }
+
+                long recordSpace = SlangApi.spReflectionTypeLayout_getDescriptorSetSpaceOffset(structTypeLayout, s);
+
+                if (recordSpace < 0)
+                {
+                    continue;
+                }
+
+                if (recordSpace != (long)rawSpace)
+                {
+                    (result ??= [])[(s, r)] = (uint)rawSpace;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// The space of the descriptor range <c>(s, r)</c> of this scope: the
+    /// correction step 0a recorded for it, or the descriptor-set record's own
+    /// space offset when there is none.
+    /// </summary>
+    private static uint SpaceOf(
+        Dictionary<(long Set, long Range), uint>? corrections,
+        long s,
+        long r,
+        long spaceOffset)
+        => corrections is not null && corrections.TryGetValue((s, r), out uint corrected)
+            ? corrected
+            : (uint)spaceOffset;
+
+    /// <summary>
     /// Step 0 — the binding-range pass: everything Slang knows about a binding
     /// that its descriptor-range list does not carry.
     /// </summary>
@@ -646,6 +934,7 @@ public sealed unsafe class SlangReflection
     private static void CollectBindingRangeFacts(
         SlangReflectionTypeLayout* structTypeLayout,
         uint absoluteSet,
+        Dictionary<(long Set, long Range), uint>? corrections,
         Dictionary<(uint Set, uint Slot), BindingFacts> into)
     {
         long bindingRangeCount = SlangApi.spReflectionTypeLayout_getBindingRangeCount(structTypeLayout);
@@ -680,7 +969,10 @@ public sealed unsafe class SlangReflection
             }
 
             // getBindingRangeImageFormat is NOT total — see ImageFormatOf.
-            into[(absoluteSet + (uint)spaceOffset, (uint)slot)] = new BindingFacts(
+            // The space goes through step 0a's correction for the same reason
+            // step 1's does: both read the same record, and both are wrong when
+            // it is (issue #180).
+            into[(absoluteSet + SpaceOf(corrections, s, r, spaceOffset), (uint)slot)] = new BindingFacts(
                 NameOfBindingRange(structTypeLayout, br),
                 ImageFormatOf(structTypeLayout, br, type),
                 SlangApi.spReflectionTypeLayout_isBindingRangeSpecializable(structTypeLayout, br) != 0,
