@@ -187,10 +187,18 @@ public sealed unsafe class Device : IDisposable
     /// <see cref="DescriptorBindingFlags"/>; if any do, the wrapper
     /// chains a <c>VkDescriptorSetLayoutBindingFlagsCreateInfo</c>.
     /// </summary>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="desc"/> has no bindings, or a binding carrying
+    /// <see cref="DescriptorBindingFlags.VariableDescriptorCount"/> is not the
+    /// one with the highest binding number in the set
+    /// (VUID-VkDescriptorSetLayoutBindingFlagsCreateInfo-pBindingFlags-03004).
+    /// </exception>
     public DescriptorSetLayout CreateDescriptorSetLayout(in DescriptorSetLayoutDescription desc)
     {
         if (desc.Bindings.IsEmpty)
             throw new ArgumentException("DescriptorSetLayoutDescription.Bindings must contain at least one entry.");
+
+        ValidateVariableDescriptorCountOrdering(desc.Bindings);
 
         Span<VkDescriptorSetLayoutBinding> nativeBindings =
             stackalloc VkDescriptorSetLayoutBinding[desc.Bindings.Length];
@@ -246,6 +254,40 @@ public sealed unsafe class Device : IDisposable
             Vk.vkCreateDescriptorSetLayout(Handle, &ci, null, &raw).ThrowIfFailed();
         }
         return new DescriptorSetLayout(raw, Handle);
+    }
+
+    /// <summary>
+    /// Enforces VUID-VkDescriptorSetLayoutBindingFlagsCreateInfo-pBindingFlags-03004:
+    /// a binding carrying
+    /// <see cref="DescriptorBindingFlags.VariableDescriptorCount"/> must be the
+    /// element with the highest binding number in the set. The validation layer
+    /// reports this at <c>vkCreateDescriptorSetLayout</c>; checking it here makes
+    /// the same mistake fail in the wrapper's own vocabulary, at the call site
+    /// that made it, for callers running without the layer.
+    /// </summary>
+    internal static void ValidateVariableDescriptorCountOrdering(
+        ReadOnlySpan<DescriptorBinding> bindings)
+    {
+        uint highestSlot = 0;
+        for (int i = 0; i < bindings.Length; i++)
+        {
+            if (bindings[i].Slot > highestSlot)
+                highestSlot = bindings[i].Slot;
+        }
+
+        for (int i = 0; i < bindings.Length; i++)
+        {
+            if ((bindings[i].BindingFlags & DescriptorBindingFlags.VariableDescriptorCount) != 0
+                && bindings[i].Slot != highestSlot)
+            {
+                throw new ArgumentException(
+                    $"Binding {bindings[i].Slot} carries "
+                    + "DescriptorBindingFlags.VariableDescriptorCount but is not the "
+                    + $"highest binding number in the set (highest is {highestSlot}). "
+                    + "Vulkan requires the variable-descriptor-count binding to be last "
+                    + "(VUID-VkDescriptorSetLayoutBindingFlagsCreateInfo-pBindingFlags-03004).");
+            }
+        }
     }
 
     /// <summary>
