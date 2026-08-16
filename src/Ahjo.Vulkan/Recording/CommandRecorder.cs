@@ -829,6 +829,89 @@ public unsafe ref struct CommandRecorder : IDisposable
                 "MemoryBarrier.Between(srcStage, Access.None, dstStage, Access.None)).");
     }
 
+    // ---- Timestamp queries ----
+
+    /// <summary>
+    /// Resets <paramref name="queryCount"/> queries of
+    /// <paramref name="pool"/> starting at <paramref name="firstQuery"/> to
+    /// the unavailable state via <c>vkCmdResetQueryPool</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Reset before use.</b> Every query must be reset by a
+    /// <b>submitted</b> reset before its first
+    /// <see cref="WriteTimestamp"/> and between reuses
+    /// (<c>VUID-vkCmdWriteTimestamp2-None-03864</c>). The idiomatic
+    /// per-frame shape is one <see cref="ResetQueryPool"/> over the frame's
+    /// query range at the top of the frame's command buffer.</para>
+    /// <para>Must be recorded <b>outside</b> a
+    /// <see cref="BeginRendering"/>/<see cref="EndRendering"/> scope
+    /// (<c>VUID-vkCmdResetQueryPool-renderpass</c>), and requires a
+    /// graphics/compute-capable queue family — a transfer-only pool cannot
+    /// record it (<c>VUID-vkCmdResetQueryPool-commandBuffer-cmdpool</c>),
+    /// unlike <see cref="WriteTimestamp"/>.</para>
+    /// </remarks>
+    public void ResetQueryPool(in QueryPool pool, uint firstQuery, uint queryCount)
+    {
+        if (AhjoValidation.IsEnabled)
+        {
+            if (pool.IsNull)
+                AhjoValidation.Fail("CommandRecorder",
+                    "ResetQueryPool: query pool is a null handle. Create one with Device.CreateQueryPool(count).");
+            // Widened to ulong before adding: uint arithmetic would wrap
+            // (e.g. firstQuery = 0xFFFF_FFFE, queryCount = 4 → 2) and let an
+            // out-of-range reset slip past the guard.
+            if (pool.QueryCount != 0 && (ulong)firstQuery + queryCount > pool.QueryCount)
+                AhjoValidation.Fail("CommandRecorder",
+                    $"ResetQueryPool: range [{firstQuery}, {(ulong)firstQuery + queryCount}) exceeds the pool's "
+                    + $"queryCount ({pool.QueryCount}).");
+        }
+        Fns.CmdResetQueryPool(Handle, pool.Handle, firstQuery, queryCount);
+    }
+
+    /// <summary>
+    /// Writes a timestamp into query <paramref name="query"/> of
+    /// <paramref name="pool"/> via <c>vkCmdWriteTimestamp2</c>: the value
+    /// latches when all previously submitted commands have completed
+    /// <paramref name="stage"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Bracket idiom.</b> Begin the measured span with
+    /// <see cref="Stage.TopOfPipe"/> and end it with
+    /// <see cref="Stage.BottomOfPipe"/> (or use
+    /// <see cref="Stage.AllCommands"/>).</para>
+    /// <para><paramref name="stage"/> must include <b>exactly one</b>
+    /// pipeline stage (<c>VUID-vkCmdWriteTimestamp2-stage-03859</c>) —
+    /// <see cref="Stage.None"/> and multi-bit masks are invalid; meta-flags
+    /// like <see cref="Stage.AllCommands"/> are single bits and legal.</para>
+    /// <para>The query must have been reset by a <b>submitted</b>
+    /// <see cref="ResetQueryPool"/> since its last use
+    /// (<c>VUID-vkCmdWriteTimestamp2-None-03864</c>).</para>
+    /// <para>The queue family must report non-zero
+    /// <see cref="QueueFamilyInfo.TimestampValidBits"/>
+    /// (<c>VUID-vkCmdWriteTimestamp2-timestampValidBits-03863</c>) — check
+    /// it in the device picker. Unlike <see cref="ResetQueryPool"/>, this
+    /// is legal inside a rendering scope and on transfer-only queue
+    /// families (<c>VUID-vkCmdWriteTimestamp2-commandBuffer-cmdpool</c>
+    /// includes transfer).</para>
+    /// </remarks>
+    public void WriteTimestamp(in QueryPool pool, Stage stage, uint query)
+    {
+        if (AhjoValidation.IsEnabled)
+        {
+            if (pool.IsNull)
+                AhjoValidation.Fail("CommandRecorder",
+                    "WriteTimestamp: query pool is a null handle. Create one with Device.CreateQueryPool(count).");
+            if (System.Numerics.BitOperations.PopCount((ulong)stage) != 1)
+                AhjoValidation.Fail("CommandRecorder",
+                    "WriteTimestamp: stage must be exactly one Stage bit "
+                    + "(VUID-vkCmdWriteTimestamp2-stage-03859); Stage.None and multi-bit masks are invalid.");
+            if (pool.QueryCount != 0 && query >= pool.QueryCount)
+                AhjoValidation.Fail("CommandRecorder",
+                    $"WriteTimestamp: query {query} is out of range for the pool's queryCount ({pool.QueryCount}).");
+        }
+        Fns.CmdWriteTimestamp2(Handle, (ulong)stage, pool.Handle, query);
+    }
+
     // ---- Copy / blit / clear / fill (copy_commands2 path) ----
 
     /// <summary>

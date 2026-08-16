@@ -33,7 +33,7 @@ Use this table to look up the expected benchmark for each changed file. If a fil
 | `Memory/StagingBatch.cs`               | `StagingUploaderBenchmarks.cs`                         |
 | `Memory/Allocator.cs`                  | `BufferBenchmarks.cs` (covers allocation path)         |
 | `Memory/MappedRegion.cs`               | `BufferBenchmarks.cs`                                  |
-| `Recording/CommandRecorder.cs`         | `CommandRecorderBenchmarks.cs` **plus the class matching the changed command family** — barriers/split barriers → `PipelineBarrierBenchmarks.cs`, push constants → `PushConstantsBenchmarks.cs`, push descriptors → `PushDescriptorsBenchmarks.cs`, bind descriptor sets → `BindDescriptorSetsBenchmarks.cs`. Applied literally to `CommandRecorderBenchmarks.cs` alone this row yields false "gaps". |
+| `Recording/CommandRecorder.cs`         | `CommandRecorderBenchmarks.cs` **plus the class matching the changed command family** — barriers/split barriers → `PipelineBarrierBenchmarks.cs`, push constants → `PushConstantsBenchmarks.cs`, push descriptors → `PushDescriptorsBenchmarks.cs`, bind descriptor sets → `BindDescriptorSetsBenchmarks.cs`, timestamp queries (`ResetQueryPool`/`WriteTimestamp`) → `TimestampQueryBenchmarks.cs`. Applied literally to `CommandRecorderBenchmarks.cs` alone this row yields false "gaps". |
 | `Recording/BufferCopyRegion.cs`        | `CommandRecorderBenchmarks.cs`                         |
 | `Recording/ImmediateRecord.cs`         | `CommandRecorderBenchmarks.cs`                         |
 | `Recording/*Barrier.cs`                | `PipelineBarrierBenchmarks.cs`                         |
@@ -50,6 +50,8 @@ Use this table to look up the expected benchmark for each changed file. If a fil
 | `Sync/BinarySemaphore.cs`              | `SyncPoolBenchmarks.cs`                                |
 | `Sync/TimelineSemaphore.cs`            | `SyncPoolBenchmarks.cs`                                |
 | `Sync/Event.cs`, `EventCreateFlags.cs` | `PipelineBarrierBenchmarks.cs` (split barriers) — not `SyncPoolBenchmarks.cs`: what is hot about an `Event` is the record side (`SetEvent`/`WaitEvent`/`ResetEvent`), not a pool cycle |
+| `Sync/QueryPool.cs`                    | `TimestampQueryBenchmarks.cs` — not `SyncPoolBenchmarks.cs` (the `Event` precedent): what is hot is the record side plus the per-frame `TryGetResults` readback, not a pool cycle |
+| `Sync/QueryResult.cs`                  | `TimestampQueryBenchmarks.cs` — the 16-byte layout is what `TryGetResults_WithAvailability_NotReady` fixes over |
 | `Resources/Buffer.cs`                  | `BufferBenchmarks.cs`                                  |
 | `Pipelines/GraphicsPipelineBuilder.cs` | `GraphicsPipelineBuilderBenchmarks.cs`                 |
 | `Pipelines/ComputePipelineBuilder.cs`  | `GraphicsPipelineBuilderBenchmarks.cs` (similar shape) |

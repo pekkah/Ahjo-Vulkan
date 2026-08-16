@@ -118,6 +118,14 @@ internal readonly unsafe struct DeviceFunctionTable
     public readonly delegate* unmanaged[Stdcall]<
         VkCommandBuffer_T*, VkEvent_T*, ulong, void> CmdResetEvent2;
 
+    // ---- Timestamp queries ----
+
+    public readonly delegate* unmanaged[Stdcall]<
+        VkCommandBuffer_T*, VkQueryPool_T*, uint, uint, void> CmdResetQueryPool;
+
+    public readonly delegate* unmanaged[Stdcall]<
+        VkCommandBuffer_T*, ulong, VkQueryPool_T*, uint, void> CmdWriteTimestamp2;
+
     // ---- Copy / blit / clear / fill (copy_commands2 path) ----
 
     public readonly delegate* unmanaged[Stdcall]<
@@ -285,6 +293,16 @@ internal readonly unsafe struct DeviceFunctionTable
         CmdResetEvent2 =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkEvent_T*, ulong, void>)
             ResolveRequired(Utf8Name.FromLiteral("vkCmdResetEvent2"u8));
+
+        // Timestamp queries. vkCmdResetQueryPool is core since Vulkan 1.0
+        // and vkCmdWriteTimestamp2 since 1.3 — the wrapper's device floor —
+        // so no KHR-suffixed fallback is needed; ResolveRequired is correct.
+        CmdResetQueryPool =
+            (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkQueryPool_T*, uint, uint, void>)
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdResetQueryPool"u8));
+        CmdWriteTimestamp2 =
+            (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, ulong, VkQueryPool_T*, uint, void>)
+            ResolveRequired(Utf8Name.FromLiteral("vkCmdWriteTimestamp2"u8));
 
         CmdCopyBuffer2 =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkCopyBufferInfo2*, void>)

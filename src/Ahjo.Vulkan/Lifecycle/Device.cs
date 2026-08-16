@@ -559,6 +559,64 @@ public sealed unsafe class Device : IDisposable
     }
 
     /// <summary>
+    /// Creates a timestamp-typed <see cref="QueryPool"/>
+    /// (<c>VK_QUERY_TYPE_TIMESTAMP</c> — the only query type this method
+    /// mints) with <paramref name="queryCount"/> queries. The returned
+    /// handle is caller-owned; dispose it once no submission still
+    /// references it.
+    /// </summary>
+    /// <remarks>
+    /// Queries start <b>uninitialized</b>: record and submit
+    /// <see cref="CommandRecorder.ResetQueryPool"/> over a query's index
+    /// before its first <see cref="CommandRecorder.WriteTimestamp"/> or any
+    /// readback via <see cref="QueryPool.TryGetResults(uint, Span{ulong})"/>.
+    /// Convert raw ticks to nanoseconds with
+    /// <see cref="QueueFamilyInfo.TimestampValidBits"/> +
+    /// <see cref="TimestampPeriod"/>.
+    /// </remarks>
+    public QueryPool CreateQueryPool(uint queryCount)
+    {
+        if (queryCount == 0)
+            throw new ArgumentOutOfRangeException(nameof(queryCount),
+                "A query pool must contain at least one query (VUID-VkQueryPoolCreateInfo-queryCount-02763).");
+
+        var ci = new VkQueryPoolCreateInfo
+        {
+            sType      = VkStructureType.VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+            queryType  = VkQueryType.VK_QUERY_TYPE_TIMESTAMP,
+            queryCount = queryCount,
+        };
+        VkQueryPool_T* raw = null;
+        Vk.vkCreateQueryPool(Handle, &ci, null, &raw).ThrowIfFailed();
+        return new QueryPool(raw, Handle, queryCount);
+    }
+
+    /// <summary>
+    /// Nanoseconds per timestamp tick
+    /// (<c>VkPhysicalDeviceLimits::timestampPeriod</c>). Multiply a masked
+    /// tick delta from <see cref="QueryPool.TryGetResults(uint, Span{ulong})"/>
+    /// by this to get nanoseconds.
+    /// </summary>
+    /// <remarks>
+    /// Read on demand from the physical device into a stack struct —
+    /// zero-alloc, no caching, the same shape as the
+    /// <c>maxPushConstantsSize</c> read in
+    /// <see cref="CreatePipelineLayout"/>. Typically read once at setup.
+    /// The value is often non-integral (e.g. 52.083 on some tile GPUs), so
+    /// multiply the masked tick delta rather than accumulating ticks as
+    /// nanoseconds.
+    /// </remarks>
+    public float TimestampPeriod
+    {
+        get
+        {
+            VkPhysicalDeviceProperties props;
+            Vk.vkGetPhysicalDeviceProperties(PhysicalDevice.Handle, &props);
+            return props.limits.timestampPeriod;
+        }
+    }
+
+    /// <summary>
     /// Builds a <see cref="PipelineLayout"/> from descriptor-set layouts +
     /// push-constant ranges.
     /// </summary>
