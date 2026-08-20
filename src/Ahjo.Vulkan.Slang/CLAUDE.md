@@ -132,8 +132,45 @@ null-terminated.
   shippable — this package ships both RIDs, and an API that SIGSEGVs on one of
   them cannot have a per-platform contract — but it is what the upstream bug
   report should say, and it means point 4's guard is required rather than
-  conditional. Spec OPEN-4(b); the report is tracked as #170 and its upstream
-  number belongs here once filed.
+  conditional. Spec OPEN-4(b).
+
+  **No upstream fix exists to wait for — checked 2026-08-18 against
+  `v2026.14.1`, which is still Slang's latest release.** #170 was re-scoped from
+  "file it upstream" to "re-probe on the next Slang bump", because the upstream
+  record says the decision above is the *supported* shape rather than a
+  stopgap:
+
+  - The nearest already-fixed upstream bug is in the pin and does not help.
+    shader-slang/slang#10314 (`ConstantBuffer<IFoo>` / `ParameterBlock<IFoo>`
+    global interface params segfault) was fixed by PR #10776, merged
+    2026-05-07 — months before `v2026.14.1`. That fix is in
+    `slang-ir-typeflow-specialize.cpp` and covers the `-conformance` path only;
+    this crash is in the type legalizer on the `specialize()` path and survives
+    it.
+  - **`AddTypeConformance` is the covered path, not the fallback.** Upstream's
+    `tests/language-feature/dynamic-dispatch/parameterblock-interface.slang` is
+    enabled and passing, driven by `-conformance` — which is what
+    `createTypeConformanceComponentType` is. There is no upstream test for
+    `ParameterBlock<IFoo>` through `specialize()` at all. Point 2 understates
+    it: the crashing route is also the untested one.
+  - shader-slang/slang#10749 (`lookupExternDeclRefType` segfault) looks adjacent
+    and is not this bug — it is link-time type specialization
+    (`export struct X : Y = Z`) reaching `getTypeLayout` with a null
+    `programLayout`, a different trigger and a different crash site. Its fix,
+    PR #10769, has been open since 2026-04-10 and is still unmerged. Do not cite
+    it as the pending fix for this.
+  - No open upstream issue matches this repro. That is a fact about the tracker
+    as of 2026-08-18, not an invitation to file one.
+
+  If a later phase genuinely needs specialization over an interface-typed
+  block, the shader-side shape to try first is the struct wrapper —
+  `ParameterBlock<Params>` with an `ISurface` *field* rather than
+  `ParameterBlock<ISurface>` — which upstream covers as passing in
+  `parameterblock-struct-interface-field.slang`. Unverified here: it can only be
+  probed on `linux-x64`, and win-x64 does not crash to begin with. The one
+  merged change worth re-probing after the next release is PR #11667
+  (2026-08-03, existential dynamic-dispatch specialization), though it too is in
+  the typeflow pass rather than the legalizer, so expect no change.
 
 ## Reflection — eleven rules Slang does not hand you
 

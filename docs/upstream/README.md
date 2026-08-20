@@ -23,6 +23,15 @@ needed.
 |---|---|---|
 | `slang-getbindingrangeimageformat-crash.{md,cpp}` | shader-slang/slang | Not filed. Tracked as #181. Guard: `SlangReflection.ImageFormatOf`. Fixed incidentally by open PR [#11344](https://github.com/shader-slang/slang/pull/11344), unmerged — see "Prior art upstream" in the report. Repro last re-run 2026-08-03 against the pinned `v2026.14.1`: still crashes (`0xC0000005`). |
 
+**#170 has no file here, deliberately.** The `IComponentType::specialize`
+segfault it tracks (interface-typed `ParameterBlock`, crash in
+`Slang::legalizeTypes`) reproduces on `linux-x64` only and not on `win-x64`, so
+a repro kept here could not be re-run by anyone working on the platform this
+repo's wrapper suite runs on. The sequence lives in the issue body, and the
+upstream check — no fix available as of 2026-08-18, `v2026.14.1` already the
+latest release — is recorded in `src/Ahjo.Vulkan.Slang/CLAUDE.md` next to the
+guard and in OPEN-4(c) of the issue-166 spec.
+
 ## Re-testing after a version bump
 
 The Slang repro builds against the pinned release archives the build already

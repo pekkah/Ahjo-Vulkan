@@ -27,6 +27,16 @@ Slang's `SV_VertexID` makes the emitted module declare the SPIR-V
 `DrawParameters` capability, which the GLSL it replaces does not — the first
 thing found by putting reflection output in front of a real driver and the
 validation layer.
+**Revised:** 2026-08-18 (upstream check) — **OPEN-4 is closed.** The follow-up
+was re-scoped by the issue owner from "file the `specialize()` segfault
+upstream" to "check whether a fix or workaround exists"; it does not. There is
+no newer Slang release than the pinned `v2026.14.1`, the adjacent upstream fix
+(shader-slang/slang#10314 / PR #10776) is already in the pin and does not cover
+this path, and shader-slang/slang#10749 is a different crash whose fix is
+unmerged. What the check *does* establish is that D9's `AddTypeConformance` is
+the route upstream tests and `specialize()` over an interface-typed
+`ParameterBlock` is untested there — so D9 is confirmed, not merely unblocked.
+New sub-item OPEN-4(c). No other decision changed.
 
 ---
 
@@ -1347,8 +1357,7 @@ disposes two compilers in sequence and passes. `slang_shutdown` stays uncalled:
 it is process-scoped (`slang.h:5860`), and a library has no standing to end the
 process's use of Slang on behalf of its host.
 
-**OPEN-4 — the `specialize()` segfault (E14) — DECIDED 2026-08-01, one
-sub-question still open.** `IComponentType::specialize` on a component whose
+**OPEN-4 — the `specialize()` segfault (E14) — CLOSED 2026-08-18.** `IComponentType::specialize` on a component whose
 global scope contains an interface-typed `ParameterBlock`, followed by any
 codegen call, crashes inside Slang's type-legalization pass — reproduced 3/3
 with a stack trace, on `v2026.14.1` linux-x64.
@@ -1373,9 +1382,38 @@ with a stack trace, on `v2026.14.1` linux-x64.
   `AddTypeConformance` and no `Specialize`. What the answer *does* settle is the
   size of D9 rule 3's pre-flight guard: the guard is required on `linux-x64` and
   cannot be conditioned away on `win-x64` without making the API's contract
-  differ per platform — which is a worse outcome than the guard. Filing the
-  repro upstream should now say "linux-x64 only", because that is a much more
-  actionable bug report than the original.
+  differ per platform — which is a worse outcome than the guard.
+- **(c) CLOSED 2026-08-18 — the upstream check was run instead of the upstream
+  filing, and it confirms (a) rather than qualifying it.** Checked against
+  `v2026.14.1`, still Slang's latest release (published 2026-07-30), so there
+  is no version bump that could carry a fix.
+
+  - shader-slang/slang#10314 — `ConstantBuffer<IFoo>` / `ParameterBlock<IFoo>`
+    global interface params segfault — is the nearest *fixed* upstream bug. Its
+    fix, PR #10776, merged 2026-05-07 and is therefore already in the pin. It
+    lives in `slang-ir-typeflow-specialize.cpp` and covers the `-conformance`
+    path; E14 is in the type legalizer on the `specialize()` path and survives
+    it.
+  - **`AddTypeConformance` is the path upstream tests.**
+    `tests/language-feature/dynamic-dispatch/parameterblock-interface.slang` is
+    enabled and passing in Slang main, driven by `-conformance` — which is what
+    `createTypeConformanceComponentType` is. `ParameterBlock<IFoo>` through
+    `specialize()` has no upstream test at all. (a) picked the covered route,
+    not a workaround.
+  - shader-slang/slang#10749 is **not** this bug, despite the surface
+    resemblance: it is link-time type specialization (`export struct X : Y = Z`)
+    reaching `getTypeLayout` with a null `programLayout`, crashing in
+    `lookupExternDeclRefType`. Its fix, PR #10769, has been open since
+    2026-04-10 and is unmerged.
+  - No open upstream issue matches E14's repro as of 2026-08-18.
+
+  The shader-side shape to try first, should a later phase need specialization
+  over an interface-typed block, is the struct wrapper — `ParameterBlock<Params>`
+  with an `ISurface` *field* — which upstream covers as passing in
+  `parameterblock-struct-interface-field.slang`. Unverified here: it is probeable
+  only on `linux-x64`, and win-x64 does not crash. PR #11667 (merged 2026-08-03,
+  post-pin) is the one merged change worth re-probing after the next release,
+  though it is also in the typeflow pass rather than the legalizer.
 
 **OPEN-5 — more than one push-constant block (E17).** Two modules each declaring
 `[[vk::push_constant]]` compose and link, and reflection reports two
@@ -1464,13 +1502,16 @@ found (#168, #169).
   modes (task host, incremental inputs, design-time builds) and it is what
   finally deletes the eight duplicated `_GlslcExe` blocks and lets `ci.yml:212`
   stop printing "NOT PROVEN".
-- **File the `specialize()` segfault upstream** (E14, OPEN-4) — **#170**. A
-  minimal repro exists: `ParameterBlock<ISurface>` +
+- **Re-probe the `specialize()` segfault on the next Slang bump** (E14,
+  OPEN-4) — **#170**, re-scoped 2026-08-18 from "file it upstream" on the
+  issue owner's call. A minimal repro exists: `ParameterBlock<ISurface>` +
   `IComponentType::specialize(Concrete)` + `link` + `getEntryPointCode` on the
-  consuming entry point. It is not this spec's job to fix Slang, but it is this
-  spec's job to record that D9 exists because of it, so a future `Specialize`
-  API is not added by someone who only read the header. The report should say
-  **linux-x64 only** — see OPEN-4(b).
+  consuming entry point, **linux-x64 only** — see OPEN-4(b). Nothing upstream
+  fixes it today and `v2026.14.1` is already the latest release — see
+  OPEN-4(c), which is also where the near-miss upstream issues are recorded so
+  the next reader does not re-derive them. It is not this spec's job to fix
+  Slang, but it is this spec's job to record that D9 exists because of it, so a
+  future `Specialize` API is not added by someone who only read the header.
 - **Migrate the existing GLSL sample shaders to Slang** — **#172**, blocked on
   #171. It is a content change with a per-sample visual diff to review, it is
   not all-or-nothing (Slang can consume GLSL), and doing it before the build
