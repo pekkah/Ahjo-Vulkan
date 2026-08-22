@@ -466,6 +466,12 @@ public unsafe ref struct CommandRecorder : IDisposable
             "Vulkan 1.4; on a 1.3 device enable VK_KHR_push_descriptor via DeviceDescription.Extensions, " +
             "and build the target set layout with DescriptorSetLayoutDescription.PushDescriptor.");
 
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    private static void ThrowMeshShaderUnsupported() =>
+        throw new InvalidOperationException(
+            "Mesh-shader draw commands are not available on this device. " +
+            MeshShaderSupport.EnableInstructions);
+
     private static void FlushPush(
         delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkPipelineBindPoint, VkPipelineLayout_T*, uint, uint, VkWriteDescriptorSet*, void> cmdPushDescriptorSet,
         VkCommandBuffer_T*            cb,
@@ -570,6 +576,130 @@ public unsafe ref struct CommandRecorder : IDisposable
         => Fns.CmdDrawIndexedIndirectCount(
             Handle, buffer.Handle, offset,
             countBuffer.Handle, countBufferOffset, maxDrawCount, stride);
+
+    /// <summary>
+    /// <c>vkCmdDrawMeshTasksEXT</c> — launches a grid of mesh (or, when the
+    /// bound pipeline has a task stage, task) workgroups. The counts are
+    /// <b>workgroups</b>, not vertices, which is why the Y/Z defaults mirror
+    /// <see cref="Dispatch"/> rather than <see cref="Draw"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Requires <c>VK_EXT_mesh_shader</c> and the <c>meshShader</c>
+    /// feature on the device, and a pipeline built with
+    /// <see cref="GraphicsPipelineBuilder.WithMeshStages"/>; the command must
+    /// be recorded inside a <see cref="BeginRendering"/> /
+    /// <see cref="EndRendering"/> scope. Throws
+    /// <see cref="InvalidOperationException"/> when the extension was not
+    /// enabled on the device.</para>
+    /// <para><b>Bounds the wrapper does not check.</b> When the bound
+    /// pipeline has a task stage, each <c>groupCount*</c> must be
+    /// ≤ <c>VkPhysicalDeviceMeshShaderPropertiesEXT::maxTaskWorkGroupCount[i]</c>
+    /// and their product ≤ <c>maxTaskWorkGroupTotalCount</c>
+    /// (<c>VUID-vkCmdDrawMeshTasksEXT-TaskEXT-07322</c>/<c>-07323</c>/<c>-07324</c>/<c>-07325</c>);
+    /// without a task stage the same bounds apply against
+    /// <c>maxMeshWorkGroupCount[i]</c> / <c>maxMeshWorkGroupTotalCount</c>
+    /// (<c>-07326</c>/<c>-07327</c>/<c>-07328</c>/<c>-07329</c>). Read those
+    /// limits with <see cref="PhysicalDevice.TryGetMeshShaderLimits"/>: use
+    /// <see cref="MeshShaderLimits.MaxTaskWorkGroupCountX"/> and its Y/Z/total
+    /// siblings when the bound pipeline has a task stage, and
+    /// <see cref="MeshShaderLimits.MaxMeshWorkGroupCountX"/> and its siblings
+    /// when it does not.</para>
+    /// </remarks>
+    public void DrawMeshTasks(uint groupCountX, uint groupCountY = 1, uint groupCountZ = 1)
+    {
+        var fn = Fns.CmdDrawMeshTasks;
+        if (fn == null) ThrowMeshShaderUnsupported();
+        fn(Handle, groupCountX, groupCountY, groupCountZ);
+    }
+
+    /// <summary>
+    /// <c>vkCmdDrawMeshTasksIndirectEXT</c> — reads <paramref name="drawCount"/>
+    /// <c>VkDrawMeshTasksIndirectCommandEXT</c> structs (three <c>uint32</c>s,
+    /// 12 bytes) from <paramref name="buffer"/> at <paramref name="offset"/>,
+    /// <paramref name="stride"/> bytes apart.
+    /// </summary>
+    /// <remarks>
+    /// <para>Requires <c>VK_EXT_mesh_shader</c> and the <c>meshShader</c>
+    /// feature, a pipeline built with
+    /// <see cref="GraphicsPipelineBuilder.WithMeshStages"/>, and a
+    /// <see cref="BeginRendering"/> / <see cref="EndRendering"/> scope. Throws
+    /// <see cref="InvalidOperationException"/> when the extension was not
+    /// enabled on the device.</para>
+    /// <para><b>Rules the wrapper does not check.</b>
+    /// <paramref name="buffer"/> must have been created with
+    /// <see cref="BufferUsage.IndirectBuffer"/>
+    /// (<c>VUID-vkCmdDrawMeshTasksIndirectEXT-buffer-02709</c>);
+    /// <paramref name="offset"/> must be a multiple of 4 (<c>-offset-02710</c>);
+    /// a <paramref name="drawCount"/> greater than 1 requires the
+    /// <c>multiDrawIndirect</c> feature (<c>-drawCount-02718</c>) and a
+    /// <paramref name="stride"/> that is a multiple of 4 and at least 12
+    /// (<c>-drawCount-07088</c>).</para>
+    /// <para><b>Bounds the wrapper does not check.</b> The same task/mesh
+    /// workgroup-count split as <see cref="DrawMeshTasks"/> applies to the
+    /// <c>groupCount*</c> fields <i>inside</i> the indirect buffer, checked
+    /// against the command struct rather than the call:
+    /// <c>VUID-VkDrawMeshTasksIndirectCommandEXT-TaskEXT-07322</c>…<c>-07325</c>
+    /// when the bound pipeline has a task stage,
+    /// <c>-07326</c>…<c>-07329</c> when it does not. The wrapper cannot see
+    /// those values — they are device memory — so read the limits with
+    /// <see cref="PhysicalDevice.TryGetMeshShaderLimits"/> and bound whatever
+    /// writes the buffer (compute shader or host fill).</para>
+    /// </remarks>
+    public void DrawMeshTasksIndirect(in Buffer buffer, ulong offset, uint drawCount, uint stride)
+    {
+        var fn = Fns.CmdDrawMeshTasksIndirect;
+        if (fn == null) ThrowMeshShaderUnsupported();
+        fn(Handle, buffer.Handle, offset, drawCount, stride);
+    }
+
+    /// <summary>
+    /// <c>vkCmdDrawMeshTasksIndirectCountEXT</c> — like
+    /// <see cref="DrawMeshTasksIndirect"/>, but the draw count is read from
+    /// <paramref name="countBuffer"/> at <paramref name="countBufferOffset"/>
+    /// (a single <c>uint32</c>) rather than passed as an immediate; the
+    /// effective count is <c>min(maxDrawCount, *countBuffer)</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Requires <c>VK_EXT_mesh_shader</c> and the <c>meshShader</c>
+    /// feature, a pipeline built with
+    /// <see cref="GraphicsPipelineBuilder.WithMeshStages"/>, and a
+    /// <see cref="BeginRendering"/> / <see cref="EndRendering"/> scope. Throws
+    /// <see cref="InvalidOperationException"/> when the extension was not
+    /// enabled on the device.</para>
+    /// <para><b>Rules the wrapper does not check.</b> Both buffers must have
+    /// been created with <see cref="BufferUsage.IndirectBuffer"/>, and the
+    /// device must have the <c>drawIndirectCount</c> feature enabled (Vulkan
+    /// 1.2 core; flip it via
+    /// <c>VkPhysicalDeviceVulkan12Features.drawIndirectCount</c> in
+    /// <see cref="DeviceDescription.ConfigureFeatures"/>) —
+    /// <c>VUID-vkCmdDrawMeshTasksIndirectCountEXT-None-04445</c>.
+    /// <paramref name="countBufferOffset"/> must be a multiple of 4
+    /// (<c>-countBufferOffset-02716</c>), and <paramref name="stride"/> a
+    /// multiple of 4 and at least 12 — the size of
+    /// <c>VkDrawMeshTasksIndirectCommandEXT</c> (<c>-stride-07096</c>).</para>
+    /// <para><b>Bounds the wrapper does not check.</b> As for
+    /// <see cref="DrawMeshTasksIndirect"/>, the <c>groupCount*</c> fields
+    /// <i>inside</i> the indirect buffer carry the same task/mesh split as
+    /// <see cref="DrawMeshTasks"/>:
+    /// <c>VUID-VkDrawMeshTasksIndirectCommandEXT-TaskEXT-07322</c>…<c>-07325</c>
+    /// with a task stage, <c>-07326</c>…<c>-07329</c> without one. Read the
+    /// limits with <see cref="PhysicalDevice.TryGetMeshShaderLimits"/> and
+    /// bound the producer that writes the buffer — for the
+    /// compute-writes-the-count shape this overload exists for, that is the
+    /// compute shader, not this call site.</para>
+    /// </remarks>
+    public void DrawMeshTasksIndirectCount(
+        in Buffer buffer,
+        ulong     offset,
+        in Buffer countBuffer,
+        ulong     countBufferOffset,
+        uint      maxDrawCount,
+        uint      stride)
+    {
+        var fn = Fns.CmdDrawMeshTasksIndirectCount;
+        if (fn == null) ThrowMeshShaderUnsupported();
+        fn(Handle, buffer.Handle, offset, countBuffer.Handle, countBufferOffset, maxDrawCount, stride);
+    }
 
     public void Dispatch(uint groupCountX, uint groupCountY = 1, uint groupCountZ = 1)
         => Fns.CmdDispatch(Handle, groupCountX, groupCountY, groupCountZ);

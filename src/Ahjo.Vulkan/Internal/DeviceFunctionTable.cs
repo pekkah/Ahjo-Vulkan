@@ -19,12 +19,29 @@ namespace Ahjo.Vulkan;
 /// with a <c>KHR</c>-suffixed fallback for 1.3 devices that enable
 /// <c>VK_KHR_push_descriptor</c> and stays null — the recorder throws rather
 /// than dispatching through it — when neither is present.</description></item>
-/// <item><description>Extension entry points — <c>VK_EXT_debug_utils</c>.
-/// Absent extensions yield null pointers and the corresponding wrapper
-/// helpers degrade to no-ops (e.g.
+/// <item><description><b>Instance-extension entry points reached through
+/// <c>vkGetDeviceProcAddr</c></b> — the four <c>VK_EXT_debug_utils</c>
+/// pointers. <c>VK_EXT_debug_utils</c> is enabled on the <em>instance</em>,
+/// never appears in <see cref="DeviceDescription.Extensions"/>, and so is
+/// resolved unconditionally; absent ⇒ null ⇒ the corresponding wrapper
+/// helper degrades to a no-op (e.g.
 /// <see cref="ObjectName.Set{T}(Device, T, System.ReadOnlySpan{byte})"/>
-/// when <c>VK_EXT_debug_utils</c> is not enabled on the
+/// when the extension is not enabled on the
 /// instance).</description></item>
+/// <item><description><b>Device-extension entry points</b> — resolved
+/// <b>only</b> when the extension appears in the enabled list passed to
+/// <c>vkCreateDevice</c>. Two failure modes, both loud: not enabled ⇒ null
+/// pointer ⇒ the calling wrapper method throws a message naming the
+/// extension; enabled but unresolvable ⇒ throw here, at
+/// <see cref="Device"/> construction. This group is <b>not</b> limited to
+/// <c>vkCmd*</c>: the loader does not export extension symbols through
+/// <c>vulkan-1.dll</c> (see <c>Internal/InstanceFunctionTable.cs</c>), so
+/// create/destroy/query entry points of a device extension belong here
+/// too, unlike core cold-path calls which stay on the static
+/// <c>[DllImport]</c>s. <c>VK_EXT_mesh_shader</c> is the first member;
+/// issue #202 (<c>VK_KHR_acceleration_structure</c> +
+/// <c>VK_KHR_ray_query</c>) is the next consumer and adds a second
+/// <c>if</c> block of the same shape.</description></item>
 /// </list>
 /// All pointers are resolved at <see cref="Device"/> construction. Cold-path
 /// and instance-level calls keep using the static <c>[DllImport]</c>s on
@@ -101,6 +118,23 @@ internal readonly unsafe struct DeviceFunctionTable
 
     public readonly delegate* unmanaged[Stdcall]<
         VkCommandBuffer_T*, VkBuffer_T*, ulong, void> CmdDispatchIndirect;
+
+    // ---- Mesh shading (VK_EXT_mesh_shader) ----
+
+    /// <summary><c>vkCmdDrawMeshTasksEXT</c>. Null when VK_EXT_mesh_shader
+    /// was not enabled on this device.</summary>
+    public readonly delegate* unmanaged[Stdcall]<
+        VkCommandBuffer_T*, uint, uint, uint, void> CmdDrawMeshTasks;
+
+    /// <summary><c>vkCmdDrawMeshTasksIndirectEXT</c>. Null when
+    /// VK_EXT_mesh_shader was not enabled on this device.</summary>
+    public readonly delegate* unmanaged[Stdcall]<
+        VkCommandBuffer_T*, VkBuffer_T*, ulong, uint, uint, void> CmdDrawMeshTasksIndirect;
+
+    /// <summary><c>vkCmdDrawMeshTasksIndirectCountEXT</c>. Null when
+    /// VK_EXT_mesh_shader was not enabled on this device.</summary>
+    public readonly delegate* unmanaged[Stdcall]<
+        VkCommandBuffer_T*, VkBuffer_T*, ulong, VkBuffer_T*, ulong, uint, uint, void> CmdDrawMeshTasksIndirectCount;
 
     // ---- Pipeline barriers (sync2) ----
 
@@ -197,9 +231,16 @@ internal readonly unsafe struct DeviceFunctionTable
     public readonly delegate* unmanaged[Stdcall]<
         VkCommandBuffer_T*, VkDebugUtilsLabelEXT*, void> CmdInsertDebugUtilsLabel;
 
-    public DeviceFunctionTable(VkDevice_T* device)
+    public DeviceFunctionTable(VkDevice_T* device, ReadOnlySpan<Utf8Name> enabledExtensions)
     {
         _device = device;
+
+        // Device-extension pointers stay null unless the gated block at the
+        // end of this constructor resolves them; `readonly` fields must be
+        // definitely assigned on every path.
+        CmdDrawMeshTasks              = null;
+        CmdDrawMeshTasksIndirect      = null;
+        CmdDrawMeshTasksIndirectCount = null;
 
         // Core hot-path commands. The wrapper rejects pre-1.3 devices, so
         // every one of these resolves to a valid pointer; the resulting
@@ -353,6 +394,29 @@ internal readonly unsafe struct DeviceFunctionTable
         CmdInsertDebugUtilsLabel =
             (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkDebugUtilsLabelEXT*, void>)
             Resolve(Utf8Name.FromLiteral("vkCmdInsertDebugUtilsLabelEXT"u8));
+
+        // Device-extension entry points. Gated on the list the wrapper itself
+        // passed to vkCreateDevice — vkCreateDevice has already succeeded, so
+        // membership in that list *is* "enabled", and Vulkan offers no query to
+        // ask the device after the fact.
+        if (IsExtensionEnabled(enabledExtensions, DeviceExtensionNames.MeshShader))
+        {
+            CmdDrawMeshTasks =
+                (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, uint, uint, uint, void>)
+                ResolveExtensionRequired(
+                    Utf8Name.FromLiteral(DeviceExtensionNames.CmdDrawMeshTasks),
+                    DeviceExtensionNames.MeshShader);
+            CmdDrawMeshTasksIndirect =
+                (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkBuffer_T*, ulong, uint, uint, void>)
+                ResolveExtensionRequired(
+                    Utf8Name.FromLiteral(DeviceExtensionNames.CmdDrawMeshTasksIndirect),
+                    DeviceExtensionNames.MeshShader);
+            CmdDrawMeshTasksIndirectCount =
+                (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkBuffer_T*, ulong, VkBuffer_T*, ulong, uint, uint, void>)
+                ResolveExtensionRequired(
+                    Utf8Name.FromLiteral(DeviceExtensionNames.CmdDrawMeshTasksIndirectCount),
+                    DeviceExtensionNames.MeshShader);
+        }
     }
 
     public delegate* unmanaged[Stdcall]<void> Resolve(Utf8Name name) =>
@@ -393,4 +457,47 @@ internal readonly unsafe struct DeviceFunctionTable
         var p = Resolve(core);
         return p != null ? p : Resolve(extension);
     }
+
+    /// <summary>
+    /// True when <paramref name="utf8Name"/> is in the device-extension list
+    /// the caller passed to <c>vkCreateDevice</c>. Setup-time, allocation-free;
+    /// the span-over-NUL-terminated-pointer idiom is the one
+    /// <c>Instance.IsExtensionSupported(Utf8Name)</c> uses.
+    /// </summary>
+    private static bool IsExtensionEnabled(ReadOnlySpan<Utf8Name> enabled, ReadOnlySpan<byte> utf8Name)
+    {
+        for (int i = 0; i < enabled.Length; i++)
+        {
+            if (enabled[i].IsNull) continue;
+            if (System.Runtime.InteropServices.MemoryMarshal
+                    .CreateReadOnlySpanFromNullTerminated((byte*)enabled[i].Ptr)
+                    .SequenceEqual(utf8Name))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Resolves an entry point belonging to a device extension the caller
+    /// enabled. A null result means the driver advertised the extension at
+    /// <c>vkCreateDevice</c> but does not expose the command — a broken
+    /// loader/driver configuration, reported here rather than as an access
+    /// violation on a later frame.
+    /// </summary>
+    private delegate* unmanaged[Stdcall]<void> ResolveExtensionRequired(
+        Utf8Name entryPoint, ReadOnlySpan<byte> extension)
+    {
+        var p = Resolve(entryPoint);
+        if (p == null) ThrowExtensionEntryPointMissing(entryPoint, extension);
+        return p;
+    }
+
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    private static void ThrowExtensionEntryPointMissing(Utf8Name entryPoint, ReadOnlySpan<byte> extension) =>
+        throw new InvalidOperationException(
+            "vkGetDeviceProcAddr returned null for " +
+            $"'{System.Runtime.InteropServices.Marshal.PtrToStringUTF8((nint)entryPoint.Ptr)}', which belongs to " +
+            $"device extension '{System.Text.Encoding.UTF8.GetString(extension)}' — enabled at device creation " +
+            "via DeviceDescription.Extensions. The driver advertises the extension but does not expose the " +
+            "command; this indicates a loader or driver configuration the wrapper does not support.");
 }

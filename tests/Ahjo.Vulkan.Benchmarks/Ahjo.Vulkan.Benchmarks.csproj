@@ -39,4 +39,36 @@
           ContinueOnError="WarnAndContinue" />
   </Target>
 
+
+  <!--
+    Mesh-shading fixtures compile through a SECOND target, not the one above.
+    GL_EXT_mesh_shader needs SPIR-V 1.4, so these need an explicit
+    target-env flag; the existing CompileShaders target passes none (so it
+    defaults to vulkan1.0) and must keep doing so, or every pre-existing .spv
+    output changes.
+
+    vulkan1.2 (SPIR-V 1.5), not vulkan1.3: at vulkan1.3 glslang emits
+    OpExecutionModeId LocalSizeId for the workgroup size, which
+    VUID-RuntimeSpirv-LocalSizeId-06434 makes conditional on the maintenance4
+    feature. That would force every consumer of these fixtures to enable a
+    feature unrelated to mesh shading. vulkan1.2 emits plain OpExecutionMode
+    LocalSize and clears the SPIR-V 1.4 floor GL_EXT_mesh_shader actually
+    needs, so the fixtures require nothing beyond VK_EXT_mesh_shader itself. Same glslc resolution and same
+    ContinueOnError="WarnAndContinue" skip-when-missing behavior.
+  -->
+  <ItemGroup>
+    <_MeshShaderSource Include="..\Ahjo.Vulkan.Tests\Shaders\mesh_tri.mesh;..\Ahjo.Vulkan.Tests\Shaders\mesh_tri.task" />
+  </ItemGroup>
+
+  <Target Name="CompileMeshShaders" AfterTargets="Build" Inputs="@(_MeshShaderSource)" Outputs="@(_MeshShaderSource->'$(OutputPath)Shaders\%(Filename)%(Extension).spv')">
+    <PropertyGroup>
+      <_GlslcExe Condition="'$(_GlslcExe)' == '' and '$(VULKAN_SDK)' != ''">$(VULKAN_SDK)\Bin\glslc.exe</_GlslcExe>
+      <_GlslcExe Condition="'$(_GlslcExe)' == ''">glslc</_GlslcExe>
+    </PropertyGroup>
+    <MakeDir Directories="$(OutputPath)Shaders" />
+    <Exec Command="&quot;$(_GlslcExe)&quot; --target-env=vulkan1.2 &quot;%(_MeshShaderSource.FullPath)&quot; -o &quot;$(OutputPath)Shaders\%(_MeshShaderSource.Filename)%(_MeshShaderSource.Extension).spv&quot;"
+          IgnoreExitCode="false"
+          ContinueOnError="WarnAndContinue" />
+  </Target>
+
 </Project>

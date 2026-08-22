@@ -93,10 +93,17 @@ public class PipelineBarrierBenchmarks
             srcStage: Stage.TopOfPipe,             srcAccess: Access.None,
             dstStage: Stage.ColorAttachmentOutput, dstAccess: Access.ColorAttachmentWrite);
 
-        using var rec = _cmdPool.Begin();
-        for (int i = 0; i < CallsPerInvoke; i++)
-            rec.PipelineBarrier(in bar);
-        rec.End();
+        // Dispose the recorder (inner-block scope) BEFORE ResetForFrame: Retire
+        // fires on Dispose, not End, so the buffer must be retired to _spent
+        // before the reset drains _spent → _idle, or it never recycles. This
+        // also keeps the benchmark valid under AHJO_VULKAN_TIER=validation,
+        // where ResetForFrame asserts on an outstanding recorder.
+        using (var rec = _cmdPool.Begin())
+        {
+            for (int i = 0; i < CallsPerInvoke; i++)
+                rec.PipelineBarrier(in bar);
+            rec.End();
+        }
 
         _cmdPool.ResetForFrame();
     }
@@ -114,13 +121,21 @@ public class PipelineBarrierBenchmarks
         Span<ImageBarrier> bars = stackalloc ImageBarrier[BatchSize];
         for (int i = 0; i < BatchSize; i++) bars[i] = template;
 
+        // Dispose the recorder (inner-block scope) BEFORE ResetForFrame: Retire
+        // fires on Dispose, not End, so the buffer must be retired to _spent
+        // before the reset drains _spent → _idle, or it never recycles. This
+        // also keeps the benchmark valid under AHJO_VULKAN_TIER=validation,
+        // where ResetForFrame asserts on an outstanding recorder.
+        //
         // `scoped` narrows the recorder's safe-to-escape to this method
         // so the method-local stackalloc above can flow into
         // PipelineBarrier without tripping CS8350.
-        using scoped var rec = _cmdPool.Begin();
-        for (int i = 0; i < CallsPerInvoke; i++)
-            rec.PipelineBarrier(default, default, bars);
-        rec.End();
+        using (scoped var rec = _cmdPool.Begin())
+        {
+            for (int i = 0; i < CallsPerInvoke; i++)
+                rec.PipelineBarrier(default, default, bars);
+            rec.End();
+        }
 
         _cmdPool.ResetForFrame();
     }
@@ -150,16 +165,24 @@ public class PipelineBarrierBenchmarks
         Span<ImageBarrier> bars = stackalloc ImageBarrier[1];
         bars[0] = bar;
 
+        // Dispose the recorder (inner-block scope) BEFORE ResetForFrame: Retire
+        // fires on Dispose, not End, so the buffer must be retired to _spent
+        // before the reset drains _spent → _idle, or it never recycles. This
+        // also keeps the benchmark valid under AHJO_VULKAN_TIER=validation,
+        // where ResetForFrame asserts on an outstanding recorder.
+        //
         // `scoped` narrows the recorder's safe-to-escape to this method so
         // the method-local stackalloc above can flow into SetEvent/WaitEvent
         // without tripping CS8350.
-        using scoped var rec = _cmdPool.Begin();
-        for (int i = 0; i < CallsPerInvoke; i++)
+        using (scoped var rec = _cmdPool.Begin())
         {
-            rec.SetEvent(in _event, default, default, bars);
-            rec.WaitEvent(in _event, default, default, bars);
+            for (int i = 0; i < CallsPerInvoke; i++)
+            {
+                rec.SetEvent(in _event, default, default, bars);
+                rec.WaitEvent(in _event, default, default, bars);
+            }
+            rec.End();
         }
-        rec.End();
 
         _cmdPool.ResetForFrame();
     }
@@ -177,10 +200,17 @@ public class PipelineBarrierBenchmarks
     [Benchmark(OperationsPerInvoke = CallsPerInvoke)]
     public void ResetEvent_Single()
     {
-        using var rec = _cmdPool.Begin();
-        for (int i = 0; i < CallsPerInvoke; i++)
-            rec.ResetEvent(in _event, Stage.AllTransfer);
-        rec.End();
+        // Dispose the recorder (inner-block scope) BEFORE ResetForFrame: Retire
+        // fires on Dispose, not End, so the buffer must be retired to _spent
+        // before the reset drains _spent → _idle, or it never recycles. This
+        // also keeps the benchmark valid under AHJO_VULKAN_TIER=validation,
+        // where ResetForFrame asserts on an outstanding recorder.
+        using (var rec = _cmdPool.Begin())
+        {
+            for (int i = 0; i < CallsPerInvoke; i++)
+                rec.ResetEvent(in _event, Stage.AllTransfer);
+            rec.End();
+        }
 
         _cmdPool.ResetForFrame();
     }

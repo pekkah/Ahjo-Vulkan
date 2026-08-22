@@ -17,6 +17,19 @@ namespace Ahjo.Vulkan;
 /// or three lines: <c>TRIANGLE_LIST</c> topology, fill polygon, no
 /// culling, CCW front-face, depth disabled, single opaque color blend
 /// per color attachment, dynamic viewport + scissor.</para>
+/// <para><b>Mesh path.</b> <see cref="WithMeshStages"/> (optionally plus
+/// <see cref="WithTaskStage"/>) selects the mesh-shading front end instead
+/// of <see cref="WithStages"/>. Mesh and classic stages are mutually
+/// exclusive — Vulkan requires a pipeline's geometric stages to come all
+/// from the mesh-shading family (task/mesh) or all from the
+/// primitive-shading family (vertex/tess/geometry), so
+/// <see cref="Build"/> rejects any mix, along with the vertex-input,
+/// topology, patch-size and dynamic-state configuration a mesh pipeline
+/// would otherwise silently discard. Everything else — rasterization,
+/// multisample, depth-stencil, color blend, dynamic rendering, layout,
+/// cache — is configured identically on both paths. Requires
+/// <c>VK_EXT_mesh_shader</c> and the <c>meshShader</c> (plus, for a task
+/// stage, <c>taskShader</c>) feature on the device.</para>
 /// <para><b>Aliasing.</b> Each <c>WithX</c> returns the builder by
 /// value, so an aliased reference (<c>var b1 = builder.WithA(...);
 /// builder.WithB(...);</c>) yields two independent copies that diverge
@@ -38,24 +51,33 @@ public unsafe ref struct GraphicsPipelineBuilder
 
     private readonly Device _device;
 
-    // Stages. vert + frag are required; geom + tessControl + tessEval are optional.
+    // Stages. On the classic path vert + frag are required and geom +
+    // tessControl + tessEval are optional; on the mesh path mesh + frag are
+    // required and task is optional. The two paths are mutually exclusive.
     private VkShaderModule_T* _vert;
     private VkShaderModule_T* _frag;
     private VkShaderModule_T* _geom;
     private VkShaderModule_T* _tessControl;
     private VkShaderModule_T* _tessEval;
+    private VkShaderModule_T* _task;
+    private VkShaderModule_T* _mesh;
     private EntryPointBuffer  _vertEntry;
     private EntryPointBuffer  _fragEntry;
     private EntryPointBuffer  _geomEntry;
     private EntryPointBuffer  _tessControlEntry;
     private EntryPointBuffer  _tessEvalEntry;
+    private EntryPointBuffer  _taskEntry;
+    private EntryPointBuffer  _meshEntry;
 
     // Vertex input.
     private ReadOnlySpan<VertexBindingDescription>   _vBindings;
     private ReadOnlySpan<VertexAttributeDescription> _vAttrs;
 
-    // Input assembly.
+    // Input assembly. _topologySet exists only so the mesh path can reject an
+    // explicit WithTopology: _topology defaults to TRIANGLE_LIST in the ctor
+    // and cannot otherwise be told apart from "never called".
     private VkPrimitiveTopology _topology;
+    private bool                _topologySet;
 
     // Tessellation.
     private uint _patchControlPoints;
@@ -111,6 +133,12 @@ public unsafe ref struct GraphicsPipelineBuilder
     private void*                       _tessEvalSpecDataPtr;
     private int                         _tessEvalSpecDataSize;
     private VkSpecializationMapEntry[]? _tessEvalSpecEntries;
+    private void*                       _taskSpecDataPtr;
+    private int                         _taskSpecDataSize;
+    private VkSpecializationMapEntry[]? _taskSpecEntries;
+    private void*                       _meshSpecDataPtr;
+    private int                         _meshSpecDataSize;
+    private VkSpecializationMapEntry[]? _meshSpecEntries;
 
     // Layout + cache.
     private VkPipelineLayout_T* _layout;
@@ -135,6 +163,8 @@ public unsafe ref struct GraphicsPipelineBuilder
         InitMain(ref _geomEntry);
         InitMain(ref _tessControlEntry);
         InitMain(ref _tessEvalEntry);
+        InitMain(ref _taskEntry);
+        InitMain(ref _meshEntry);
     }
 
     private static void InitMain(ref EntryPointBuffer buf)
@@ -148,6 +178,14 @@ public unsafe ref struct GraphicsPipelineBuilder
 
     public GraphicsPipelineBuilder WithStages(in ShaderModule vertex, in ShaderModule fragment)
     {
+        // Rejected here, not at Build(): a null module reaches the driver as
+        // VUID-VkPipelineShaderStageCreateInfo-module-parameter, a message
+        // that names neither the stage nor the builder call that supplied it.
+        if (vertex.IsNull)
+            throw new ArgumentException("Vertex ShaderModule is null (default).", nameof(vertex));
+        if (fragment.IsNull)
+            throw new ArgumentException("Fragment ShaderModule is null (default).", nameof(fragment));
+
         _vert = vertex.Handle;
         _frag = fragment.Handle;
         _stagesSet = true;
@@ -179,11 +217,87 @@ public unsafe ref struct GraphicsPipelineBuilder
         return this;
     }
 
+    /// <summary>
+    /// Selects the mesh-shading path: a mesh stage plus fragment, replacing the
+    /// vertex / tessellation / geometry front end. Mutually exclusive with
+    /// <see cref="WithStages"/>, <see cref="WithGeometryStage"/> and
+    /// <see cref="WithTessellationStages"/> — Vulkan requires every geometric
+    /// stage in a pipeline to come from one family or the other
+    /// (VUID-VkGraphicsPipelineCreateInfo-pStages-02095). Requires
+    /// VK_EXT_mesh_shader and the meshShader feature.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Build"/> rejects a mesh stage on a device where
+    /// <c>VK_EXT_mesh_shader</c> was never enabled, so the misconfiguration
+    /// surfaces at the call site rather than as a driver/validation error.
+    /// That guard is <b>partial</b>: it can only see whether the
+    /// <i>extension</i> was enabled (the mesh entry points resolved), not
+    /// whether the <c>meshShader</c> feature was — Vulkan exposes no query
+    /// for the enabled feature chain after <c>vkCreateDevice</c>. A device
+    /// with the extension but without the feature builds past this wrapper
+    /// and is caught by the driver
+    /// (VUID-VkPipelineShaderStageCreateInfo-stage-02091).
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// Either module is a <c>default</c> <see cref="ShaderModule"/>. A null
+    /// mesh module would leave <see cref="Build"/> on the classic path with a
+    /// null vertex stage, so it is rejected at the call site.
+    /// </exception>
+    public GraphicsPipelineBuilder WithMeshStages(in ShaderModule mesh, in ShaderModule fragment)
+    {
+        // A null mesh module is worse than a null vertex one: Build() selects
+        // the mesh path on `_mesh != null`, so a default ShaderModule here
+        // sets _stagesSet without selecting it. Every mesh guard would then be
+        // skipped and Build() would emit a VERTEX stage with a null module —
+        // a rejection (VUID-VkPipelineShaderStageCreateInfo-module-parameter)
+        // that never mentions mesh at all.
+        if (mesh.IsNull)
+            throw new ArgumentException("Mesh ShaderModule is null (default).", nameof(mesh));
+        if (fragment.IsNull)
+            throw new ArgumentException("Fragment ShaderModule is null (default).", nameof(fragment));
+
+        _mesh      = mesh.Handle;
+        _frag      = fragment.Handle;
+        _stagesSet = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Adds a task (amplification) stage ahead of the mesh stage. Requires
+    /// <see cref="WithMeshStages"/> — a task-only pipeline is invalid
+    /// (VUID-VkGraphicsPipelineCreateInfo-stage-02096) — plus the taskShader
+    /// feature.
+    /// </summary>
+    /// <remarks>
+    /// <c>taskShader</c> is independently optional: a device may advertise
+    /// <c>VK_EXT_mesh_shader</c> and <c>meshShader</c> without it.
+    /// <see cref="Build"/>'s extension check cannot tell the difference (see
+    /// <see cref="WithMeshStages"/>), so a task stage on a device without the
+    /// feature is caught by the driver
+    /// (VUID-VkPipelineShaderStageCreateInfo-stage-02092), not here.
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="task"/> is a <c>default</c> <see cref="ShaderModule"/>.
+    /// </exception>
+    public GraphicsPipelineBuilder WithTaskStage(in ShaderModule task)
+    {
+        // Symmetrical with WithMeshStages: a null handle here would leave
+        // _task null, silently dropping the stage the caller asked for
+        // instead of emitting it.
+        if (task.IsNull)
+            throw new ArgumentException("Task ShaderModule is null (default).", nameof(task));
+
+        _task = task.Handle;
+        return this;
+    }
+
     public GraphicsPipelineBuilder WithVertexEntryPoint(ReadOnlySpan<byte> name) { CopyName(name, ref _vertEntry); return this; }
     public GraphicsPipelineBuilder WithFragmentEntryPoint(ReadOnlySpan<byte> name) { CopyName(name, ref _fragEntry); return this; }
     public GraphicsPipelineBuilder WithGeometryEntryPoint(ReadOnlySpan<byte> name) { CopyName(name, ref _geomEntry); return this; }
     public GraphicsPipelineBuilder WithTessellationControlEntryPoint(ReadOnlySpan<byte> name) { CopyName(name, ref _tessControlEntry); return this; }
     public GraphicsPipelineBuilder WithTessellationEvaluationEntryPoint(ReadOnlySpan<byte> name) { CopyName(name, ref _tessEvalEntry); return this; }
+    public GraphicsPipelineBuilder WithMeshEntryPoint(ReadOnlySpan<byte> name) { CopyName(name, ref _meshEntry); return this; }
+    public GraphicsPipelineBuilder WithTaskEntryPoint(ReadOnlySpan<byte> name) { CopyName(name, ref _taskEntry); return this; }
 
     /// <summary>
     /// Specializes the vertex shader's <c>constant_id</c> values from the
@@ -210,6 +324,14 @@ public unsafe ref struct GraphicsPipelineBuilder
     public GraphicsPipelineBuilder WithTessellationEvaluationSpecialization<T>(SpecializationInfo<T> spec) where T : unmanaged
     { _tessEvalSpecDataPtr = spec.DataPtr; _tessEvalSpecDataSize = spec.DataSize; _tessEvalSpecEntries = spec.Entries; return this; }
 
+    /// <summary>Specializes the mesh shader's <c>constant_id</c> values.</summary>
+    public GraphicsPipelineBuilder WithMeshSpecialization<T>(SpecializationInfo<T> spec) where T : unmanaged
+    { _meshSpecDataPtr = spec.DataPtr; _meshSpecDataSize = spec.DataSize; _meshSpecEntries = spec.Entries; return this; }
+
+    /// <summary>Specializes the task shader's <c>constant_id</c> values.</summary>
+    public GraphicsPipelineBuilder WithTaskSpecialization<T>(SpecializationInfo<T> spec) where T : unmanaged
+    { _taskSpecDataPtr = spec.DataPtr; _taskSpecDataSize = spec.DataSize; _taskSpecEntries = spec.Entries; return this; }
+
     private static void CopyName(ReadOnlySpan<byte> name, ref EntryPointBuffer dst)
     {
         if (name.Length > 31)
@@ -228,7 +350,8 @@ public unsafe ref struct GraphicsPipelineBuilder
 
     public GraphicsPipelineBuilder WithTopology(VkPrimitiveTopology topology)
     {
-        _topology = topology;
+        _topology    = topology;
+        _topologySet = true;
         return this;
     }
 
@@ -379,9 +502,45 @@ public unsafe ref struct GraphicsPipelineBuilder
     /// </summary>
     public GraphicsPipeline Build()
     {
-        if (!_stagesSet)    throw new InvalidOperationException("GraphicsPipelineBuilder requires WithStages.");
+        if (!_stagesSet)    throw new InvalidOperationException("GraphicsPipelineBuilder requires WithStages or WithMeshStages.");
         if (!_renderingSet) throw new InvalidOperationException("GraphicsPipelineBuilder requires WithDynamicRendering.");
         if (_layout == null) throw new InvalidOperationException("GraphicsPipelineBuilder requires WithLayout.");
+
+        // ---- Mesh-shading path ----
+        // A mesh pipeline replaces the primitive-shading front end wholesale.
+        // Everything below either prevents a driver-rejected pipeline (stage
+        // family mixing, forbidden dynamic states) or converts state the mesh
+        // path would silently discard (vertex input, topology, patch size)
+        // into an error at the call site.
+        //
+        // The stage-FAMILY guards run ahead of the tessellation guards below,
+        // not after them: a builder carrying both WithMeshStages and
+        // WithTessellationStages is a family mix whichever order it is
+        // inspected in, and letting the tess guards win first would answer it
+        // with "add WithTessellation(patchControlPoints > 0)" — advice that
+        // makes the caller add a call which then throws a *different* error.
+        bool meshPath = _mesh != null;
+        if (_task != null && !meshPath)
+            throw new InvalidOperationException(
+                "WithTaskStage requires WithMeshStages — a task shader amplifies a mesh shader and a " +
+                "task-only pipeline has no pre-rasterization stage " +
+                "(VUID-VkGraphicsPipelineCreateInfo-stage-02096).");
+        if (meshPath && _vert != null)
+            throw new InvalidOperationException(
+                "WithStages (vertex) and WithMeshStages are mutually exclusive; a pipeline's geometric " +
+                "stages must all come from the primitive-shading family or all from the mesh-shading " +
+                "family (VUID-VkGraphicsPipelineCreateInfo-pStages-02095). Pick one.");
+        if (meshPath && _geom != null)
+            throw new InvalidOperationException(
+                "WithGeometryStage and WithMeshStages are mutually exclusive; a geometry shader is a " +
+                "primitive-shading-family stage (VUID-VkGraphicsPipelineCreateInfo-pStages-02095). " +
+                "Drop WithGeometryStage.");
+        if (meshPath && (_tessControl != null || _tessEval != null))
+            throw new InvalidOperationException(
+                "WithTessellationStages and WithMeshStages are mutually exclusive; tessellation control " +
+                "and evaluation are primitive-shading-family stages " +
+                "(VUID-VkGraphicsPipelineCreateInfo-pStages-02095). Drop WithTessellationStages.");
+
         if ((_tessControl == null) != (_tessEval == null))
             throw new InvalidOperationException("Tessellation requires both control + evaluation stages (WithTessellationStages).");
         // WithTessellationStages without WithTessellation(patchControlPoints)
@@ -392,6 +551,60 @@ public unsafe ref struct GraphicsPipelineBuilder
         if (_tessControl != null && _patchControlPoints == 0)
             throw new InvalidOperationException(
                 "Tessellation pipeline requires WithTessellation(patchControlPoints > 0); pair it with WithTessellationStages.");
+
+        if (meshPath && (!_vBindings.IsEmpty || !_vAttrs.IsEmpty))
+            throw new InvalidOperationException(
+                "WithVertexInput has no effect on a mesh pipeline — a mesh shader has no vertex-input " +
+                "stage and reads its data through descriptors or buffer device addresses. " +
+                "Drop WithVertexInput.");
+        if (meshPath && _topologySet)
+            throw new InvalidOperationException(
+                "WithTopology has no effect on a mesh pipeline — the mesh shader emits primitives " +
+                "directly, so there is no input-assembly stage to configure. Drop WithTopology.");
+        if (meshPath && _patchControlPoints != 0)
+            throw new InvalidOperationException(
+                "WithTessellation has no effect on a mesh pipeline — the mesh shader emits primitives " +
+                "directly and there are no patches to subdivide. Drop WithTessellation.");
+        if (meshPath)
+        {
+            // Only an explicit WithDynamicState override can trip this; the
+            // builder's viewport + scissor default contains none of the
+            // forbidden states, so scanning _dynamicStates is sufficient.
+            for (int i = 0; i < _dynamicStates.Length; i++)
+            {
+                string? vuid = MeshForbiddenDynamicStateVuid(_dynamicStates[i]);
+                if (vuid != null)
+                    throw new InvalidOperationException(
+                        $"{_dynamicStates[i]} is not allowed on a mesh pipeline — the mesh shader has no " +
+                        "vertex-input or input-assembly stage for the state to apply to " +
+                        $"(VUID-VkGraphicsPipelineCreateInfo-{vuid}). Drop it from WithDynamicState.");
+            }
+
+            // Extension-enabled check, deliberately PARTIAL — see
+            // MeshShaderSupport.PartialGuardNote. A non-null CmdDrawMeshTasks
+            // is the recorder's own oracle for "VK_EXT_mesh_shader was in the
+            // list this wrapper passed to vkCreateDevice", because
+            // DeviceFunctionTable resolves the mesh entry points only when it
+            // was. Without this guard a mesh stage on a plain device reaches
+            // vkCreateGraphicsPipelines and surfaces as
+            // VUID-VkPipelineShaderStageCreateInfo-stage-02091, while
+            // CommandRecorder.DrawMeshTasks' friendly message — which names
+            // the same extension for the same misconfiguration — is
+            // unreachable, because the builder runs first.
+            //
+            // Ordered LAST among the mesh guards on purpose: everything above
+            // is static misuse of the builder, true regardless of which device
+            // the caller happens to hold, and stays the more actionable
+            // message when both are wrong at once.
+            if (_device.Functions.CmdDrawMeshTasks == null)
+                throw new InvalidOperationException(
+                    "WithMeshStages / WithTaskStage require a Device created with VK_EXT_mesh_shader " +
+                    "enabled; vkCmdDrawMeshTasksEXT did not resolve on this device, so the mesh stage " +
+                    "would be rejected by the driver " +
+                    "(VUID-VkPipelineShaderStageCreateInfo-stage-02091). " +
+                    MeshShaderSupport.EnableInstructions + " " +
+                    MeshShaderSupport.PartialGuardNote);
+        }
         // WithColorBlend(...) is optional — when omitted every color
         // attachment defaults to opaque. When provided, the attachment
         // count must match the rendering color-format count exactly:
@@ -460,16 +673,22 @@ public unsafe ref struct GraphicsPipelineBuilder
         bool hasGeomSpec        = _geomSpecEntries        is { Length: > 0 };
         bool hasTessControlSpec = _tessControlSpecEntries is { Length: > 0 };
         bool hasTessEvalSpec    = _tessEvalSpecEntries    is { Length: > 0 };
+        bool hasTaskSpec        = _taskSpecEntries        is { Length: > 0 };
+        bool hasMeshSpec        = _meshSpecEntries        is { Length: > 0 };
         fixed (byte* pVertEntry        = &_vertEntry[0])
         fixed (byte* pFragEntry        = &_fragEntry[0])
         fixed (byte* pGeomEntry        = &_geomEntry[0])
         fixed (byte* pTessControlEntry = &_tessControlEntry[0])
         fixed (byte* pTessEvalEntry    = &_tessEvalEntry[0])
+        fixed (byte* pTaskEntry        = &_taskEntry[0])
+        fixed (byte* pMeshEntry        = &_meshEntry[0])
         fixed (VkSpecializationMapEntry* pVertSpecEntries        = _vertSpecEntries)
         fixed (VkSpecializationMapEntry* pFragSpecEntries        = _fragSpecEntries)
         fixed (VkSpecializationMapEntry* pGeomSpecEntries        = _geomSpecEntries)
         fixed (VkSpecializationMapEntry* pTessControlSpecEntries = _tessControlSpecEntries)
         fixed (VkSpecializationMapEntry* pTessEvalSpecEntries    = _tessEvalSpecEntries)
+        fixed (VkSpecializationMapEntry* pTaskSpecEntries        = _taskSpecEntries)
+        fixed (VkSpecializationMapEntry* pMeshSpecEntries        = _meshSpecEntries)
         fixed (VkVertexInputBindingDescription*    pBindings = nativeBindings)
         fixed (VkVertexInputAttributeDescription*  pAttrs    = nativeAttrs)
         fixed (VkFormat*                           pColors   = _colorFormats)
@@ -485,24 +704,35 @@ public unsafe ref struct GraphicsPipelineBuilder
             VkSpecializationInfo geomSpec        = SpecInfo(_geomSpecEntries,        pGeomSpecEntries,        _geomSpecDataSize,        _geomSpecDataPtr);
             VkSpecializationInfo tessControlSpec = SpecInfo(_tessControlSpecEntries, pTessControlSpecEntries, _tessControlSpecDataSize, _tessControlSpecDataPtr);
             VkSpecializationInfo tessEvalSpec    = SpecInfo(_tessEvalSpecEntries,    pTessEvalSpecEntries,    _tessEvalSpecDataSize,    _tessEvalSpecDataPtr);
+            VkSpecializationInfo taskSpec        = SpecInfo(_taskSpecEntries,        pTaskSpecEntries,        _taskSpecDataSize,        _taskSpecDataPtr);
+            VkSpecializationInfo meshSpec        = SpecInfo(_meshSpecEntries,        pMeshSpecEntries,        _meshSpecDataSize,        _meshSpecDataPtr);
 
-            // Up to five stages: vert, frag, optional geom, optional tess
-            // control + tess eval. Built inline; size is bounded by the
-            // wrapper's currently-supported stage set. Mesh + task shaders
-            // are not wired through the builder yet; raise MaxStages when
-            // they land (the count would become 7 = vert+frag+geom+
-            // tessC+tessE+task+mesh, but only one of {classic, mesh} can
-            // be used at a time so the actual ceiling stays at 5).
+            // MaxStages stays 5. The classic path's maximum is 5 (vert +
+            // frag + geom + tessC + tessE); the mesh path's is 3 (task +
+            // mesh + frag); the two are mutually exclusive (rejected in the
+            // preamble above), so the ceiling is the larger of the two.
             var stages = stackalloc VkPipelineShaderStageCreateInfo[MaxStages];
             uint stageCount = 0;
-            stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_VERTEX_BIT,   _vert, pVertEntry, hasVertSpec ? &vertSpec : null);
-            stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_FRAGMENT_BIT, _frag, pFragEntry, hasFragSpec ? &fragSpec : null);
-            if (_geom != null)
-                stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_GEOMETRY_BIT, _geom, pGeomEntry, hasGeomSpec ? &geomSpec : null);
-            if (_tessControl != null)
+            if (meshPath)
             {
-                stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT,    _tessControl, pTessControlEntry, hasTessControlSpec ? &tessControlSpec : null);
-                stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT, _tessEval,    pTessEvalEntry,    hasTessEvalSpec    ? &tessEvalSpec    : null);
+                // Order within pStages is not significant; task -> mesh ->
+                // fragment reads in pipeline order.
+                if (_task != null)
+                    stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_TASK_BIT_EXT, _task, pTaskEntry, hasTaskSpec ? &taskSpec : null);
+                stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_MESH_BIT_EXT,     _mesh, pMeshEntry, hasMeshSpec ? &meshSpec : null);
+                stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_FRAGMENT_BIT,     _frag, pFragEntry, hasFragSpec ? &fragSpec : null);
+            }
+            else
+            {
+                stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_VERTEX_BIT,   _vert, pVertEntry, hasVertSpec ? &vertSpec : null);
+                stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_FRAGMENT_BIT, _frag, pFragEntry, hasFragSpec ? &fragSpec : null);
+                if (_geom != null)
+                    stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_GEOMETRY_BIT, _geom, pGeomEntry, hasGeomSpec ? &geomSpec : null);
+                if (_tessControl != null)
+                {
+                    stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT,    _tessControl, pTessControlEntry, hasTessControlSpec ? &tessControlSpec : null);
+                    stages[stageCount++] = ShaderStage(VkShaderStageFlagBits.VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT, _tessEval,    pTessEvalEntry,    hasTessEvalSpec    ? &tessEvalSpec    : null);
+                }
             }
 
             var vertexInput = new VkPipelineVertexInputStateCreateInfo
@@ -587,6 +817,10 @@ public unsafe ref struct GraphicsPipelineBuilder
                 pDynamicStates    = pDyn,
             };
 
+            // viewMask stays 0 (never set by the builder), which is what
+            // keeps VUID-VkGraphicsPipelineCreateInfo-renderPass-07720 —
+            // mesh shader + non-zero viewMask requires the
+            // multiviewMeshShader feature — structurally unreachable.
             var renderingInfo = new VkPipelineRenderingCreateInfo
             {
                 sType                   = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
@@ -602,8 +836,15 @@ public unsafe ref struct GraphicsPipelineBuilder
                 pNext               = &renderingInfo,
                 stageCount          = stageCount,
                 pStages             = stages,
-                pVertexInputState   = &vertexInput,
-                pInputAssemblyState = &inputAssembly,
+                // A mesh pipeline has neither stage; both members are
+                // optional + noautovalidity, and nulling them is the only way
+                // to make "no vertex input" true in the struct the driver
+                // sees. The guards above already rejected WithVertexInput /
+                // WithTopology on this path, so nothing is being discarded.
+                pVertexInputState   = meshPath ? null : &vertexInput,
+                pInputAssemblyState = meshPath ? null : &inputAssembly,
+                // No meshPath branch needed: the pStages-02095 guard above
+                // guarantees _tessControl == null whenever meshPath is true.
                 pTessellationState  = _tessControl != null ? &tessellation : null,
                 pViewportState      = &viewportState,
                 pRasterizationState = &rasterization,
@@ -621,6 +862,22 @@ public unsafe ref struct GraphicsPipelineBuilder
         }
         return new GraphicsPipeline(raw, _layout, _device.Handle);
     }
+
+    /// <summary>
+    /// Returns the VUID suffix a mesh pipeline would violate by declaring
+    /// <paramref name="state"/> dynamic, or <see langword="null"/> when the
+    /// state is legal on the mesh path. Cold: only called from
+    /// <see cref="Build"/>'s setup-time guard scan.
+    /// </summary>
+    private static string? MeshForbiddenDynamicStateVuid(VkDynamicState state) => state switch
+    {
+        VkDynamicState.VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY            => "pDynamicStates-07065",
+        VkDynamicState.VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE   => "pDynamicStates-07065",
+        VkDynamicState.VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE      => "pDynamicStates-07066",
+        VkDynamicState.VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT      => "pDynamicStates-07066",
+        VkDynamicState.VK_DYNAMIC_STATE_VERTEX_INPUT_EXT              => "pDynamicStates-07067",
+        _                                                             => null,
+    };
 
     private static VkPipelineShaderStageCreateInfo ShaderStage(
         VkShaderStageFlagBits stage,

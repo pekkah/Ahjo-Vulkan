@@ -49,10 +49,16 @@ public sealed unsafe class Device : IDisposable
     private  static readonly List<WeakReference<Device>> s_live     = [];
     private  static readonly object                      s_liveLock = new();
 
-    internal Device(VkDevice_T* handle, PhysicalDevice physicalDevice, Queue[] queues)
+    internal Device(
+        VkDevice_T*            handle,
+        PhysicalDevice         physicalDevice,
+        Queue[]                queues,
+        ReadOnlySpan<Utf8Name> enabledExtensions)
     {
         Handle         = handle;
-        Functions      = new DeviceFunctionTable(handle);
+        // The span is consumed here and never stored — a ReadOnlySpan field
+        // in a class would not compile, which is the enforcement.
+        Functions      = new DeviceFunctionTable(handle, enabledExtensions);
         PhysicalDevice = physicalDevice;
         _queues        = queues;
 
