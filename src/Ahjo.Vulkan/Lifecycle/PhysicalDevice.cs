@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Ahjo.Vulkan.Native;
@@ -81,6 +82,65 @@ public sealed unsafe class PhysicalDevice
     }
 
     /// <summary>
+    /// <see langword="true"/> when this GPU advertises the named <b>device</b>
+    /// extension. The after-the-picker counterpart to
+    /// <see cref="PhysicalDeviceInfo.SupportsExtension"/>, which is only
+    /// reachable inside <see cref="Instance.PickPhysicalDevice"/> because
+    /// <see cref="PhysicalDeviceInfo"/> is a <c>ref struct</c> that cannot
+    /// escape the callback.
+    /// </summary>
+    /// <remarks>
+    /// Setup-time: issues <c>vkEnumerateDeviceExtensionProperties</c> on every
+    /// call and caches nothing, the same policy as
+    /// <see cref="GetMemoryLimits"/> and <c>Device.TimestampPeriod</c>. Rents
+    /// its scratch from <see cref="ArrayPool{T}.Shared"/> and returns it, the
+    /// same shape as <see cref="Instance.IsExtensionSupported(ReadOnlySpan{byte})"/>.
+    /// An empty name answers <see langword="false"/> — the capability answer,
+    /// not an error.
+    /// </remarks>
+    /// <param name="utf8ExtensionName">
+    /// The extension name as UTF-8 bytes, without the trailing NUL (a
+    /// <c>"…"u8</c> literal).
+    /// </param>
+    public bool SupportsExtension(ReadOnlySpan<byte> utf8ExtensionName)
+    {
+        if (utf8ExtensionName.IsEmpty) return false;
+
+        uint count = 0;
+        Vk.vkEnumerateDeviceExtensionProperties(Handle, null, &count, null).ThrowIfErrored();
+        if (count == 0) return false;
+
+        var pool = ArrayPool<VkExtensionProperties>.Shared;
+        var buf  = pool.Rent((int)count);
+        try
+        {
+            fixed (VkExtensionProperties* p = buf)
+            {
+                Vk.vkEnumerateDeviceExtensionProperties(Handle, null, &count, p).ThrowIfErrored();
+                for (int i = 0; i < (int)count; i++)
+                {
+                    if (PhysicalDeviceInfo.NameEquals((sbyte*)&p[i].extensionName.e0, utf8ExtensionName))
+                        return true;
+                }
+            }
+        }
+        finally { pool.Return(buf); }
+
+        return false;
+    }
+
+    /// <inheritdoc cref="SupportsExtension(ReadOnlySpan{byte})"/>
+    /// <param name="extension">
+    /// The extension name as a process-lifetime <see cref="Utf8Name"/> — e.g.
+    /// <see cref="VulkanExtensions.ExtMeshShader"/>. A null name answers
+    /// <see langword="false"/>.
+    /// </param>
+    public bool SupportsExtension(Utf8Name extension)
+        => !extension.IsNull
+           && SupportsExtension(
+               MemoryMarshal.CreateReadOnlySpanFromNullTerminated((byte*)extension.Ptr));
+
+    /// <summary>
     /// Creates a Vulkan device with the wrapper's default feature set
     /// (<c>synchronization2</c>, <c>dynamicRendering</c>,
     /// <c>timelineSemaphore</c>, <c>bufferDeviceAddress</c>,
@@ -140,6 +200,239 @@ public sealed unsafe class PhysicalDevice
             NonCoherentAtomSize = props.limits.nonCoherentAtomSize,
             MaxMemoryAllocationCount = props.limits.maxMemoryAllocationCount,
         };
+    }
+
+    // ---- Chained property queries ----
+
+    /// <summary>
+    /// Reads one <c>VkPhysicalDeviceProperties2</c> <c>pNext</c> extension
+    /// struct, but only when this GPU advertises
+    /// <paramref name="utf8ExtensionName"/>.
+    /// </summary>
+    /// <typeparam name="T">
+    /// The properties struct to read. The
+    /// <c>IChainable&lt;VkPhysicalDeviceProperties2&gt;</c> constraint is
+    /// generated from <c>vk.xml</c>'s <c>structextends</c> attribute, so a
+    /// struct Vulkan does not permit on this chain root is a <b>compile</b>
+    /// error, and <c>sType</c> is written from <c>T.SType</c> — the caller
+    /// never supplies one and structurally cannot supply a wrong one.
+    /// </typeparam>
+    /// <param name="utf8ExtensionName">
+    /// The device extension that owns <typeparamref name="T"/>, as UTF-8 bytes
+    /// (a <c>"…"u8</c> literal).
+    /// </param>
+    /// <param name="properties">
+    /// The filled struct on <see langword="true"/>; <c>default</c> on
+    /// <see langword="false"/>.
+    /// </param>
+    /// <returns>
+    /// <see langword="true"/> when the gate passed and the driver filled the
+    /// node.
+    /// </returns>
+    /// <remarks>
+    /// <para><b>What the gate means.</b> When the gate fails this returns
+    /// <see langword="false"/> and leaves <paramref name="properties"/> at
+    /// <c>default</c> <b>without</b> issuing the chained query at all. The
+    /// wrapper refuses to put an <c>sType</c> a driver may not recognise into a
+    /// <c>vkGetPhysicalDeviceProperties2</c> chain: the spec says
+    /// implementations must skip unrecognized <c>pNext</c> nodes, but real ICDs
+    /// have been observed not to — see the SwiftShader note in
+    /// <c>Instance.PickPhysicalDevice</c>, where an unrecognized
+    /// <c>VkPhysicalDeviceVulkan14Features</c> in a read-back chain produced
+    /// cumulative state damage and later SIGSEGVs in unrelated entry points. A
+    /// <see langword="false"/> result therefore means "not supported", never
+    /// "supported but zero".</para>
+    /// <para><b>Which overload to use.</b> An extension-only struct
+    /// (<c>VkPhysicalDeviceMeshShaderPropertiesEXT</c>,
+    /// <c>VkPhysicalDeviceAccelerationStructurePropertiesKHR</c>) takes the
+    /// name overloads. A core-promoted struct
+    /// (<c>VkPhysicalDeviceVulkan11Properties</c> …
+    /// <c>VkPhysicalDeviceVulkan14Properties</c>) takes
+    /// <see cref="TryGetProperties{T}(VulkanVersion, out T)"/>; there is no
+    /// extension to name. A struct that is <i>both</i> — e.g.
+    /// <c>VkPhysicalDeviceDriverProperties</c>, from
+    /// <c>VK_KHR_driver_properties</c> and promoted to Vulkan 1.2 — also takes
+    /// the version overload, because a device that supports it through core
+    /// promotion is not required to keep advertising the extension.</para>
+    /// <para><b>Cost.</b> Setup-time, and nothing is cached. The
+    /// <see cref="TryGetProperties{T}(VulkanVersion, out T)"/> overload issues
+    /// <b>two</b> native queries when the gate passes
+    /// (<c>vkGetPhysicalDeviceProperties</c> for the api version, then
+    /// <c>vkGetPhysicalDeviceProperties2</c>) and one when it fails; it
+    /// allocates nothing (one <c>stackalloc</c>). The name overloads issue
+    /// <b>three</b> when the gate passes —
+    /// <c>vkEnumerateDeviceExtensionProperties</c> twice (count, then fill)
+    /// inside <see cref="SupportsExtension(ReadOnlySpan{byte})"/>, then
+    /// <c>vkGetPhysicalDeviceProperties2</c> — and rent and return a pooled
+    /// array for the extension list. Same no-caching policy as
+    /// <see cref="GetMemoryLimits"/> and <c>Device.TimestampPeriod</c>. Not
+    /// for a per-frame path.</para>
+    /// <para>The returned struct's <c>pNext</c> is <see langword="null"/> by
+    /// construction — it is the chain tail — so nothing here hands the caller a
+    /// pointer into a dead stack frame.</para>
+    /// <para>Example:</para>
+    /// <code>
+    /// if (gpu.TryGetProperties&lt;VkPhysicalDeviceMeshShaderPropertiesEXT&gt;(
+    ///         VulkanExtensions.ExtMeshShader, out var raw))
+    ///     uint maxVerts = raw.maxMeshOutputVertices;
+    /// </code>
+    /// For that struct's per-draw workgroup bounds specifically, prefer the
+    /// typed projection <see cref="TryGetMeshShaderLimits"/>.
+    /// </remarks>
+    public bool TryGetProperties<T>(ReadOnlySpan<byte> utf8ExtensionName, out T properties)
+        where T : unmanaged, IChainable<VkPhysicalDeviceProperties2>
+    {
+        if (!SupportsExtension(utf8ExtensionName))
+        {
+            properties = default;
+            return false;
+        }
+
+        QueryChained(out properties);
+        return true;
+    }
+
+    /// <inheritdoc cref="TryGetProperties{T}(ReadOnlySpan{byte}, out T)"/>
+    /// <param name="extension">
+    /// The device extension that owns <typeparamref name="T"/>, as a
+    /// process-lifetime <see cref="Utf8Name"/> — e.g.
+    /// <see cref="VulkanExtensions.ExtMeshShader"/>. A null name gates out.
+    /// </param>
+    /// <param name="properties">
+    /// The filled struct on <see langword="true"/>; <c>default</c> on
+    /// <see langword="false"/>.
+    /// </param>
+    public bool TryGetProperties<T>(Utf8Name extension, out T properties)
+        where T : unmanaged, IChainable<VkPhysicalDeviceProperties2>
+    {
+        if (extension.IsNull)
+        {
+            properties = default;
+            return false;
+        }
+
+        return TryGetProperties(
+            MemoryMarshal.CreateReadOnlySpanFromNullTerminated((byte*)extension.Ptr),
+            out properties);
+    }
+
+    /// <inheritdoc cref="TryGetProperties{T}(ReadOnlySpan{byte}, out T)"/>
+    /// <param name="minimumApiVersion">
+    /// The core Vulkan version that promoted <typeparamref name="T"/> — the
+    /// version whose header <i>defines</i> the struct, which is not always the
+    /// version its name suggests: <c>VkPhysicalDeviceVulkan11Properties</c> is
+    /// Vulkan <b>1.2</b>, because the "11" names the feature set it
+    /// aggregates. The gate is this GPU's
+    /// <c>VkPhysicalDeviceProperties.apiVersion</c>, read with a plain
+    /// (un-chained) <c>vkGetPhysicalDeviceProperties</c>.
+    /// <para>The gate reads the <b>device</b> api version only. It assumes the
+    /// <see cref="Instance"/> this GPU came from was itself created at
+    /// <paramref name="minimumApiVersion"/> or above —
+    /// <c>vkGetPhysicalDeviceProperties2</c> is an instance-scope entry point,
+    /// and the validation layer's stateless <c>pNext</c> checks for
+    /// physical-device commands key off the <i>instance</i> version. The
+    /// default satisfies this
+    /// (<see cref="InstanceDescription.ApiVersion"/> defaults to
+    /// <c>V1_4</c>); a caller who deliberately lowers it is responsible for
+    /// not querying above it.</para>
+    /// </param>
+    /// <param name="properties">
+    /// The filled struct on <see langword="true"/>; <c>default</c> on
+    /// <see langword="false"/>.
+    /// </param>
+    public bool TryGetProperties<T>(VulkanVersion minimumApiVersion, out T properties)
+        where T : unmanaged, IChainable<VkPhysicalDeviceProperties2>
+    {
+        if (ReadApiVersion() < minimumApiVersion.Packed)
+        {
+            properties = default;
+            return false;
+        }
+
+        QueryChained(out properties);
+        return true;
+    }
+
+    /// <summary>
+    /// The gate-free two-node query: root + <typeparamref name="T"/>, one
+    /// <c>vkGetPhysicalDeviceProperties2</c>, copy the node out by value.
+    /// Private because calling it without a gate is exactly the hazard the
+    /// public overloads exist to prevent.
+    /// </summary>
+    /// <remarks>
+    /// The scratch is sized from two compile-time-known struct sizes plus 16
+    /// bytes — two 8-byte absolute-address pads, one per node, per
+    /// <c>ChainBuilder.Reserve</c>. ILC constant-folds both size terms per
+    /// instantiation. No <c>Clear()</c> is needed: <c>Reserve</c> zeroes each
+    /// slot before <c>WriteHeader</c> runs.
+    /// </remarks>
+    private void QueryChained<T>(out T properties)
+        where T : unmanaged, IChainable<VkPhysicalDeviceProperties2>
+    {
+        Span<byte> scratch = stackalloc byte[
+            sizeof(VkPhysicalDeviceProperties2) + Unsafe.SizeOf<T>() + 16];
+
+        var chain = ChainBuilder.For<VkPhysicalDeviceProperties2>(scratch);
+        chain.Root();
+        ref T node = ref chain.Push<T>();
+        Vk.vkGetPhysicalDeviceProperties2(Handle, chain.Head);
+        properties = node;
+    }
+
+    /// <summary>
+    /// The <c>VkPhysicalDeviceMeshShaderPropertiesEXT</c> workgroup bounds a
+    /// <see cref="CommandRecorder.DrawMeshTasks"/> dispatch must obey, as a
+    /// flat <see cref="MeshShaderLimits"/>.
+    /// </summary>
+    /// <param name="limits">
+    /// The projection on <see langword="true"/>; <c>default</c> on
+    /// <see langword="false"/>.
+    /// </param>
+    /// <returns>
+    /// <see langword="false"/> when this GPU does not advertise
+    /// <c>VK_EXT_mesh_shader</c>.
+    /// </returns>
+    /// <remarks>
+    /// <see langword="false"/> means the <b>physical device</b> does not
+    /// advertise the extension. It does <b>not</b> mean the extension was
+    /// enabled on any <see cref="Device"/> — this is a physical-device query,
+    /// and the limits are deliberately readable before
+    /// <see cref="CreateDevice"/> so a caller can size its dispatch while it is
+    /// still choosing a GPU. To actually record a mesh draw, pass
+    /// <see cref="VulkanExtensions.ExtMeshShader"/> in
+    /// <see cref="DeviceDescription.Extensions"/> and enable the
+    /// <c>meshShader</c> feature as well.
+    /// <para><b>Cost.</b> The name-gated
+    /// <see cref="TryGetProperties{T}(ReadOnlySpan{byte}, out T)"/> path:
+    /// three native queries when the extension is present
+    /// (<c>vkEnumerateDeviceExtensionProperties</c> twice, then
+    /// <c>vkGetPhysicalDeviceProperties2</c>), two when it is not, and no
+    /// caching. Setup-time — read it once and keep the struct.</para>
+    /// </remarks>
+    public bool TryGetMeshShaderLimits(out MeshShaderLimits limits)
+    {
+        if (!TryGetProperties<VkPhysicalDeviceMeshShaderPropertiesEXT>(
+                DeviceExtensionNames.MeshShader, out var p))
+        {
+            limits = default;
+            return false;
+        }
+
+        limits = new MeshShaderLimits
+        {
+            MaxTaskWorkGroupCountX      = p.maxTaskWorkGroupCount[0],
+            MaxTaskWorkGroupCountY      = p.maxTaskWorkGroupCount[1],
+            MaxTaskWorkGroupCountZ      = p.maxTaskWorkGroupCount[2],
+            MaxTaskWorkGroupTotalCount  = p.maxTaskWorkGroupTotalCount,
+            MaxTaskWorkGroupInvocations = p.maxTaskWorkGroupInvocations,
+
+            MaxMeshWorkGroupCountX      = p.maxMeshWorkGroupCount[0],
+            MaxMeshWorkGroupCountY      = p.maxMeshWorkGroupCount[1],
+            MaxMeshWorkGroupCountZ      = p.maxMeshWorkGroupCount[2],
+            MaxMeshWorkGroupTotalCount  = p.maxMeshWorkGroupTotalCount,
+            MaxMeshWorkGroupInvocations = p.maxMeshWorkGroupInvocations,
+        };
+        return true;
     }
 
     public Device CreateDevice(in DeviceDescription desc)
@@ -287,7 +580,7 @@ public sealed unsafe class PhysicalDevice
         try
         {
             Queue[] queues = new Queue[totalQueues];
-            var device = new Device(raw, physicalDevice: this, queues);
+            var device = new Device(raw, physicalDevice: this, queues, desc.Extensions);
             int qSlot = 0;
             for (int i = 0; i < desc.Queues.Length; i++)
             {
@@ -340,6 +633,20 @@ public sealed unsafe class PhysicalDevice
                     $"VkDeviceCreateInfo pNext chain contains duplicate sType {a->sType}; the Vulkan spec disallows two structs of the same type in a single chain.{hint}");
             }
         }
+    }
+
+    /// <summary>
+    /// Packed <c>VkPhysicalDeviceProperties.apiVersion</c>, read into a stack
+    /// struct. Deliberately the un-chained
+    /// <c>vkGetPhysicalDeviceProperties</c>: this is the call that decides
+    /// whether a node is safe to put in a <c>VkPhysicalDeviceProperties2</c>
+    /// chain at all, so it cannot itself use one.
+    /// </summary>
+    private uint ReadApiVersion()
+    {
+        VkPhysicalDeviceProperties props;
+        Vk.vkGetPhysicalDeviceProperties(Handle, &props);
+        return props.apiVersion;
     }
 
     private void ValidateQueues(ReadOnlySpan<QueueRequest> queues)

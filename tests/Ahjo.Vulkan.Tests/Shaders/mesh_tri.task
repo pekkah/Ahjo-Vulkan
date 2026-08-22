@@ -1,0 +1,12 @@
+#version 450
+#extension GL_EXT_mesh_shader : require
+
+// Minimal amplification stage: one workgroup in, one mesh workgroup out.
+// Exists so the builder's task+mesh path has a real SPIR-V module to feed
+// vkCreateGraphicsPipelines; it adds no amplification of its own.
+
+layout(local_size_x = 1) in;
+
+void main() {
+    EmitMeshTasksEXT(1, 1, 1);
+}

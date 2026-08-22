@@ -50,6 +50,16 @@ public static class VulkanExtensions
     /// <see cref="Swapchain"/> creation and present.</summary>
     public static Utf8Name KhrSwapchain => Utf8Name.FromLiteral("VK_KHR_swapchain"u8);
 
+    /// <summary>VK_EXT_mesh_shader — device-level. Enables
+    /// <see cref="GraphicsPipelineBuilder.WithMeshStages"/> /
+    /// <see cref="GraphicsPipelineBuilder.WithTaskStage"/> and the
+    /// <see cref="CommandRecorder.DrawMeshTasks"/> family. Pair it with the
+    /// <c>meshShader</c> (and, for a task stage, <c>taskShader</c>) feature via
+    /// <see cref="DeviceDescription.ConfigureFeatures"/> pushing
+    /// <c>VkPhysicalDeviceMeshShaderFeaturesEXT</c> — the extension alone is not
+    /// enough.</summary>
+    public static Utf8Name ExtMeshShader => Utf8Name.FromLiteral(DeviceExtensionNames.MeshShader);
+
     /// <summary>VK_KHR_external_memory_win32 — device-level. Enable to
     /// export a <c>VkDeviceMemory</c> as a Win32 <c>HANDLE</c> for cross-API
     /// GPU interop (e.g. an <see cref="ExportableImage"/> imported by a

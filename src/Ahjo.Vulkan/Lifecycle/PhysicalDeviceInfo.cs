@@ -79,7 +79,16 @@ public readonly ref struct PhysicalDeviceInfo
         return false;
     }
 
-    private static unsafe bool NameEquals(sbyte* name, ReadOnlySpan<byte> target)
+    /// <summary>
+    /// Compares a NUL-terminated UTF-8 name against a literal. <c>internal</c>
+    /// rather than <c>private</c> because
+    /// <see cref="PhysicalDevice.SupportsExtension(ReadOnlySpan{byte})"/> asks
+    /// the same question after the picker callback has returned; sharing this
+    /// one keeps the repo at the two copies it already has
+    /// (the other is <c>Instance.PointerStringEquals</c>) instead of gaining a
+    /// third.
+    /// </summary>
+    internal static unsafe bool NameEquals(sbyte* name, ReadOnlySpan<byte> target)
     {
         for (int i = 0; i < target.Length; i++)
         {

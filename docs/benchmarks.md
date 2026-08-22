@@ -24,7 +24,7 @@ dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*Chain
 
 # Driver-bound: needs a real Vulkan ICD on the host. Fails at GlobalSetup
 # if the host cannot create a VkInstance.
-dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*FrameRing*|*PushDescriptors*|*PipelineBarrier*|*CommandRecorder*|*BufferBenchmarks*"
+dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*FrameRing*|*PushDescriptors*|*PipelineBarrier*|*CommandRecorder*|*BufferBenchmarks*|*MeshShader*"
 ```
 
 `BenchmarkDotNet.Artifacts/` is gitignored — the run produces CSV / Markdown
@@ -59,9 +59,18 @@ Captured on:
 - **Vulkan**: instance v1.4.341 (vulkaninfo)
 
 The table is **not a single capture**. The four `PipelineBarrier.*` rows were
-recaptured for #155 on .NET 10.0.8 (SDK 10.0.204) / Windows 11 10.0.26200.8894
-with an NVIDIA RTX 4070 Ti; the `HandleOwnership.*` rows came from a Linux
-container. Rows are comparable to their own successors, not to each other —
+first recaptured for #155 on .NET 10.0.8 (SDK 10.0.204) / Windows 11
+10.0.26200.8894 with an NVIDIA RTX 4070 Ti, and **recaptured again for #201**
+on Windows 11 10.0.26200.9168 with the same RTX 4070 Ti after the
+recorder-disposal fix described in their row notes (minimum of 5 post-fix runs,
+against 3 pre-fix control runs in the same session); the five `MeshShader.*`
+rows were captured for #201 on .NET 10.0.8 (SDK 10.0.204) / Windows 11
+10.0.26200.9168 with the same RTX 4070 Ti
+(`Build_MeshPipeline_WithSpecialization` last, in the review-fix pass, on the
+same host and toolchain — the other four re-read 16.15 / 21.88 / 24.23 ns and
+36.13 µs on that pass's single confirming run, all within their recorded
+spreads, so they were left at their minimum-of-N figures); the `HandleOwnership.*` rows came
+from a Linux container. Rows are comparable to their own successors, not to each other —
 re-measure the row you care about before drawing a conclusion from it.
 
 ## Baseline
@@ -76,14 +85,19 @@ managed-byte count BDN's `MemoryDiagnoser` reports; `-` is zero.
 | `Buffer.AsSpan_SequentialWrite`                 |   1.85 ns  |        -  | One `AsSpan<T>` + one sequential `int` store per op; one invoke = one 4 KiB sequential fill of a `HostAccessSequentialWrite` allocation. |
 | `Buffer.AsSpan_WriteThenRead_SeqWriteAlloc`     | 173.4 ns   |        -  | #157 probe, **not a wrapper canary**: store + read-back of the same element on a `HostAccessSequentialWrite` allocation. This is the former `Buffer.Map_AsSpan` (166.8 ns) renamed — the number did not change. |
 | `Buffer.AsSpan_WriteThenRead_RandomAlloc`       |   1.53 ns  |        -  | #157 probe, **not a wrapper canary**: identical body on a `HostAccessRandom` allocation. Only the ratio against the row above carries information. |
-| `CommandBufferPool.Frame_Begin_100Cmds_End_Reset` | 6.44 µs |        -  | Begin → 100 dynamic-state + fill commands → End → ResetForFrame.          |
+| `CommandBufferPool.Frame_Begin_100Cmds_End_Reset` | 6.44 µs |        -  | Begin → **300** commands → End → ResetForFrame. The name counts loop iterations, not commands: the body is 100 × (`SetViewport` + `SetScissor` + `FillBuffer`) (`CommandBufferPoolBenchmarks.cs:77-82`). No `OperationsPerInvoke`, so the Mean is the whole cycle. |
 | `CommandRecorder.RenderingPass100Cmds`          |   3.23 µs  |        -  | BeginRendering → 100 SetViewport → EndRendering, dynamic rendering path.  |
 | `CommandRecorder.CopyBuffer_8Regions`           | 810.0 ns   |        -  | #141 canary: multi-region CopyBuffer; stackalloc ≤16 path stays 0 B/op.   |
 | `CommandRecorder.CopyBuffer_24Regions`          |   1.57 µs  |        -  | #141 canary: multi-region CopyBuffer; ArrayPool >16 path stays 0 B/op.    |
-| `PipelineBarrier.SingleImageTransition`         | 178.8 ns   |        -  | One `vkCmdPipelineBarrier2` with a single image barrier. Recaptured for #155 — see the split-barrier caveat. |
-| `PipelineBarrier.LargeBatch_8x8x1`              |   2.80 µs  |        -  | One `vkCmdPipelineBarrier2` with 64 image barriers. Recaptured for #155 — **minimum of 5 runs**; strongly bimodal (median 3.61 µs, range 2.80–4.61 µs), so compare minima across ≥3 runs, not single samples. |
-| `PipelineBarrier.SetWaitEventPair_SingleImage`  | 260.7 ns   |        -  | #155 canary: one `vkCmdSetEvent2` + `vkCmdWaitEvents2` pair, one image barrier each. Recording only, never submitted. |
-| `PipelineBarrier.ResetEvent_Single`             |  33.4 ns   |        -  | #155 canary: one `vkCmdResetEvent2` — bare stage-mask pass-through, no dependency marshalling. |
+| `MeshShader.DrawMeshTasks_1024`                 |  15.49 ns  |        -  | #201 canary: `vkCmdDrawMeshTasksEXT` × 1024 inside one BeginRendering scope with a mesh pipeline bound. Pointer load + unconditional null test + native call; the null test is not behind `AhjoValidation`, so it is measured here rather than compiled away. Recording only, never submitted. **Minimum of 5 runs** (15.49 / 15.52 / 15.53 ns on the three quiet runs; two noisy runs read 23.2 and 24.9 ns with every row in the same run elevated). Needs `VK_EXT_mesh_shader` — see the driver-dependency caveat. Includes the per-invoke bracket; see the note below the table. |
+| `MeshShader.DrawMeshTasksIndirect_1024`         |  21.43 ns  |        -  | #201 canary: `vkCmdDrawMeshTasksIndirectEXT` × 1024 with `drawCount: 1`, `stride: 12`. `drawCount` is 1 on purpose — above 1 needs the `multiDrawIndirect` feature (VUID-vkCmdDrawMeshTasksIndirectEXT-drawCount-02718), which would narrow the host requirement for no wrapper-side difference. **Minimum of 5 runs** (range 21.43–24.43 ns). Includes the per-invoke bracket; see the note below the table. |
+| `MeshShader.DrawMeshTasksIndirectCount_1024`    |  23.20 ns  |        -  | #201 canary: `vkCmdDrawMeshTasksIndirectCountEXT` × 1024 with `maxDrawCount: 1`, `stride: 12` — Ahjo's actual shape (compute writes the count, raster reads it). **Minimum of 5 runs** (range 23.20–24.05 ns, StdDev 0.04–0.90 ns). Was 34.52 ns and strongly bimodal (BDN mValue 3.33) when first captured, before the recorder-disposal fix — the recorder was disposed *after* `ResetForFrame` rather than before, so the command buffer never made it back to `_idle` and the pool settled into alternating two buffers instead of re-recording one. **What the fix is credited with is the bimodality, not the mean.** The bimodality claim is well-evidenced: mValue 3.33 pre-fix, not flagged in any of the 5 post-fix runs, with the StdDev collapsing to 0.04–0.90 ns. The **mean** shift is not: 34.52 ns came from a different session on Windows 11 10.0.26200.8894, and the same host drift moved `PipelineBarrier.SingleImageTransition` from 178.8 to 143.9 ns — a 20% drop with **no code change at all** (see that row). An unknown share of 34.52 → 23.20 is therefore drift, and a clean pre-fix control is no longer recoverable (this file's benchmark body also gained `SetViewport`/`SetScissor` since, which changes what is measured) — so do not try to reconstruct one. The minimum-of-5 discipline is retained rather than re-argued. Needs `VK_EXT_mesh_shader` **and** the `drawIndirectCount` feature (VUID-vkCmdDrawMeshTasksIndirectCountEXT-None-04445) — the wrapper does not enable the latter by default. |
+| `MeshShader.Build_MeshPipeline`                 |  35.44 µs  |        -  | #201: `vkCreateGraphicsPipelines` for the **widest** mesh shape — task + mesh + fragment — so the builder's `VK_SHADER_STAGE_TASK_BIT_EXT` emission and the mesh path's extra four `fixed` statements are measured, not just compiled. Setup-time, not per-frame; the row exists for the allocation column. **Minimum of 9 runs** (range 35.44–37.18 µs). `-` on 8 of those 9; one run reported `1 B`, **not attributable to the measured body**, which is allocation-free both by inspection (stage array, blend and dynamic-state spans are all `stackalloc`, every array goes through `fixed`, and `GraphicsPipeline` is a `readonly unsafe struct` so `using var` does not box) and by assertion — `MeshShaderTests.MeshPipeline_Build_IsZeroAllocation` measures `GC.GetAllocatedBytesForCurrentThread()` across 128 of exactly this chain and asserts a zero delta. (`1 B/op` at `OperationsPerInvoke = 1` and ~35 µs/op would mean ~10–20 KB inside one iteration, i.e. hundreds of objects, not one stray allocation; whatever it was, it was not this code.) Treat a *reproducible* non-`-` here as a real regression. Deliberately not on `GraphicsPipelineBuilderBenchmarks`: that class is the #44 canary and must keep running on hosts with no mesh support. Additionally needs the `taskShader` feature, which is advertised independently of `meshShader`. |
+| `MeshShader.Build_MeshPipeline_WithSpecialization` |  35.55 µs  |        -  | #201: `Build_MeshPipeline` plus **mesh and task** specialization, so the mesh path's `_meshSpecEntries` / `_taskSpecEntries` `fixed` statements are measured in their non-empty form — without this row two of the four extra `fixed` statements only ever run over a null array. The `SpecializationInfo<T>` values are stack locals (the wrapper stores a raw pointer to the caller's storage, so a field on the benchmark instance would be unpinned); the per-`T` map-entry array is cached statically and warmed in `[GlobalSetup]`, the `SpecializationInfo.Build_WithSpecialization` shape. `mesh_tri.task` declares no spec constants — an unused `constantID` is a spec-defined no-op, which is what lets one fixture drive both stages. **Minimum of 5 runs** (35.55 / 36.31 / 36.63 / 37.37 µs on the four quiet runs; one noisy run read 48.14 µs with StdDev 8.28 µs), `-` on all five. Sits within `Build_MeshPipeline`'s own spread, which is the expected result: two extra non-null `fixed` statements and two 4-byte `pData` blocks are not measurable against a 35 µs `vkCreateGraphicsPipelines`. The row exists for the allocation column, not the Mean. Same `taskShader` requirement as the row above. |
+| `PipelineBarrier.SingleImageTransition`         | 143.9 ns   |        -  | One `vkCmdPipelineBarrier2` with a single image barrier. Recaptured for #201 — **minimum of 5 runs** (143.9 / 144.6 / 144.7 / 147.1 / 165.7 ns). Was 178.8 ns at #155; see the split-barrier caveat and the recorder-disposal note on the row below. |
+| `PipelineBarrier.LargeBatch_8x8x1`              |   2.72 µs  |        -  | One `vkCmdPipelineBarrier2` with 64 image barriers. Recaptured for #201 — **minimum of 5 runs** (2.718 / 2.728 / 2.743 / 2.748 / 2.768 µs, every run BDN-unimodal at MValue 2). **The bimodality this row used to document is gone, but not because of the fix in the same commit.** The class had the `ResetForFrame()`-before-recorder-`Dispose()` ordering bug (#188/#199 shape) in all four of its methods and it was fixed here — but three pre-fix control runs in the same session read 2.716 / 2.755 / 2.780 µs, i.e. already tight and already below the old 2.80 µs figure. Fix and control are within each other's noise, so the fix cost nothing and bought nothing measurable at this scale. **What the bad ordering costs is pool state, not per-invoke work**: it grows **one** extra `VkCommandBuffer`, not one per invoke — the pool settles into ping-ponging two buffers after the second invoke (`Pools/CommandBufferPool.cs:98-118`, `:155-159`, `:168-178`). That one-off allocation is amortized across millions of ops and is therefore invisible at *every* scale; it is not why the fix showed up on one row and not another. The part that is per-invoke and steady-state is the **ping-pong itself**: post-fix one buffer is re-recorded every invoke, pre-fix two alternate, so each invoke records into driver-side memory last touched two invokes ago. That is a recurring locality cost, and it scales with how much of the measurement is recording. Here it is invisible because 2.7 µs of driver per-barrier work for 64 barriers dominates any locality delta by two orders of magnitude, and because this method records 256 commands per invoke against `MeshShader.DrawMeshTasksIndirectCount_1024`'s 1024 — that row, where recording is nearly the whole measurement, is where two-buffers-in-rotation can plausibly show as the two-mode signature it lost. The old "strongly bimodal, median 3.61 µs, range 2.80–4.61 µs" reading is therefore **host/driver drift since #155, unexplained**, not something this branch repaired — keep comparing minima across ≥3 runs until a run reproduces the wide spread and identifies it. |
+| `PipelineBarrier.SetWaitEventPair_SingleImage`  | 247.1 ns   |        -  | #155 canary: one `vkCmdSetEvent2` + `vkCmdWaitEvents2` pair, one image barrier each. Recording only, never submitted. Recaptured for #201 — **minimum of 5 runs** (247.1–257.2 ns); was 260.7 ns. |
+| `PipelineBarrier.ResetEvent_Single`             |  33.3 ns   |        -  | #155 canary: one `vkCmdResetEvent2` — bare stage-mask pass-through, no dependency marshalling. Recaptured for #201 — **minimum of 5 runs**; unchanged from the #155 figure (33.4 → 33.3 ns), and unchanged by the recorder-disposal fix (pre-fix control minimum 33.25 ns). One of the five runs read 46.7 ns with MValue 3.76 — a noisy run, not a mode. |
 | `FrameRing.Frame_Begin_Submit_Wait`             |  56.20 µs  |        -  | Full headless frame: BeginFrame → submit no-op cmd → wait fence.          |
 | `PushDescriptors.PushDescriptors_StorageBuffer` |  69.34 ns  |        -  | `vkCmdPushDescriptorSetWithTemplate` × 1024 in one Begin/End scope; bimodal under driver overhead. |
 | `BindDescriptorSets.Bind_1Set`                  | n/m        |        -  | #188 canary: `vkCmdBindDescriptorSets` with one set × 1024 in one Begin/End scope — the common per-draw bind. The single handle is copied into a `stackalloc nint[1]` (the recorder's `<= 32` branch), so no managed allocation. **Mean not yet captured** — the authoring host had no Vulkan ICD; the `-` is from static analysis of the stackalloc branch and must be confirmed on the first measured run. |
@@ -102,7 +116,9 @@ managed-byte count BDN's `MemoryDiagnoser` reports; `-` is zero.
 **Reading the Mean column.** Many benchmarks here unroll an inner loop and
 declare `OperationsPerInvoke` (e.g. `Buffer.AsSpan_*`, `PipelineBarrier.*`,
 `PushDescriptors.*`, `PushConstants.*`, `SyncPool.*`, `ResultPolicy.*`,
-`HandleOwnership.*`, `DescriptorSetPool.*` — not an exhaustive list). When it
+`HandleOwnership.*`, `DescriptorSetPool.*`, `MeshShader.DrawMeshTasks*` — not an
+exhaustive list; the two `MeshShader.Build_MeshPipeline*` rows are one build
+per op and set none). When it
 is set, **BDN has already divided: the reported Mean and Allocated are
 per-operation. Do not divide by the loop count again.** Earlier revisions of
 this table carried `"166.8 ns / 1024 ops ≈ 0.16 ns/op"`-style tails that did
@@ -111,6 +127,34 @@ and have been removed without re-running, since the BDN Means they annotated
 were already the correct per-call numbers. For
 `PipelineBarrier.SetWaitEventPair_SingleImage` one operation is one Set+Wait
 **pair**, i.e. two recorded commands.
+
+**The per-invoke bracket is inside the mean.** The three
+`MeshShader.DrawMeshTasks*` rows each record `Begin` → `BeginRendering` →
+`BindPipeline` → `SetViewport` → `SetScissor` → 1024 draws → `EndRendering` →
+`End` → `ResetForFrame`, and `OperationsPerInvoke = 1024` divides *all* of that
+by 1024 — so the bracket is a real component of a ~15–24 ns figure, not an
+error bar. A bound on its size, from
+`CommandRecorder.RenderingPass100Cmds` (3.23 µs for
+Begin → BeginRendering → 100 × SetViewport → EndRendering → End → ResetForFrame,
+`CommandRecorderBenchmarks.cs:9-10`): the mesh bracket nests inside that shape
+except for `BindPipeline` — same `Begin`/`End`/`ResetForFrame`, same
+`BeginRendering`/`EndRendering` pair, and 100 `SetViewport`s more than cover the
+bracket's one `SetViewport` + one `SetScissor`. So the bracket is
+**under ~3.3 ns/op here, plus one `BindPipeline`**. The row this note used to
+cite — `CommandBufferPool.Frame_Begin_100Cmds_End_Reset`, 6.44 µs — is not a
+bound: it records 300 commands, not 100, and contains neither a
+`BeginRendering`/`EndRendering` pair nor a `BindPipeline`, so its shape is not a
+superset and "strictly less" was unearned. If you want a bound that covers
+`BindPipeline` too without measuring it, the union of the two rows
+(6.44 + 3.23 µs over 1024 ops) puts the bracket under 9.5 ns/op. **The benchmarks are deliberately not
+changed to exclude it** — every unrolled row in this table carries its own
+bracket the same way, and the rows are regression canaries compared against
+themselves, so subtracting it would break comparability with every prior
+capture for no gain. `SetViewport`/`SetScissor` are part of that bracket
+because the pipeline takes the builder's default dynamic state and CoreChecks
+validates dynamic state at **record** time — recording the draws without them
+is `VUID-vkCmdDrawMeshTasksEXT-None-07831`/`-07832` whether or not the buffer
+is ever submitted.
 
 ## Caveats
 
@@ -128,6 +172,41 @@ were already the correct per-call numbers. For
   two more methods on `DescriptorSetPoolBenchmarks`, whose
   `AcquireReleaseReset_Cycle` (the #114 canary) must keep running on any host
   with an ICD.
+  `MeshShaderBenchmarks` is the same shape one step further: its
+  `[GlobalSetup]` needs a device that exposes `VK_EXT_mesh_shader` plus the
+  `meshShader` feature, `drawIndirectCount` for the indirect-count row, and
+  `taskShader` for the two `Build_MeshPipeline*` rows — `taskShader` is advertised
+  independently of `meshShader`, so a mesh-only device fails
+  `vkCreateDevice` with `VK_ERROR_FEATURE_NOT_PRESENT` here. That failure is
+  loud and intended; contrast `MeshShaderTests`, where the same request would
+  turn a partial-capability host into a silent skip of the whole mesh tier and
+  so is made per-test instead. The picker will find no physical device at all
+  without the extension. That is exactly why it is
+  its own class and not two more methods on `CommandRecorderBenchmarks`, whose
+  `RenderingPass100Cmds` is the #29 canary and must keep running on any host
+  with an ICD — mesh-capable or not.
+- **No row for the physical-device property queries, deliberately.**
+  `PhysicalDevice.SupportsExtension`, `PhysicalDevice.TryGetProperties<T>` and
+  `PhysicalDevice.TryGetMeshShaderLimits` (plus the `MeshShaderLimits`
+  projection) are **setup-time**, not per-frame, and cache nothing. The
+  version-gated `TryGetProperties` issues two native queries when the gate
+  passes (`vkGetPhysicalDeviceProperties`, then
+  `vkGetPhysicalDeviceProperties2`); the name-gated overloads and
+  `TryGetMeshShaderLimits` issue three
+  (`vkEnumerateDeviceExtensionProperties` twice — count, then fill — then
+  `vkGetPhysicalDeviceProperties2`). `Lifecycle/` is not on the
+  zero-per-frame-allocation list in `src/Ahjo.Vulkan/CLAUDE.md`, and the two
+  closest existing accessors — `PhysicalDevice.GetMemoryLimits` and
+  `Device.TimestampPeriod` — have no rows here either. Accounting anyway, for
+  the record: the `VulkanVersion`-gated `TryGetProperties` overload allocates
+  nothing (one `stackalloc` sized from two compile-time struct sizes), and the
+  extension-gated overloads rent and return a pooled
+  `VkExtensionProperties[]` exactly as `Instance.IsExtensionSupported` does.
+  A native driver query is the wrong thing to have on a per-frame path
+  whatever its allocation profile, so the answer is "don't call it per frame",
+  not "benchmark it". Stated here and in
+  `.claude/agents/bench-coverage-checker.md` so it does not get re-litigated
+  on a later diff.
 - **Host reads are a memory-type property, not a wrapper property (#157)**:
   the old `Buffer.Map_AsSpan` row's 166.8 ns was a **host read** from the
   mapped allocation, not the cost of `AsSpan<T>`. The method
