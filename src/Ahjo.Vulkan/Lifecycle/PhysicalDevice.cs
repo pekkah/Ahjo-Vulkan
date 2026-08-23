@@ -277,7 +277,10 @@ public sealed unsafe class PhysicalDevice
     ///     uint maxVerts = raw.maxMeshOutputVertices;
     /// </code>
     /// For that struct's per-draw workgroup bounds specifically, prefer the
-    /// typed projection <see cref="TryGetMeshShaderLimits"/>.
+    /// typed projection <see cref="TryGetMeshShaderLimits"/>; for
+    /// <c>VkPhysicalDeviceAccelerationStructurePropertiesKHR</c>'s
+    /// scratch-alignment and capacity values, prefer
+    /// <see cref="TryGetAccelerationStructureLimits"/>.
     /// </remarks>
     public bool TryGetProperties<T>(ReadOnlySpan<byte> utf8ExtensionName, out T properties)
         where T : unmanaged, IChainable<VkPhysicalDeviceProperties2>
@@ -431,6 +434,62 @@ public sealed unsafe class PhysicalDevice
             MaxMeshWorkGroupCountZ      = p.maxMeshWorkGroupCount[2],
             MaxMeshWorkGroupTotalCount  = p.maxMeshWorkGroupTotalCount,
             MaxMeshWorkGroupInvocations = p.maxMeshWorkGroupInvocations,
+        };
+        return true;
+    }
+
+    /// <summary>
+    /// The <c>VkPhysicalDeviceAccelerationStructurePropertiesKHR</c> values an
+    /// acceleration-structure consumer has to obey — above all the
+    /// scratch-address alignment every
+    /// <see cref="CommandRecorder.BuildAccelerationStructures"/> must satisfy —
+    /// as a flat <see cref="AccelerationStructureLimits"/>.
+    /// </summary>
+    /// <param name="limits">
+    /// The projection on <see langword="true"/>; <c>default</c> on
+    /// <see langword="false"/>.
+    /// </param>
+    /// <returns>
+    /// <see langword="false"/> when this GPU does not advertise
+    /// <c>VK_KHR_acceleration_structure</c>.
+    /// </returns>
+    /// <remarks>
+    /// <see langword="false"/> means the <b>physical device</b> does not
+    /// advertise the extension. It does <b>not</b> mean the extension was
+    /// enabled on any <see cref="Device"/> — this is a physical-device query,
+    /// and the limits are deliberately readable before
+    /// <see cref="CreateDevice"/> so a caller can reject a GPU on
+    /// <see cref="AccelerationStructureLimits.MaxInstanceCount"/> while it is
+    /// still choosing one. To actually build an acceleration structure, enable
+    /// all three extensions and the three features —
+    /// <see cref="VulkanExtensions.KhrAccelerationStructure"/> carries the full
+    /// recipe.
+    /// <para><b>Cost.</b> The name-gated
+    /// <see cref="TryGetProperties{T}(ReadOnlySpan{byte}, out T)"/> path:
+    /// three native queries when the extension is present
+    /// (<c>vkEnumerateDeviceExtensionProperties</c> twice, then
+    /// <c>vkGetPhysicalDeviceProperties2</c>), two when it is not, and no
+    /// caching. Setup-time — read it once and keep the struct.</para>
+    /// </remarks>
+    public bool TryGetAccelerationStructureLimits(out AccelerationStructureLimits limits)
+    {
+        if (!TryGetProperties<VkPhysicalDeviceAccelerationStructurePropertiesKHR>(
+                DeviceExtensionNames.AccelerationStructure, out var p))
+        {
+            limits = default;
+            return false;
+        }
+
+        limits = new AccelerationStructureLimits
+        {
+            MinScratchOffsetAlignment = p.minAccelerationStructureScratchOffsetAlignment,
+            MaxGeometryCount          = p.maxGeometryCount,
+            MaxInstanceCount          = p.maxInstanceCount,
+            MaxPrimitiveCount         = p.maxPrimitiveCount,
+            MaxPerStageDescriptorAccelerationStructures =
+                p.maxPerStageDescriptorAccelerationStructures,
+            MaxDescriptorSetAccelerationStructures =
+                p.maxDescriptorSetAccelerationStructures,
         };
         return true;
     }

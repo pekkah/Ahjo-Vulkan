@@ -19,6 +19,13 @@ Don't use this for one-shot timing curiosity questions — BDN warmup + JIT tier
 
 The benchmark project is a normal exe; `--filter` accepts BDN glob syntax matched against the fully qualified `Namespace.Class.Method`.
 
+> **Multiple patterns are separate space-separated arguments, never pipe-joined.**
+> `--filter "*A*" "*B*"` is correct. `--filter "*A*|*B*"` is **not** a BDN
+> alternation — it is treated as one literal pattern, matches zero benchmarks,
+> prints the available-benchmarks list and **exits 0**. An empty run that looks
+> successful is the worst possible failure mode for an allocation canary, so
+> always confirm the summary table lists the rows you expected.
+
 | User says…                    | Filter                                           |
 |-------------------------------|--------------------------------------------------|
 | `chain builder`               | `*ChainBuilder*`                                 |
@@ -36,14 +43,21 @@ The benchmark project is a normal exe; `--filter` accepts BDN glob syntax matche
 | `result policy`               | `*ResultPolicy*`                                 |
 | `physical device picker`      | `*PhysicalDevicePicker*`                         |
 | `everything` / `all`          | `*`                                              |
-| `host-only` / `no driver`     | `*ChainBuilder*\|*ResultPolicy*`                  |
-| `driver-bound`                | `*FrameRing*\|*PushDescriptors*\|*PipelineBarrier*\|*CommandRecorder*\|*StagingUploader*\|*SyncPool*\|*Buffer*` |
+| `acceleration structure` / `ray query` | `*AccelerationStructure*`               |
+| `host-only` / `no driver`     | `*ChainBuilder*` `*ResultPolicy*` (two args)      |
+| `driver-bound`                | `*FrameRing*` `*PushDescriptors*` `*PipelineBarrier*` `*CommandRecorder*` `*StagingUploader*` `*SyncPool*` `*Buffer*` (seven args) |
 
 When in doubt, look at `tests/Ahjo.Vulkan.Benchmarks/*.cs` for the class names — each file name follows `<Subsystem>Benchmarks.cs` (except `PhysicalDevicePickerBenchmark.cs`, which is singular).
 
 ## How to run
 
 Always pass `-c Release`. Debug builds short-circuit JIT tiering and produce noisy + meaningless numbers.
+
+For a quick regression check — "did this change start allocating?" — add `--job short`.
+It cuts a multi-class sweep from tens of minutes to under a minute and the
+**Allocated** column is still trustworthy; only the Mean loses precision. Record
+any number captured that way as a ShortRun in `docs/benchmarks.md` so it is not
+mistaken for a full-precision baseline.
 
 ```bash
 dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "<filter>"
@@ -55,8 +69,9 @@ Example invocations:
 # After changing ChainBuilder.cs
 dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*ChainBuilder*"
 
-# Host-only subset (no Vulkan ICD required) — useful in environments without a driver
-dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*ChainBuilder*|*ResultPolicy*"
+# Host-only subset (no Vulkan ICD required) — useful in environments without a driver.
+# NOTE the two separate patterns: "*ChainBuilder*|*ResultPolicy*" matches NOTHING and exits 0.
+dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*ChainBuilder*" "*ResultPolicy*"
 
 # Full sweep — refreshes the docs/benchmarks.md baseline
 dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*"
@@ -67,7 +82,8 @@ dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*"
 Most benchmarks call into a real Vulkan device at `[GlobalSetup]` and fail there if no ICD is available:
 
 - **Host-only** (no driver needed): `ChainBuilder`, `ResultPolicy`, `SpecializationInfo`, `PushConstants` (partially).
-- **Driver-bound** (need `vulkan-1.dll` + an ICD on path): `FrameRing`, `BufferBenchmarks`, `CommandRecorder`, `PipelineBarrier`, `PushDescriptors`, `StagingUploader`, `SyncPool`, `CommandBufferPool`, `GraphicsPipelineBuilder`, `PhysicalDevicePicker`.
+- **Driver-bound** (need `vulkan-1.dll` + an ICD on path): `FrameRing`, `BufferBenchmarks`, `CommandRecorder`, `PipelineBarrier`, `PushDescriptors`, `StagingUploader`, `SyncPool`, `CommandBufferPool`, `GraphicsPipelineBuilder`, `PhysicalDevicePicker`, `TimestampQuery`, `DescriptorSetPool`, `BindDescriptorSets`.
+- **Capability-gated** (need an ICD *and* an optional device feature; `[GlobalSetup]` throws otherwise, deliberately): `MeshShader` (`VK_EXT_mesh_shader` + `meshShader`/`taskShader`/`drawIndirectCount`), `AccelerationStructure` (`VK_KHR_acceleration_structure` + `VK_KHR_ray_query` + `VK_KHR_deferred_host_operations` and the `accelerationStructure`/`rayQuery`/`bufferDeviceAddress` features), `DescriptorSetPoolVariableCount` (`descriptorBindingVariableDescriptorCount`). Each is its own class so a host without the capability cannot take a canary class down with it.
 
 On a host with no Vulkan driver, point the user at one of the host-only benchmarks instead, or provision SwiftShader the way CI does (`.github/workflows/ci.yml` is the reference recipe).
 

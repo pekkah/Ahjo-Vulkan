@@ -108,7 +108,8 @@ AhjoDiagnostics.Sink = (severity, source, message) => myLogger.Log(severity, sou
   See the `FromLiteral` XML doc for the full contract. The wrapper's
   `VulkanExtensions` static class exposes ready-made `Utf8Name` constants
   for the names it actively wraps (`KhrSurface`, `KhrWin32Surface`,
-  `KhrSwapchain`).
+  `KhrSwapchain`, `ExtMeshShader`, `KhrAccelerationStructure`,
+  `KhrRayQuery`, `KhrDeferredHostOperations`).
 
 Deeper rationale on each layer lives under
 [`docs/design/specs/`](https://github.com/pekkah/Ahjo-Vulkan/tree/main/docs/design/specs)

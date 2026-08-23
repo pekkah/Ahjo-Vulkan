@@ -12,9 +12,17 @@ namespace Ahjo.Vulkan.Benchmarks;
 /// per-op allocation column converges to 0.
 /// </summary>
 [MemoryDiagnoser]
-public class PushDescriptorsBenchmarks
+public unsafe class PushDescriptorsBenchmarks
 {
     private const int CallsPerInvoke = 1024;
+
+    // Sixteen writes crosses CommandRecorder.PushDescriptorSet's
+    // StackThreshold of 8 and DescriptorSetExtensions.Update's, so the
+    // *_16 rows measure the ArrayPool leg both of them grew a second nested
+    // rental on in #202 (the VkWriteDescriptorSetAccelerationStructureKHR
+    // chains buffer). Without a row above the threshold neither overflow path
+    // is reachable from any benchmark.
+    private const int OverflowWrites = 16;
 
     private Instance               _instance = null!;
     private Device                 _device   = null!;
@@ -23,6 +31,17 @@ public class PushDescriptorsBenchmarks
     private DescriptorTemplate<FillWrites> _template;
     private Buffer                 _buffer;
     private CommandBufferPool      _cmdPool  = null!;
+
+    // The non-push half of the fixture. A push-descriptor set layout cannot be
+    // used with vkAllocateDescriptorSets, so DescriptorSetExtensions.Update
+    // needs a layout of its own plus a pool to allocate from.
+    private DescriptorSetLayout    _updateLayout;
+    private DescriptorSetPool      _setPool  = null!;
+    private DescriptorSet          _set;
+
+    // Hoisted: building the write array is setup, not part of the measured
+    // body (the MeshShaderBenchmarks._colorFormats shape).
+    private DescriptorWrite[]      _writes16 = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -47,6 +66,13 @@ public class PushDescriptorsBenchmarks
             Queues = [new QueueRequest(family, count: 1, priority: 1.0f)],
         });
 
+        // The template writes binding 0 only; the LAYOUT declares all sixteen
+        // so PushDescriptorSet_SpanWrites_16 has somewhere valid to push.
+        // vkCmdPushDescriptorSet against a binding the layout does not declare
+        // is a VU violation the driver answers with an access violation, not
+        // an error code — which is exactly what the 16-write row hit before
+        // the layout was widened. 16 is safely under the 32 minimum every
+        // conformant device guarantees for maxPushDescriptors.
         DescriptorBinding[] bindings =
         [
             new DescriptorBinding
@@ -55,9 +81,16 @@ public class PushDescriptorsBenchmarks
                 Count = 1, Stages = ShaderStages.Compute,
             },
         ];
+        var pushBindings = new DescriptorBinding[OverflowWrites];
+        for (int i = 0; i < OverflowWrites; i++)
+            pushBindings[i] = new DescriptorBinding
+            {
+                Slot = (uint)i, Type = VkDescriptorType.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                Count = 1, Stages = ShaderStages.Compute,
+            };
         _setLayout = _device.CreateDescriptorSetLayout(new DescriptorSetLayoutDescription
         {
-            Bindings       = bindings,
+            Bindings       = pushBindings,
             PushDescriptor = true,
         });
         DescriptorSetLayout[] layouts = [_setLayout];
@@ -72,18 +105,56 @@ public class PushDescriptorsBenchmarks
             new BufferDescription { Size = 1024, Usage = BufferUsage.StorageBuffer },
             new AllocationDescription { Usage = MemoryUsage.AutoPreferDevice });
 
+        // Non-push layout + pool for Update_StorageBuffer. Sixteen bindings so
+        // the same layout serves both the 1-write and the 16-write rows.
+        var updateBindings = new DescriptorBinding[OverflowWrites];
+        for (int i = 0; i < OverflowWrites; i++)
+            updateBindings[i] = new DescriptorBinding
+            {
+                Slot = (uint)i, Type = VkDescriptorType.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                Count = 1, Stages = ShaderStages.Compute,
+            };
+        _updateLayout = _device.CreateDescriptorSetLayout(new DescriptorSetLayoutDescription
+        {
+            Bindings = updateBindings,
+        });
+
+        VkDescriptorPoolSize[] poolSizes =
+        [
+            new VkDescriptorPoolSize
+            {
+                type            = VkDescriptorType.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                descriptorCount = OverflowWrites,
+            },
+        ];
+        _setPool = new DescriptorSetPool(_device, maxSets: 1, poolSizes);
+        _set     = _setPool.Acquire(_updateLayout.Handle);
+
+        var info16 = BufferDescriptorWrite.Of(in _buffer);
+        _writes16 = new DescriptorWrite[OverflowWrites];
+        for (int i = 0; i < OverflowWrites; i++)
+            _writes16[i] = DescriptorWrite.Buffer(
+                binding: (uint)i, arrayElement: 0,
+                VkDescriptorType.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, in info16);
+
         _cmdPool = new CommandBufferPool(_device, family);
 
         // Warm — fault in the pool's first buffer so steady-state Begin/Dispose pairs hit reuse.
         var rec = _cmdPool.Begin();
         rec.End();
         rec.Dispose();
+
+        // Warm the two new paths so the measured runs hit steady state.
+        Update_StorageBuffer();
+        PushDescriptorSet_SpanWrites_16();
     }
 
     [GlobalCleanup]
     public void Cleanup()
     {
         _cmdPool?.Dispose();
+        _setPool?.Dispose();
+        _updateLayout.Dispose();
         _buffer.Dispose();
         _template.Dispose();
         _pipelineLayout.Dispose();
@@ -128,6 +199,49 @@ public class PushDescriptorsBenchmarks
             rec.PushDescriptorSet(
                 VkPipelineBindPoint.VK_PIPELINE_BIND_POINT_COMPUTE,
                 in _pipelineLayout, set: 0, writes);
+    }
+
+    /// <summary>
+    /// Covers <see cref="DescriptorSetExtensions.Update"/> — the <b>other</b>
+    /// caller of <c>DescriptorWriteBuilder.BuildWrites</c>, and until #202 the
+    /// one with no benchmark anywhere in the repo. It is a genuine per-frame
+    /// path for engines that rebuild descriptor sets rather than push, and it
+    /// grew the same <c>chains</c> span every push-descriptor call did, so it
+    /// carries the same 0 B/op obligation. One write stays on the <c>≤ 8</c>
+    /// stackalloc leg.
+    /// </summary>
+    [Benchmark(OperationsPerInvoke = CallsPerInvoke)]
+    public void Update_StorageBuffer()
+    {
+        var info = BufferDescriptorWrite.Of(in _buffer);
+        ReadOnlySpan<DescriptorWrite> writes =
+        [
+            DescriptorWrite.Buffer(
+                binding: 0, arrayElement: 0,
+                VkDescriptorType.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, in info),
+        ];
+        for (int i = 0; i < CallsPerInvoke; i++)
+            _set.Update(_device, writes);
+    }
+
+    /// <summary>
+    /// <see cref="CommandRecorder.PushDescriptorSet(VkPipelineBindPoint, in PipelineLayout, uint, System.ReadOnlySpan{DescriptorWrite})"/>
+    /// with sixteen writes — <b>above</b> the recorder's <c>StackThreshold</c>
+    /// of 8, so this is the only benchmark that reaches the
+    /// <see cref="System.Buffers.ArrayPool{T}"/> leg. #202 added a second
+    /// nested rental there (the <c>chains</c> buffer), and a rent/return pair
+    /// per call must still amortize to <c>-</c> in <b>Allocated</b>: a
+    /// non-<c>-</c> reading here means a rental is escaping or the arrays are
+    /// not being returned.
+    /// </summary>
+    [Benchmark(OperationsPerInvoke = CallsPerInvoke)]
+    public void PushDescriptorSet_SpanWrites_16()
+    {
+        using scoped var rec = _cmdPool.Begin();
+        for (int i = 0; i < CallsPerInvoke; i++)
+            rec.PushDescriptorSet(
+                VkPipelineBindPoint.VK_PIPELINE_BIND_POINT_COMPUTE,
+                in _pipelineLayout, set: 0, _writes16);
     }
 
     [StructLayout(LayoutKind.Sequential)]

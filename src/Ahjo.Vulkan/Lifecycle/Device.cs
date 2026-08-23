@@ -566,10 +566,12 @@ public sealed unsafe class Device : IDisposable
 
     /// <summary>
     /// Creates a timestamp-typed <see cref="QueryPool"/>
-    /// (<c>VK_QUERY_TYPE_TIMESTAMP</c> — the only query type this method
-    /// mints) with <paramref name="queryCount"/> queries. The returned
-    /// handle is caller-owned; dispose it once no submission still
-    /// references it.
+    /// (<see cref="QueryType.Timestamp"/>) with
+    /// <paramref name="queryCount"/> queries — a one-line forward to
+    /// <see cref="CreateQueryPool(QueryType, uint)"/>, kept because timestamps
+    /// were the only type this wrapper minted before #202 and every existing
+    /// call site means exactly what it always meant. The returned handle is
+    /// caller-owned; dispose it once no submission still references it.
     /// </summary>
     /// <remarks>
     /// Queries start <b>uninitialized</b>: record and submit
@@ -581,20 +583,269 @@ public sealed unsafe class Device : IDisposable
     /// <see cref="TimestampPeriod"/>.
     /// </remarks>
     public QueryPool CreateQueryPool(uint queryCount)
+        => CreateQueryPool(QueryType.Timestamp, queryCount);
+
+    /// <summary>
+    /// Creates a <see cref="QueryPool"/> of <paramref name="type"/> with
+    /// <paramref name="queryCount"/> queries. The one create path; the
+    /// <see cref="CreateQueryPool(uint)"/> overload forwards here with
+    /// <see cref="QueryType.Timestamp"/>. The returned handle is caller-owned;
+    /// dispose it once no submission still references it.
+    /// </summary>
+    /// <remarks>
+    /// <para>The pool remembers its <paramref name="type"/> as
+    /// <see cref="QueryPool.Type"/>, which is what lets
+    /// <see cref="CommandRecorder.WriteAccelerationStructuresProperties"/> take
+    /// no <c>queryType</c> parameter and therefore be unable to mismatch the
+    /// pool
+    /// (<c>VUID-vkCmdWriteAccelerationStructuresPropertiesKHR-queryPool-02493</c>).</para>
+    /// <para>Queries start <b>uninitialized</b> whatever the type: record and
+    /// submit <see cref="CommandRecorder.ResetQueryPool"/> over a query's index
+    /// before it is first written and before any readback.</para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="type"/> is <see cref="QueryType.Unknown"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="queryCount"/> is 0.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="type"/> is
+    /// <see cref="QueryType.AccelerationStructureCompactedSize"/> but
+    /// <c>VK_KHR_acceleration_structure</c> was not enabled on this device —
+    /// the pool would have nothing able to write it, and creating it is itself
+    /// a valid-usage violation without the <c>accelerationStructure</c>
+    /// feature.
+    /// </exception>
+    public QueryPool CreateQueryPool(QueryType type, uint queryCount)
     {
+        if (type == QueryType.Unknown)
+            throw new ArgumentException(
+                "QueryType.Unknown is the borrowed-handle sentinel, not a creatable type. "
+                + "Pass QueryType.Timestamp or QueryType.AccelerationStructureCompactedSize.",
+                nameof(type));
+
         if (queryCount == 0)
             throw new ArgumentOutOfRangeException(nameof(queryCount),
                 "A query pool must contain at least one query (VUID-VkQueryPoolCreateInfo-queryCount-02763).");
 
+        if (type == QueryType.AccelerationStructureCompactedSize
+            && Functions.CmdWriteAccelerationStructuresProperties == null)
+            throw new InvalidOperationException(
+                "QueryType.AccelerationStructureCompactedSize pools are not available on this device. "
+                + AccelerationStructureSupport.EnableInstructions);
+
         var ci = new VkQueryPoolCreateInfo
         {
             sType      = VkStructureType.VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
-            queryType  = VkQueryType.VK_QUERY_TYPE_TIMESTAMP,
+            queryType  = (VkQueryType)type,
             queryCount = queryCount,
         };
         VkQueryPool_T* raw = null;
         Vk.vkCreateQueryPool(Handle, &ci, null, &raw).ThrowIfFailed();
-        return new QueryPool(raw, Handle, queryCount);
+        return new QueryPool(raw, Handle, queryCount, type);
+    }
+
+    /// <summary>
+    /// Creates a <see cref="AccelerationStructure"/> of
+    /// <paramref name="type"/> over <paramref name="size"/> bytes of
+    /// <paramref name="buffer"/> starting at <paramref name="offset"/>, via
+    /// <c>vkCreateAccelerationStructureKHR</c>. The structure is empty until a
+    /// <see cref="CommandRecorder.BuildAccelerationStructures"/> writes it.
+    /// </summary>
+    /// <param name="type">TLAS or BLAS. Note
+    /// <see cref="AccelerationStructureType.TopLevel"/> is the enum's default
+    /// value.</param>
+    /// <param name="buffer">
+    /// The backing buffer, which must have been created with
+    /// <see cref="BufferUsage.AccelerationStructureStorage"/>
+    /// (<c>VUID-VkAccelerationStructureCreateInfoKHR-buffer-03614</c>).
+    /// </param>
+    /// <param name="offset">
+    /// Byte offset into <paramref name="buffer"/>. Must be a multiple of
+    /// <b>256</b>
+    /// (<c>VUID-VkAccelerationStructureCreateInfoKHR-offset-03734</c>).
+    /// </param>
+    /// <param name="size">
+    /// Bytes to reserve — take it from
+    /// <see cref="AccelerationStructureBuildSizes.AccelerationStructureSize"/>,
+    /// or from the compacted-size query when creating a compaction
+    /// destination. <c>offset + size</c> must not exceed the buffer's size
+    /// (<c>VUID-VkAccelerationStructureCreateInfoKHR-offset-03616</c>).
+    /// </param>
+    /// <remarks>
+    /// <para><b>The returned structure does not own
+    /// <paramref name="buffer"/>.</b> Neither the buffer nor its allocator is
+    /// stored. The caller must keep the buffer alive <b>strictly longer</b>
+    /// than the acceleration structure, and must not let a second acceleration
+    /// structure or any other resource alias the
+    /// <c>[offset, offset + size)</c> range. Suballocating many BLASes into a
+    /// few large buffers at 256-byte-aligned offsets is the intended pattern —
+    /// one buffer per structure would waste memory against that alignment and
+    /// multiply VMA allocations.</para>
+    /// <para>The guards below are unconditional rather than
+    /// <see cref="AhjoValidation"/>-gated: this is a setup-time call, the
+    /// <see cref="CreateQueryPool(QueryType, uint)"/> precedent.</para>
+    /// <para><b>Capture/replay is out of scope.</b> <c>createFlags</c> is
+    /// always 0 and <c>deviceAddress</c> always 0 — the latter is only
+    /// meaningful with
+    /// <c>VK_ACCELERATION_STRUCTURE_CREATE_DEVICE_ADDRESS_CAPTURE_REPLAY_BIT_KHR</c>
+    /// (<c>VUID-VkAccelerationStructureCreateInfoKHR-deviceAddress-03612</c>),
+    /// which needs the <c>accelerationStructureCaptureReplay</c> feature and a
+    /// capture-tool lifetime model of its own.</para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// <c>VK_KHR_acceleration_structure</c> was not enabled on this device.
+    /// </exception>
+    public AccelerationStructure CreateAccelerationStructure(
+        AccelerationStructureType type, in Buffer buffer, ulong offset, ulong size)
+    {
+        if (buffer.IsNull)
+            throw new ArgumentException(
+                "CreateAccelerationStructure requires a non-null backing buffer.", nameof(buffer));
+
+        if (size == 0)
+            throw new ArgumentOutOfRangeException(nameof(size),
+                "An acceleration structure must be at least one byte; size it from "
+                + "AccelerationStructureBuildSizes.AccelerationStructureSize.");
+
+        if (offset % 256 != 0)
+            throw new ArgumentException(
+                $"CreateAccelerationStructure: offset ({offset}) must be a multiple of 256 bytes "
+                + "(VUID-VkAccelerationStructureCreateInfoKHR-offset-03734).", nameof(offset));
+
+        // Buffer caches Size and Usage at create time; a borrowed
+        // (Buffer.FromRaw) buffer reports 0 / None, which these two read as
+        // *unknown* and skip — the QueryPool.AssertRangeInBounds convention.
+        if (buffer.Size != 0 && offset + size > buffer.Size)
+            throw new ArgumentOutOfRangeException(nameof(size),
+                $"CreateAccelerationStructure: offset + size ({offset} + {size} = {offset + size}) "
+                + $"exceeds the buffer's size ({buffer.Size}) "
+                + "(VUID-VkAccelerationStructureCreateInfoKHR-offset-03616).");
+
+        if (buffer.Usage != BufferUsage.None
+            && (buffer.Usage & BufferUsage.AccelerationStructureStorage) == 0)
+            throw new ArgumentException(
+                "CreateAccelerationStructure: the backing buffer must have been created with "
+                + "BufferUsage.AccelerationStructureStorage "
+                + "(VUID-VkAccelerationStructureCreateInfoKHR-buffer-03614).", nameof(buffer));
+
+        var fn = Functions.CreateAccelerationStructure;
+        if (fn == null)
+            throw new InvalidOperationException(
+                "Device.CreateAccelerationStructure is not available on this device. "
+                + AccelerationStructureSupport.EnableInstructions);
+
+        var ci = new VkAccelerationStructureCreateInfoKHR
+        {
+            sType         = VkStructureType.VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+            createFlags   = 0,
+            buffer        = buffer.Handle,
+            offset        = offset,
+            size          = size,
+            type          = (VkAccelerationStructureTypeKHR)type,
+            deviceAddress = 0,
+        };
+        VkAccelerationStructureKHR_T* raw = null;
+        fn(Handle, &ci, null, &raw).ThrowIfFailed();
+        return new AccelerationStructure(raw, Handle, Functions.DestroyAccelerationStructure, size);
+    }
+
+    /// <summary>
+    /// How much memory a prospective build would need, via
+    /// <c>vkGetAccelerationStructureBuildSizesKHR</c> with
+    /// <c>VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR</c>: the backing size
+    /// to pass to <see cref="CreateAccelerationStructure"/> and the scratch
+    /// size for each of the two build modes.
+    /// </summary>
+    /// <param name="type">The structure type the build will target.</param>
+    /// <param name="flags">
+    /// The <b>same</b> flags the build will use — they change the sizes the
+    /// driver reports, so sizing with one set and building with another gives
+    /// ranges that are too small.
+    /// </param>
+    /// <param name="geometries">The geometries the build will carry.</param>
+    /// <param name="maxPrimitiveCounts">
+    /// Upper bound on <see cref="AccelerationStructureBuildRange.PrimitiveCount"/>
+    /// for each geometry, one entry per geometry and in the same order.
+    /// </param>
+    /// <remarks>
+    /// <para>There is no destination parameter because the query ignores
+    /// <c>srcAccelerationStructure</c>, <c>dstAccelerationStructure</c> and
+    /// <c>scratchData</c> — and no mode parameter because both scratch sizes
+    /// come back from one call.</para>
+    /// <para>Setup-time and stack-only: the native geometry array is a
+    /// <c>stackalloc</c> at 16 geometries or fewer and an
+    /// <see cref="ArrayPool{T}"/> rental beyond, so nothing is allocated on the
+    /// common path.</para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// <c>VK_KHR_acceleration_structure</c> was not enabled on this device.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="maxPrimitiveCounts"/> and <paramref name="geometries"/>
+    /// have different lengths.
+    /// </exception>
+    public AccelerationStructureBuildSizes GetAccelerationStructureBuildSizes(
+        AccelerationStructureType                   type,
+        AccelerationStructureBuildFlags             flags,
+        ReadOnlySpan<AccelerationStructureGeometry> geometries,
+        ReadOnlySpan<uint>                          maxPrimitiveCounts)
+    {
+        var fn = Functions.GetAccelerationStructureBuildSizes;
+        if (fn == null)
+            throw new InvalidOperationException(
+                "Device.GetAccelerationStructureBuildSizes is not available on this device. "
+                + AccelerationStructureSupport.EnableInstructions);
+
+        if (maxPrimitiveCounts.Length != geometries.Length)
+            throw new ArgumentException(
+                $"GetAccelerationStructureBuildSizes: maxPrimitiveCounts has {maxPrimitiveCounts.Length} "
+                + $"entries but geometries has {geometries.Length}; there must be exactly one primitive "
+                + "count per geometry.", nameof(maxPrimitiveCounts));
+
+        const int GeometryStackThreshold = 16;
+        int count = geometries.Length;
+
+        VkAccelerationStructureGeometryKHR[]? rented = null;
+        Span<VkAccelerationStructureGeometryKHR> natives =
+            count <= GeometryStackThreshold
+                ? stackalloc VkAccelerationStructureGeometryKHR[GeometryStackThreshold].Slice(0, count)
+                : (rented = ArrayPool<VkAccelerationStructureGeometryKHR>.Shared.Rent(count))
+                    .AsSpan(0, count);
+        try
+        {
+            // sType MUST be set on the sizes struct before the call — a zeroed
+            // sType is the classic silent failure here, and the driver reads it
+            // to decide what it is being handed.
+            var sizes = new VkAccelerationStructureBuildSizesInfoKHR
+            {
+                sType = VkStructureType.VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR,
+            };
+
+            fixed (VkAccelerationStructureGeometryKHR* pNatives = natives)
+            fixed (uint* pCounts = maxPrimitiveCounts)
+            {
+                AccelerationStructureBuildTranslator.BuildSizeQueryInfo(
+                    type, flags, geometries, pNatives, out var info);
+
+                fn(Handle,
+                   VkAccelerationStructureBuildTypeKHR.VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                   &info, pCounts, &sizes);
+            }
+
+            return new AccelerationStructureBuildSizes
+            {
+                AccelerationStructureSize = sizes.accelerationStructureSize,
+                BuildScratchSize          = sizes.buildScratchSize,
+                UpdateScratchSize         = sizes.updateScratchSize,
+            };
+        }
+        finally
+        {
+            if (rented is not null)
+                ArrayPool<VkAccelerationStructureGeometryKHR>.Shared.Return(rented);
+        }
     }
 
     /// <summary>
