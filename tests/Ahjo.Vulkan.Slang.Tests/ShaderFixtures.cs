@@ -1086,4 +1086,34 @@ internal static class ShaderFixtures
             return float4(gPushB.scale, 0.0, 1.0);
         }
         """;
+
+    /// <summary>
+    /// A ray-query compute entry point — the one shader shape that needs a
+    /// target capability the default <c>spirv_1_5</c> profile does not carry.
+    /// Compiles either way; without <c>spvRayQueryKHR</c> in
+    /// <see cref="SlangSessionDescription.Capabilities"/> Slang upgrades the
+    /// profile itself and says so (E41012).
+    /// </summary>
+    public const string RayQueryCompute = """
+        [[vk::binding(0, 0)]] RaytracingAccelerationStructure scene;
+        [[vk::binding(1, 0)]] RWTexture2D<float4> output;
+
+        [shader("compute")]
+        [numthreads(8, 8, 1)]
+        void computeMain(uint3 tid : SV_DispatchThreadID)
+        {
+            RayDesc ray;
+            ray.Origin    = float3(tid.x / 64.0, tid.y / 64.0, -1.0);
+            ray.Direction = float3(0.0, 0.0, 1.0);
+            ray.TMin      = 0.001;
+            ray.TMax      = 100.0;
+
+            RayQuery<RAY_FLAG_FORCE_OPAQUE> q;
+            q.TraceRayInline(scene, RAY_FLAG_NONE, 0xFF, ray);
+            q.Proceed();
+
+            float hit = q.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 1.0 : 0.0;
+            output[tid.xy] = float4(hit, hit, hit, 1.0);
+        }
+        """;
 }

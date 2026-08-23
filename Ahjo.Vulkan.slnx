@@ -20,4 +20,5 @@
   <Project Path="samples/HelloCube/HelloCube.csproj" />
   <Project Path="samples/HelloVma/HelloVma.csproj" />
   <Project Path="samples/HelloVmaWindowed/HelloVmaWindowed.csproj" />
+  <Project Path="samples/HelloRayQuery/HelloRayQuery.csproj" />
 </Solution>

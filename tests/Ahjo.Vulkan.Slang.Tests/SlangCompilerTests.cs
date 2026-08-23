@@ -390,4 +390,107 @@ public sealed class SlangCompilerTests
         // failure mode a naive "generate once, reuse" cache produces.
         Assert.NotEqual(program.Spirv(0).Length, program.Spirv(1).Length);
     }
+
+    // ---- Target capabilities (issue 207) ----
+
+    /// <summary>
+    /// A ray-query entry point uses <c>spvRayQueryKHR</c>, which the default
+    /// <c>spirv_1_5</c> profile does not carry. Slang compiles it anyway by
+    /// upgrading the profile itself — and warns that it did. This pins the
+    /// pre-<see cref="SlangSessionDescription.Capabilities"/> behaviour, so the
+    /// pair below is a before/after rather than a lone assertion.
+    /// </summary>
+    [Fact]
+    public void Compile_RayQuery_WithoutCapability_WarnsProfileUpgraded()
+    {
+        using var compiler = SlangCompiler.Create();
+        using SlangSession session = compiler.CreateSession(default);
+        using SlangProgram program = session.Compile(new SlangCompileRequest
+        {
+            ModuleName = "rayQueryDefault",
+            Source     = ShaderFixtures.RayQueryCompute,
+        });
+
+        Assert.False(program.Spirv(0).IsEmpty);
+        Assert.NotNull(program.Warnings);
+        Assert.Contains("E41012", program.Warnings, StringComparison.Ordinal);
+        Assert.Contains("spvRayQueryKHR", program.Warnings, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Declaring the capability is how a caller says "I meant that". The
+    /// warning goes away and the SPIR-V is byte-identical — the capability
+    /// moves the decision from Slang's inference to the description, it does
+    /// not change what is emitted.
+    /// </summary>
+    [Fact]
+    public void Compile_RayQuery_WithCapability_IsWarningFreeAndEmitsTheSameSpirv()
+    {
+        using var compiler = SlangCompiler.Create();
+
+        using SlangSession inferred = compiler.CreateSession(default);
+        using SlangProgram inferredProgram = inferred.Compile(new SlangCompileRequest
+        {
+            ModuleName = "rayQueryInferred",
+            Source     = ShaderFixtures.RayQueryCompute,
+        });
+
+        using SlangSession declared = compiler.CreateSession(new SlangSessionDescription
+        {
+            Capabilities = [Utf8Name.FromLiteral("spvRayQueryKHR"u8)],
+        });
+        using SlangProgram declaredProgram = declared.Compile(new SlangCompileRequest
+        {
+            ModuleName = "rayQueryDeclared",
+            Source     = ShaderFixtures.RayQueryCompute,
+        });
+
+        Assert.True(string.IsNullOrEmpty(declaredProgram.Warnings),
+            "Declaring spvRayQueryKHR should leave nothing for Slang to warn about, got: "
+            + declaredProgram.Warnings);
+        Assert.True(inferredProgram.Spirv(0).SequenceEqual(declaredProgram.Spirv(0)),
+            "The capability declares intent; it must not change the emitted module.");
+    }
+
+    /// <summary>
+    /// A capability name that does not resolve fails at
+    /// <see cref="SlangCompiler.CreateSession"/> with the name in the message —
+    /// the same shape as an unknown profile. Silently ignoring it would hand
+    /// the caller back the E41012 warning they thought they had turned off.
+    /// </summary>
+    [Fact]
+    public void CreateSession_UnknownCapability_Throws()
+    {
+        using var compiler = SlangCompiler.Create();
+
+        var ex = Assert.Throws<SlangCompilationException>(() =>
+            compiler.CreateSession(new SlangSessionDescription
+            {
+                Capabilities = [Utf8Name.FromLiteral("notACapability"u8)],
+            }));
+
+        Assert.Contains("notACapability", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Capabilities are additive to the profile, not a replacement for it, and
+    /// an empty array must behave exactly like the default.
+    /// </summary>
+    [Fact]
+    public void CreateSession_EmptyCapabilities_MatchesDefault()
+    {
+        using var compiler = SlangCompiler.Create();
+        using SlangSession session = compiler.CreateSession(new SlangSessionDescription
+        {
+            Capabilities = [],
+        });
+        using SlangProgram program = session.Compile(new SlangCompileRequest
+        {
+            ModuleName = "vertexOnly",
+            Source     = ShaderFixtures.VertexOnly,
+        });
+
+        Assert.Equal(1, program.EntryPointCount);
+        Assert.False(program.Spirv(0).IsEmpty);
+    }
 }

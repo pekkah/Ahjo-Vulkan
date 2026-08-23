@@ -27,7 +27,7 @@ src/
   Ahjo.Vulkan.Utilities/       dep-free helpers for samples/tests (not published)
 
 native/                        pinned upstream sources, VMA translation unit, staged binaries
-samples/                       HelloTriangle, HelloCube, HelloVma, HelloVmaWindowed, HeadlessTriangle, HeadlessExport, AotSmoke
+samples/                       HelloTriangle, HelloCube, HelloVma, HelloVmaWindowed, HeadlessTriangle, HeadlessExport, HelloRayQuery, AotSmoke
 tests/                         wrapper + native test suites, BenchmarkDotNet allocation canary
 tools/                         codegen config (*.rsp) + StructExtendsGen/ResultPolicyGen
 docs/design/                   spec-driven design docs (specs/ + plans/, paired per issue)
