@@ -65,4 +65,36 @@ public readonly record struct SlangSessionDescription
     /// setting for a program built entirely from in-memory sources.
     /// </summary>
     public string[]? SearchPaths { get; init; }
+
+    /// <summary>
+    /// Target capability atoms to add to <see cref="SpirvProfile"/> — e.g.
+    /// <c>Utf8Name.FromLiteral("spvRayQueryKHR"u8)</c>. Null or empty (the
+    /// default) means the profile alone.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>What this is for.</b> A profile name is a SPIR-V *version*
+    /// (<c>spirv_1_5</c>); capabilities are the optional features on top of it.
+    /// An entry point that uses one the profile does not declare still
+    /// compiles — Slang upgrades the profile itself and warns:</para>
+    /// <code>
+    /// warning[E41012]: profile implicitly upgraded
+    ///   entry point 'computeMain' uses additional capabilities that are not part
+    ///   of the specified profile 'spirv_1_5'. The profile setting is
+    ///   automatically updated to include these capabilities: 'spvRayQueryKHR'
+    /// </code>
+    /// <para>Declaring the capability here is how a caller says "I meant that"
+    /// and gets a clean compile. It does not enable anything that was not
+    /// already going to be enabled; it moves the decision from Slang's
+    /// inference to the caller's description.</para>
+    /// <para><b>Not part of the profile string.</b>
+    /// <c>SpirvProfile = "spirv_1_5+spvRayQueryKHR"</c> does not work —
+    /// <c>IGlobalSession::findProfile</c> rejects it as an unknown profile.
+    /// Capabilities resolve through <c>findCapability</c> and ride as separate
+    /// target options, which is why they are a separate member.</para>
+    /// <para><see cref="Utf8Name"/> rather than <see cref="string"/> for the
+    /// same reason as <see cref="SpirvProfile"/>: capability names are
+    /// compile-time constants, so invariant #1 applies in its literal
+    /// form.</para>
+    /// </remarks>
+    public Utf8Name[]? Capabilities { get; init; }
 }

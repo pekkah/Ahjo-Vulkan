@@ -109,10 +109,46 @@ public sealed unsafe class SlangCompiler : IDisposable
             // CompilerOptionName.Optimization is the documented route. The
             // public enum's values are the native SlangOptimizationLevel's, so
             // the cast is the mapping.
-            CompilerOptionEntry optimization = default;
-            optimization.name = CompilerOptionName.Optimization;
-            optimization.value.kind = CompilerOptionValueKind.Int;
-            optimization.value.intValue0 = (int)description.Optimization;
+            // One entry for the optimization level, then one per requested
+            // capability. Slang copies the array during createSession, so a
+            // stack buffer that dies with this method is enough.
+            Utf8Name[] capabilities = description.Capabilities ?? [];
+            Span<CompilerOptionEntry> options =
+                stackalloc CompilerOptionEntry[1 + capabilities.Length];
+            options.Clear();
+
+            options[0].name = CompilerOptionName.Optimization;
+            options[0].value.kind = CompilerOptionValueKind.Int;
+            options[0].value.intValue0 = (int)description.Optimization;
+
+            // Capability atoms resolve by name through the global session.
+            // Passing the *resolved id* rather than the string is what lets an
+            // unknown name fail here, with the name in the message, instead of
+            // being silently ignored and resurfacing as an E41012 warning the
+            // caller thought they had turned off.
+            for (int i = 0; i < capabilities.Length; i++)
+            {
+                Utf8Name name = capabilities[i];
+                if (name.IsNull)
+                {
+                    throw new ArgumentException(
+                        "Capabilities must not contain null entries.", nameof(description));
+                }
+
+                SlangCapabilityID id = global->findCapability(name.Ptr);
+                if (id == SlangCapabilityID.SLANG_CAPABILITY_UNKNOWN)
+                {
+                    throw new SlangCompilationException(
+                        "Slang compilation failed: unknown target capability "
+                        + $"'{SlangUtf8.ToString(name.Ptr)}'.",
+                        string.Empty,
+                        innerException: null);
+                }
+
+                options[i + 1].name = CompilerOptionName.Capability;
+                options[i + 1].value.kind = CompilerOptionValueKind.Int;
+                options[i + 1].value.intValue0 = (int)id;
+            }
 
             // structureSize is NOT optional on either struct. Both carry C++
             // default member initialisers upstream, ClangSharp does not
@@ -123,8 +159,7 @@ public sealed unsafe class SlangCompiler : IDisposable
             target.format = SlangCompileTarget.SLANG_SPIRV;
             target.profile = profile;
             target.flags = description.EmitSpirvDirectly ? SlangApi.SLANG_TARGET_FLAG_GENERATE_SPIRV_DIRECTLY : 0u;
-            target.compilerOptionEntries = &optimization;
-            target.compilerOptionEntryCount = 1;
+            target.compilerOptionEntryCount = (uint)options.Length;
 
             SessionDesc desc = default;
             desc.structureSize = (nuint)sizeof(SessionDesc);
@@ -134,7 +169,12 @@ public sealed unsafe class SlangCompiler : IDisposable
             desc.searchPathCount = searchPaths?.Count ?? 0;
 
             ISession* session = null;
-            int rc = global->createSession(&desc, &session);
+            int rc;
+            fixed (CompilerOptionEntry* pOptions = options)
+            {
+                target.compilerOptionEntries = pOptions;
+                rc = global->createSession(&desc, &session);
+            }
 
             if (rc < 0 || session == null)
             {
