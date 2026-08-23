@@ -33,14 +33,30 @@ public static unsafe class DescriptorSetExtensions
         if (count <= StackThreshold)
         {
             Span<VkWriteDescriptorSet> raws = stackalloc VkWriteDescriptorSet[count];
-            FlushUpdate(device, set.Handle, writes, raws);
+            // Carved alongside raws by the same rule: an acceleration-structure
+            // write needs a VkWriteDescriptorSetAccelerationStructureKHR chained
+            // into pNext, and that node must outlive the native call.
+            Span<VkWriteDescriptorSetAccelerationStructureKHR> chains =
+                stackalloc VkWriteDescriptorSetAccelerationStructureKHR[count];
+            FlushUpdate(device, set.Handle, writes, raws, chains);
             return;
         }
 
         VkWriteDescriptorSet[] rented = ArrayPool<VkWriteDescriptorSet>.Shared.Rent(count);
         try
         {
-            FlushUpdate(device, set.Handle, writes, rented.AsSpan(0, count));
+            VkWriteDescriptorSetAccelerationStructureKHR[] rentedChains =
+                ArrayPool<VkWriteDescriptorSetAccelerationStructureKHR>.Shared.Rent(count);
+            try
+            {
+                FlushUpdate(
+                    device, set.Handle, writes,
+                    rented.AsSpan(0, count), rentedChains.AsSpan(0, count));
+            }
+            finally
+            {
+                ArrayPool<VkWriteDescriptorSetAccelerationStructureKHR>.Shared.Return(rentedChains);
+            }
         }
         finally
         {
@@ -49,14 +65,18 @@ public static unsafe class DescriptorSetExtensions
     }
 
     private static void FlushUpdate(
-        Device                        device,
-        VkDescriptorSet_T*            setHandle,
-        ReadOnlySpan<DescriptorWrite> writes,
-        Span<VkWriteDescriptorSet>    raws)
+        Device                                             device,
+        VkDescriptorSet_T*                                 setHandle,
+        ReadOnlySpan<DescriptorWrite>                      writes,
+        Span<VkWriteDescriptorSet>                         raws,
+        Span<VkWriteDescriptorSetAccelerationStructureKHR> chains)
     {
+        // writes and chains are both pinned across BuildWrites AND the native
+        // call: the produced entries point into both.
         fixed (DescriptorWrite* _ = writes)
+        fixed (VkWriteDescriptorSetAccelerationStructureKHR* __ = chains)
         {
-            DescriptorWriteBuilder.BuildWrites(writes, setHandle, raws);
+            DescriptorWriteBuilder.BuildWrites(writes, setHandle, raws, chains);
             fixed (VkWriteDescriptorSet* pRaws = raws)
                 Vk.vkUpdateDescriptorSets(device.Handle, (uint)writes.Length, pRaws, 0, null);
         }

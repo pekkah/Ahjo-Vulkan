@@ -38,10 +38,19 @@ namespace Ahjo.Vulkan;
 /// <c>vulkan-1.dll</c> (see <c>Internal/InstanceFunctionTable.cs</c>), so
 /// create/destroy/query entry points of a device extension belong here
 /// too, unlike core cold-path calls which stay on the static
-/// <c>[DllImport]</c>s. <c>VK_EXT_mesh_shader</c> is the first member;
-/// issue #202 (<c>VK_KHR_acceleration_structure</c> +
-/// <c>VK_KHR_ray_query</c>) is the next consumer and adds a second
-/// <c>if</c> block of the same shape.</description></item>
+/// <c>[DllImport]</c>s. <c>VK_EXT_mesh_shader</c> was the first member
+/// (issue #201) and <c>VK_KHR_acceleration_structure</c> is the second
+/// (issue #202), added as a second <c>if</c> block of the same shape.
+/// The acceleration-structure block is the first to carry
+/// <b>device-level</b> entry points — <c>vkCreateAccelerationStructureKHR</c>,
+/// <c>vkDestroyAccelerationStructureKHR</c>,
+/// <c>vkGetAccelerationStructureBuildSizesKHR</c> and
+/// <c>vkGetAccelerationStructureDeviceAddressKHR</c> are create/destroy/query
+/// rather than <c>vkCmd*</c>, which is exactly the case this bullet
+/// anticipated. <c>VK_KHR_ray_query</c> and
+/// <c>VK_KHR_deferred_host_operations</c> ride along at
+/// <c>vkCreateDevice</c> but gate nothing here: the first defines no entry
+/// points and the wrapper calls none of the second extension commands.</description></item>
 /// </list>
 /// All pointers are resolved at <see cref="Device"/> construction. Cold-path
 /// and instance-level calls keep using the static <c>[DllImport]</c>s on
@@ -135,6 +144,58 @@ internal readonly unsafe struct DeviceFunctionTable
     /// VK_EXT_mesh_shader was not enabled on this device.</summary>
     public readonly delegate* unmanaged[Stdcall]<
         VkCommandBuffer_T*, VkBuffer_T*, ulong, VkBuffer_T*, ulong, uint, uint, void> CmdDrawMeshTasksIndirectCount;
+
+    // ---- Acceleration structures (VK_KHR_acceleration_structure) ----
+
+    /// <summary><c>vkCreateAccelerationStructureKHR</c>. Null when
+    /// VK_KHR_acceleration_structure was not enabled on this
+    /// device.</summary>
+    public readonly delegate* unmanaged[Stdcall]<
+        VkDevice_T*, VkAccelerationStructureCreateInfoKHR*, VkAllocationCallbacks*,
+        VkAccelerationStructureKHR_T**, VkResult> CreateAccelerationStructure;
+
+    /// <summary><c>vkDestroyAccelerationStructureKHR</c>. Null when
+    /// VK_KHR_acceleration_structure was not enabled on this
+    /// device.</summary>
+    public readonly delegate* unmanaged[Stdcall]<
+        VkDevice_T*, VkAccelerationStructureKHR_T*, VkAllocationCallbacks*, void>
+        DestroyAccelerationStructure;
+
+    /// <summary><c>vkGetAccelerationStructureBuildSizesKHR</c>. Null when
+    /// VK_KHR_acceleration_structure was not enabled on this
+    /// device.</summary>
+    public readonly delegate* unmanaged[Stdcall]<
+        VkDevice_T*, VkAccelerationStructureBuildTypeKHR,
+        VkAccelerationStructureBuildGeometryInfoKHR*, uint*,
+        VkAccelerationStructureBuildSizesInfoKHR*, void> GetAccelerationStructureBuildSizes;
+
+    /// <summary><c>vkGetAccelerationStructureDeviceAddressKHR</c>. Null when
+    /// VK_KHR_acceleration_structure was not enabled on this
+    /// device.</summary>
+    public readonly delegate* unmanaged[Stdcall]<
+        VkDevice_T*, VkAccelerationStructureDeviceAddressInfoKHR*, ulong>
+        GetAccelerationStructureDeviceAddress;
+
+    /// <summary><c>vkCmdBuildAccelerationStructuresKHR</c>. Null when
+    /// VK_KHR_acceleration_structure was not enabled on this
+    /// device.</summary>
+    public readonly delegate* unmanaged[Stdcall]<
+        VkCommandBuffer_T*, uint, VkAccelerationStructureBuildGeometryInfoKHR*,
+        VkAccelerationStructureBuildRangeInfoKHR**, void> CmdBuildAccelerationStructures;
+
+    /// <summary><c>vkCmdWriteAccelerationStructuresPropertiesKHR</c>. Null when
+    /// VK_KHR_acceleration_structure was not enabled on this
+    /// device.</summary>
+    public readonly delegate* unmanaged[Stdcall]<
+        VkCommandBuffer_T*, uint, VkAccelerationStructureKHR_T**, VkQueryType,
+        VkQueryPool_T*, uint, void> CmdWriteAccelerationStructuresProperties;
+
+    /// <summary><c>vkCmdCopyAccelerationStructureKHR</c>. Null when
+    /// VK_KHR_acceleration_structure was not enabled on this
+    /// device.</summary>
+    public readonly delegate* unmanaged[Stdcall]<
+        VkCommandBuffer_T*, VkCopyAccelerationStructureInfoKHR*, void>
+        CmdCopyAccelerationStructure;
 
     // ---- Pipeline barriers (sync2) ----
 
@@ -241,6 +302,14 @@ internal readonly unsafe struct DeviceFunctionTable
         CmdDrawMeshTasks              = null;
         CmdDrawMeshTasksIndirect      = null;
         CmdDrawMeshTasksIndirectCount = null;
+
+        CreateAccelerationStructure              = null;
+        DestroyAccelerationStructure             = null;
+        GetAccelerationStructureBuildSizes       = null;
+        GetAccelerationStructureDeviceAddress    = null;
+        CmdBuildAccelerationStructures           = null;
+        CmdWriteAccelerationStructuresProperties = null;
+        CmdCopyAccelerationStructure             = null;
 
         // Core hot-path commands. The wrapper rejects pre-1.3 devices, so
         // every one of these resolves to a valid pointer; the resulting
@@ -416,6 +485,50 @@ internal readonly unsafe struct DeviceFunctionTable
                 ResolveExtensionRequired(
                     Utf8Name.FromLiteral(DeviceExtensionNames.CmdDrawMeshTasksIndirectCount),
                     DeviceExtensionNames.MeshShader);
+        }
+
+        // VK_KHR_acceleration_structure is the only one of the three
+        // ray-query extensions that gates anything: VK_KHR_ray_query defines
+        // no entry points, and the wrapper calls none of
+        // the VK_KHR_deferred_host_operations commands. Four of the seven
+        // pointers below are device-level (create/destroy/query), not vkCmd*.
+        if (IsExtensionEnabled(enabledExtensions, DeviceExtensionNames.AccelerationStructure))
+        {
+            CreateAccelerationStructure =
+                (delegate* unmanaged[Stdcall]<VkDevice_T*, VkAccelerationStructureCreateInfoKHR*, VkAllocationCallbacks*, VkAccelerationStructureKHR_T**, VkResult>)
+                ResolveExtensionRequired(
+                    Utf8Name.FromLiteral(DeviceExtensionNames.CreateAccelerationStructure),
+                    DeviceExtensionNames.AccelerationStructure);
+            DestroyAccelerationStructure =
+                (delegate* unmanaged[Stdcall]<VkDevice_T*, VkAccelerationStructureKHR_T*, VkAllocationCallbacks*, void>)
+                ResolveExtensionRequired(
+                    Utf8Name.FromLiteral(DeviceExtensionNames.DestroyAccelerationStructure),
+                    DeviceExtensionNames.AccelerationStructure);
+            GetAccelerationStructureBuildSizes =
+                (delegate* unmanaged[Stdcall]<VkDevice_T*, VkAccelerationStructureBuildTypeKHR, VkAccelerationStructureBuildGeometryInfoKHR*, uint*, VkAccelerationStructureBuildSizesInfoKHR*, void>)
+                ResolveExtensionRequired(
+                    Utf8Name.FromLiteral(DeviceExtensionNames.GetAccelerationStructureBuildSizes),
+                    DeviceExtensionNames.AccelerationStructure);
+            GetAccelerationStructureDeviceAddress =
+                (delegate* unmanaged[Stdcall]<VkDevice_T*, VkAccelerationStructureDeviceAddressInfoKHR*, ulong>)
+                ResolveExtensionRequired(
+                    Utf8Name.FromLiteral(DeviceExtensionNames.GetAccelerationStructureDeviceAddress),
+                    DeviceExtensionNames.AccelerationStructure);
+            CmdBuildAccelerationStructures =
+                (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, uint, VkAccelerationStructureBuildGeometryInfoKHR*, VkAccelerationStructureBuildRangeInfoKHR**, void>)
+                ResolveExtensionRequired(
+                    Utf8Name.FromLiteral(DeviceExtensionNames.CmdBuildAccelerationStructures),
+                    DeviceExtensionNames.AccelerationStructure);
+            CmdWriteAccelerationStructuresProperties =
+                (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, uint, VkAccelerationStructureKHR_T**, VkQueryType, VkQueryPool_T*, uint, void>)
+                ResolveExtensionRequired(
+                    Utf8Name.FromLiteral(DeviceExtensionNames.CmdWriteAccelerationStructuresProperties),
+                    DeviceExtensionNames.AccelerationStructure);
+            CmdCopyAccelerationStructure =
+                (delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkCopyAccelerationStructureInfoKHR*, void>)
+                ResolveExtensionRequired(
+                    Utf8Name.FromLiteral(DeviceExtensionNames.CmdCopyAccelerationStructure),
+                    DeviceExtensionNames.AccelerationStructure);
         }
     }
 

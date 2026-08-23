@@ -3,10 +3,12 @@ using Ahjo.Vulkan.Native;
 namespace Ahjo.Vulkan;
 
 /// <summary>
-/// A timestamp-typed <c>VkQueryPool</c>: bracket GPU work with
-/// <see cref="CommandRecorder.WriteTimestamp"/> pairs, reset the frame's
-/// query range with <see cref="CommandRecorder.ResetQueryPool"/>, and read
-/// the raw ticks back with <see cref="TryGetResults(uint, Span{ulong})"/>.
+/// A typed <c>VkQueryPool</c>: reset a query range with
+/// <see cref="CommandRecorder.ResetQueryPool"/>, have the GPU write into it,
+/// and read the 64-bit results back with
+/// <see cref="TryGetResults(uint, Span{ulong})"/>. What the values <em>mean</em>
+/// is <see cref="Type"/>'s business; the reset discipline and the readback are
+/// the same either way.
 /// </summary>
 /// <remarks>
 /// <para><b>Ownership.</b> Caller-owned, like its <c>Sync/</c> neighbour
@@ -29,32 +31,47 @@ namespace Ahjo.Vulkan;
 /// <c>VUID-VkQueryPoolCreateInfo-queryCount-02763</c>).</para>
 /// <para><b>Reset before use.</b> Queries start <em>uninitialized</em> at
 /// pool creation: every query must be reset by a <b>submitted</b>
-/// <see cref="CommandRecorder.ResetQueryPool"/> before its first
-/// <see cref="CommandRecorder.WriteTimestamp"/> and before any readback —
-/// reading a never-reset query is a validation error
-/// (<c>VUID-vkGetQueryPoolResults-None-09401</c>), not a
-/// <see langword="false"/>.</para>
-/// <para><b>Ticks → nanoseconds.</b> The readback returns raw ticks: mask
-/// each value to the writing queue family's
-/// <see cref="QueueFamilyInfo.TimestampValidBits"/>, then multiply the
-/// masked delta by <see cref="Device.TimestampPeriod"/>.</para>
+/// <see cref="CommandRecorder.ResetQueryPool"/> before it is first written
+/// and before any readback — reading a never-reset query is a validation
+/// error (<c>VUID-vkGetQueryPoolResults-None-09401</c>), not a
+/// <see langword="false"/>. This holds for every <see cref="Type"/>.</para>
+/// <para><b><see cref="QueryType.Timestamp"/> pools.</b> Bracket GPU work with
+/// <see cref="CommandRecorder.WriteTimestamp"/> pairs. The readback returns
+/// raw <b>ticks</b>: mask each value to the writing queue family's
+/// <see cref="QueueFamilyInfo.TimestampValidBits"/>, then multiply the masked
+/// delta by <see cref="Device.TimestampPeriod"/> for nanoseconds. This is what
+/// <see cref="Device.CreateQueryPool(uint)"/> mints.</para>
+/// <para><b><see cref="QueryType.AccelerationStructureCompactedSize"/>
+/// pools.</b> Each result is a size in <b>bytes</b> — no masking, no period —
+/// written by
+/// <see cref="CommandRecorder.WriteAccelerationStructuresProperties"/> for
+/// acceleration structures built with
+/// <see cref="AccelerationStructureBuildFlags.AllowCompaction"/>. The same
+/// reset-before-use rule applies
+/// (<c>VUID-vkCmdWriteAccelerationStructuresPropertiesKHR-queryPool-02494</c>
+/// says the queries must be <em>unavailable</em>, which is what a submitted
+/// reset makes them). Mint one with
+/// <see cref="Device.CreateQueryPool(QueryType, uint)"/>.</para>
 /// </remarks>
 public readonly unsafe struct QueryPool : IVulkanHandle<QueryPool>, IDisposable
 {
     public readonly VkQueryPool_T* Handle;
     internal readonly VkDevice_T* DeviceHandle;
     private readonly uint _queryCount;
+    private readonly QueryType _type;
 
-    internal QueryPool(VkQueryPool_T* handle, VkDevice_T* device, uint queryCount)
+    internal QueryPool(VkQueryPool_T* handle, VkDevice_T* device, uint queryCount, QueryType type)
     {
         Handle       = handle;
         DeviceHandle = device;
         _queryCount  = queryCount;
+        _type        = type;
         HandleRegistry.TrackCreate(this);
     }
 
     public static VkObjectType ObjectType => VkObjectType.VK_OBJECT_TYPE_QUERY_POOL;
-    public static QueryPool FromRaw(nint handle) => new((VkQueryPool_T*)handle, null, 0);
+    public static QueryPool FromRaw(nint handle) =>
+        new((VkQueryPool_T*)handle, null, 0, QueryType.Unknown);
     public ulong RawHandle => (ulong)Handle;
     public bool IsNull => Handle == null;
 
@@ -69,6 +86,21 @@ public readonly unsafe struct QueryPool : IVulkanHandle<QueryPool>, IDisposable
     /// created (<c>VUID-VkQueryPoolCreateInfo-queryCount-02763</c>).
     /// </summary>
     public uint QueryCount => _queryCount;
+
+    /// <summary>
+    /// The <c>queryType</c> this pool was created with, as declared at
+    /// <see cref="Device.CreateQueryPool(QueryType, uint)"/>.
+    /// <see cref="QueryType.Unknown"/> for a borrowed
+    /// (<see cref="FromRaw"/> / <c>default</c>) handle, where it means
+    /// <em>unknown</em> — never <em>timestamp</em>. The wrapper cannot learn a
+    /// borrowed pool's type, and guessing wrong would hand
+    /// <c>vkCmdWriteAccelerationStructuresPropertiesKHR</c> a <c>queryType</c>
+    /// that does not match the pool
+    /// (<c>VUID-vkCmdWriteAccelerationStructuresPropertiesKHR-queryPool-02493</c>),
+    /// so the commands that need it refuse a borrowed pool outright rather than
+    /// defaulting.
+    /// </summary>
+    public QueryType Type => _type;
 
     public void Dispose()
     {
@@ -97,10 +129,12 @@ public readonly unsafe struct QueryPool : IVulkanHandle<QueryPool>, IDisposable
     /// <para>Every query in the range must have been reset by a
     /// <b>submitted</b> <see cref="CommandRecorder.ResetQueryPool"/> since
     /// pool creation (<c>VUID-vkGetQueryPoolResults-None-09401</c>).</para>
-    /// <para>Values are raw ticks: mask to the writing queue family's
+    /// <para>Values are raw ticks for a <see cref="QueryType.Timestamp"/>
+    /// pool: mask to the writing queue family's
     /// <see cref="QueueFamilyInfo.TimestampValidBits"/> and multiply the
-    /// masked delta by <see cref="Device.TimestampPeriod"/> for
-    /// nanoseconds.</para>
+    /// masked delta by <see cref="Device.TimestampPeriod"/> for nanoseconds.
+    /// For a <see cref="QueryType.AccelerationStructureCompactedSize"/> pool
+    /// each value is already a size in bytes.</para>
     /// <para>An empty span returns <see langword="true"/> without calling
     /// the driver (<c>vkGetQueryPoolResults</c> requires
     /// <c>dataSize &gt; 0</c>,
@@ -167,9 +201,9 @@ public readonly unsafe struct QueryPool : IVulkanHandle<QueryPool>, IDisposable
     /// until every query in the range is available and writes all values.
     /// </summary>
     /// <remarks>
-    /// <para><b>Can wait forever.</b> A query that was reset but whose
-    /// <see cref="CommandRecorder.WriteTimestamp"/> never got submitted will
-    /// never become available, and the wrapper cannot see submission state —
+    /// <para><b>Can wait forever.</b> A query that was reset but whose write
+    /// command never got submitted will never become available, and the
+    /// wrapper cannot see submission state —
     /// this is the debug/teardown tier, never the per-frame path. Use
     /// <see cref="TryGetResults(uint, Span{ulong})"/> per frame.</para>
     /// <para>Every query in the range must have been reset by a

@@ -33,14 +33,33 @@ namespace Ahjo.Vulkan;
 /// — both are exact mirrors of <c>VkDescriptorBufferInfo</c> /
 /// <c>VkDescriptorImageInfo</c>, so the conversion to native is a
 /// pointer cast at use site, not a copy.</para>
+/// <para><b>Acceleration-structure writes chain rather than point.</b> A
+/// <c>VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR</c> descriptor has no
+/// <c>pBufferInfo</c> / <c>pImageInfo</c> form: it is written by chaining a
+/// <c>VkWriteDescriptorSetAccelerationStructureKHR</c> into
+/// <c>VkWriteDescriptorSet.pNext</c> with both info pointers left null. The
+/// handle for that chain node is stored inline on this struct and the node
+/// itself is carved by the two call sites alongside the
+/// <c>VkWriteDescriptorSet</c> array — see
+/// <see cref="DescriptorWriteBuilder.BuildWrites"/>.</para>
+/// <para><b>Lifetime the caller owns.</b> Whatever a write references — a
+/// buffer, an image view, a sampler, an acceleration structure — must outlive
+/// every use of the descriptor set it is written into, not merely the
+/// <see cref="DescriptorSetExtensions.Update"/> call. For an acceleration
+/// structure that is the strictest case in this file: a destroyed TLAS leaves
+/// a bound descriptor pointing at freed memory, and beneath it the BLAS device
+/// addresses inside the TLAS's instance data are bare numbers no layer can
+/// validate (see
+/// <see cref="AccelerationStructure.GetDeviceAddress"/>).</para>
 /// </remarks>
 [StructLayout(LayoutKind.Sequential)]
-public readonly struct DescriptorWrite
+public readonly unsafe struct DescriptorWrite
 {
     internal enum Kind : byte
     {
-        Buffer = 0,
-        Image  = 1,
+        Buffer                = 0,
+        Image                 = 1,
+        AccelerationStructure = 2,
     }
 
     internal readonly uint                   _binding;
@@ -50,20 +69,30 @@ public readonly struct DescriptorWrite
     internal readonly BufferDescriptorWrite  _buffer;
     internal readonly ImageDescriptorWrite   _image;
 
+    // Last on purpose: appending keeps every existing payload field at the
+    // offset it already had, so the Buffer/Image pointer-cast trick above is
+    // untouched. VkWriteDescriptorSetAccelerationStructureKHR wants a
+    // *pointer to* a handle, so the chain node points at this field in place —
+    // which is why the two call sites must pin the writes span, exactly as
+    // they already do for the buffer and image payloads.
+    internal readonly VkAccelerationStructureKHR_T* _accelerationStructure;
+
     private DescriptorWrite(
-        uint                       binding,
-        uint                       arrayElement,
-        VkDescriptorType           type,
-        Kind                       kind,
-        in BufferDescriptorWrite   buffer,
-        in ImageDescriptorWrite    image)
+        uint                          binding,
+        uint                          arrayElement,
+        VkDescriptorType              type,
+        Kind                          kind,
+        in BufferDescriptorWrite      buffer,
+        in ImageDescriptorWrite       image,
+        VkAccelerationStructureKHR_T* accelerationStructure = null)
     {
-        _binding      = binding;
-        _arrayElement = arrayElement;
-        _type         = type;
-        _kind         = kind;
-        _buffer       = buffer;
-        _image        = image;
+        _binding               = binding;
+        _arrayElement          = arrayElement;
+        _type                  = type;
+        _kind                  = kind;
+        _buffer                = buffer;
+        _image                 = image;
+        _accelerationStructure = accelerationStructure;
     }
 
     /// <summary>
@@ -123,4 +152,34 @@ public readonly struct DescriptorWrite
         => new(binding, arrayElement,
                VkDescriptorType.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, Kind.Image,
                default, in imageAndSampler);
+
+    /// <summary>
+    /// Acceleration-structure descriptor write — the binding a ray-query
+    /// shader reads a TLAS through.
+    /// </summary>
+    /// <param name="binding">Binding index in the target set.</param>
+    /// <param name="arrayElement">Element within the binding's array.</param>
+    /// <param name="structure">
+    /// The top-level acceleration structure to bind. It must outlive every use
+    /// of the descriptor set, and — because a TLAS's instance entries carry
+    /// BLAS device addresses that nothing can validate — every BLAS beneath it
+    /// must outlive the TLAS.
+    /// </param>
+    /// <remarks>
+    /// <b>No <c>type</c> parameter</b>, unlike the buffer and image factories
+    /// which each cover several descriptor types:
+    /// <c>VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR</c> is the only type
+    /// this write can have, so accepting one would only create a value the
+    /// wrapper would have to reject. Declare the matching binding with that
+    /// type on <see cref="DescriptorBinding.Type"/> and budget the pool with a
+    /// matching <c>VkDescriptorPoolSize</c>.
+    /// </remarks>
+    public static DescriptorWrite AccelerationStructure(
+        uint                         binding,
+        uint                         arrayElement,
+        in AccelerationStructure     structure)
+        => new(binding, arrayElement,
+               VkDescriptorType.VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
+               Kind.AccelerationStructure,
+               default, default, structure.Handle);
 }

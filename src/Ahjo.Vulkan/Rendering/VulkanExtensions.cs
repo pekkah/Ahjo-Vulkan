@@ -82,4 +82,53 @@ public static class VulkanExtensions
     /// export a <c>VkSemaphore</c> as a POSIX file descriptor. Pairs with an
     /// exportable <see cref="ExportableSemaphore"/>. Linux only.</summary>
     public static Utf8Name KhrExternalSemaphoreFd => Utf8Name.FromLiteral("VK_KHR_external_semaphore_fd"u8);
+
+    /// <summary>VK_KHR_acceleration_structure — device-level. Enables
+    /// <see cref="Device.CreateAccelerationStructure"/>,
+    /// <see cref="Device.GetAccelerationStructureBuildSizes"/>,
+    /// <see cref="AccelerationStructure.GetDeviceAddress"/> and the
+    /// <see cref="CommandRecorder.BuildAccelerationStructures"/> /
+    /// <see cref="CommandRecorder.WriteAccelerationStructuresProperties"/> /
+    /// <see cref="CommandRecorder.CopyAccelerationStructure"/> commands. This is
+    /// the <b>only</b> one of the three ray-query extensions the wrapper gates
+    /// entry-point resolution on.</summary>
+    /// <remarks>
+    /// <para><b>The full enable recipe, once.</b> Ray query needs all three
+    /// extensions in <see cref="DeviceDescription.Extensions"/> —
+    /// <see cref="KhrAccelerationStructure"/>,
+    /// <see cref="KhrDeferredHostOperations"/> and <see cref="KhrRayQuery"/> —
+    /// <b>and</b> three features pushed from
+    /// <see cref="DeviceDescription.ConfigureFeatures"/>:
+    /// <c>VkPhysicalDeviceAccelerationStructureFeaturesKHR.accelerationStructure</c>,
+    /// <c>VkPhysicalDeviceRayQueryFeaturesKHR.rayQuery</c>, and Vulkan 1.2's
+    /// <c>VkPhysicalDeviceVulkan12Features.bufferDeviceAddress</c> (every
+    /// build input, the scratch and the TLAS instance references are device
+    /// addresses). The extensions alone are not enough, and the wrapper cannot
+    /// check the features — Vulkan exposes no post-<c>vkCreateDevice</c>
+    /// feature query.</para>
+    /// </remarks>
+    public static Utf8Name KhrAccelerationStructure =>
+        Utf8Name.FromLiteral(DeviceExtensionNames.AccelerationStructure);
+
+    /// <summary>VK_KHR_ray_query — device-level. Adds the <c>OpRayQuery*</c>
+    /// SPIR-V instructions a shader uses to traverse a TLAS bound through a
+    /// <c>VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR</c> binding (see
+    /// <see cref="DescriptorWrite.AccelerationStructure"/>).</summary>
+    /// <remarks>Gates <b>nothing</b> in the wrapper: ray query defines no
+    /// Vulkan entry points at all, only shader capability. Pass it to
+    /// <c>vkCreateDevice</c> alongside <see cref="KhrAccelerationStructure"/>
+    /// and enable <c>VkPhysicalDeviceRayQueryFeaturesKHR.rayQuery</c> — the
+    /// full recipe is on <see cref="KhrAccelerationStructure"/>.</remarks>
+    public static Utf8Name KhrRayQuery => Utf8Name.FromLiteral(DeviceExtensionNames.RayQuery);
+
+    /// <summary>VK_KHR_deferred_host_operations — device-level. Required by
+    /// <see cref="KhrAccelerationStructure"/> as a device-creation dependency:
+    /// <c>vkCreateDevice</c> fails without it.</summary>
+    /// <remarks>Gates <b>nothing</b> in the wrapper, and the wrapper calls no
+    /// deferred command — it records the command-buffer forms of build and
+    /// copy, which take no <c>VkDeferredOperationKHR</c>. It is listed here
+    /// only so the caller can satisfy the dependency. The full recipe is on
+    /// <see cref="KhrAccelerationStructure"/>.</remarks>
+    public static Utf8Name KhrDeferredHostOperations =>
+        Utf8Name.FromLiteral(DeviceExtensionNames.DeferredHostOperations);
 }

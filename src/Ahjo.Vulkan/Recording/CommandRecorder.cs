@@ -25,7 +25,10 @@ namespace Ahjo.Vulkan;
 /// BindIndexBuffer, Draw / DrawIndexed / DrawIndirect /
 /// DrawIndirectCount / DrawIndexedIndirect / DrawIndexedIndirectCount,
 /// Dispatch / DispatchIndirect, pipeline barriers and split barriers
-/// (SetEvent / WaitEvent / ResetEvent).</para>
+/// (SetEvent / WaitEvent / ResetEvent), and — behind
+/// <c>VK_KHR_acceleration_structure</c> — BuildAccelerationStructures,
+/// WriteAccelerationStructuresProperties and
+/// CopyAccelerationStructure.</para>
 /// </remarks>
 public unsafe ref struct CommandRecorder : IDisposable
 {
@@ -443,7 +446,12 @@ public unsafe ref struct CommandRecorder : IDisposable
         if (count <= StackThreshold)
         {
             Span<VkWriteDescriptorSet> raws = stackalloc VkWriteDescriptorSet[count];
-            FlushPush(cmdPushDescriptorSet, Handle, bindPoint, layout.Handle, set, writes, raws);
+            // Carved alongside raws by the same rule: an acceleration-structure
+            // write needs a VkWriteDescriptorSetAccelerationStructureKHR chained
+            // into pNext, and that node must outlive the native call.
+            Span<VkWriteDescriptorSetAccelerationStructureKHR> chains =
+                stackalloc VkWriteDescriptorSetAccelerationStructureKHR[count];
+            FlushPush(cmdPushDescriptorSet, Handle, bindPoint, layout.Handle, set, writes, raws, chains);
             return;
         }
 
@@ -451,7 +459,19 @@ public unsafe ref struct CommandRecorder : IDisposable
             System.Buffers.ArrayPool<VkWriteDescriptorSet>.Shared.Rent(count);
         try
         {
-            FlushPush(cmdPushDescriptorSet, Handle, bindPoint, layout.Handle, set, writes, rented.AsSpan(0, count));
+            VkWriteDescriptorSetAccelerationStructureKHR[] rentedChains =
+                System.Buffers.ArrayPool<VkWriteDescriptorSetAccelerationStructureKHR>.Shared.Rent(count);
+            try
+            {
+                FlushPush(
+                    cmdPushDescriptorSet, Handle, bindPoint, layout.Handle, set, writes,
+                    rented.AsSpan(0, count), rentedChains.AsSpan(0, count));
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<VkWriteDescriptorSetAccelerationStructureKHR>.Shared
+                    .Return(rentedChains);
+            }
         }
         finally
         {
@@ -472,19 +492,29 @@ public unsafe ref struct CommandRecorder : IDisposable
             "Mesh-shader draw commands are not available on this device. " +
             MeshShaderSupport.EnableInstructions);
 
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    private static void ThrowAccelerationStructureUnsupported(string what) =>
+        throw new InvalidOperationException(
+            what + " is not available on this device. " +
+            AccelerationStructureSupport.EnableInstructions);
+
     private static void FlushPush(
         delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, VkPipelineBindPoint, VkPipelineLayout_T*, uint, uint, VkWriteDescriptorSet*, void> cmdPushDescriptorSet,
-        VkCommandBuffer_T*            cb,
-        VkPipelineBindPoint           bindPoint,
-        VkPipelineLayout_T*           layout,
-        uint                          set,
-        ReadOnlySpan<DescriptorWrite> writes,
-        Span<VkWriteDescriptorSet>    raws)
+        VkCommandBuffer_T*                                 cb,
+        VkPipelineBindPoint                                bindPoint,
+        VkPipelineLayout_T*                                layout,
+        uint                                               set,
+        ReadOnlySpan<DescriptorWrite>                      writes,
+        Span<VkWriteDescriptorSet>                         raws,
+        Span<VkWriteDescriptorSetAccelerationStructureKHR> chains)
     {
+        // writes and chains are both pinned across BuildWrites AND the native
+        // call: the produced entries point into both.
         fixed (DescriptorWrite* _ = writes)
+        fixed (VkWriteDescriptorSetAccelerationStructureKHR* __ = chains)
         {
             // dstSet is ignored by vkCmdPushDescriptorSet; pass null.
-            DescriptorWriteBuilder.BuildWrites(writes, setHandle: null, raws);
+            DescriptorWriteBuilder.BuildWrites(writes, setHandle: null, raws, chains);
             fixed (VkWriteDescriptorSet* pRaws = raws)
                 cmdPushDescriptorSet(cb, bindPoint, layout, set, (uint)writes.Length, pRaws);
         }
@@ -1038,8 +1068,576 @@ public unsafe ref struct CommandRecorder : IDisposable
             if (pool.QueryCount != 0 && query >= pool.QueryCount)
                 AhjoValidation.Fail("CommandRecorder",
                     $"WriteTimestamp: query {query} is out of range for the pool's queryCount ({pool.QueryCount}).");
+            // The reciprocal of the type check in
+            // WriteAccelerationStructuresProperties. Before #202 the wrapper
+            // could only mint timestamp pools, so this could not be got wrong;
+            // Device.CreateQueryPool(QueryType, uint) makes a compacted-size
+            // pool reachable here. Unknown is a borrowed pool, whose type the
+            // wrapper never learned — not enforceable, so it is let through,
+            // matching how QueryCount == 0 is treated above.
+            if (pool.Type != QueryType.Unknown && pool.Type != QueryType.Timestamp)
+                AhjoValidation.Fail("CommandRecorder",
+                    $"WriteTimestamp: the pool's type is {pool.Type}, but vkCmdWriteTimestamp2 requires a "
+                    + "QueryType.Timestamp pool "
+                    + "(VUID-vkCmdWriteTimestamp2-queryPool-03861). Mint one with "
+                    + "Device.CreateQueryPool(count).");
         }
         Fns.CmdWriteTimestamp2(Handle, (ulong)stage, pool.Handle, query);
+    }
+
+    // ---- Acceleration structures (VK_KHR_acceleration_structure) ----
+
+    // The batch and geometry counts below which BuildAccelerationStructures
+    // stackallocs its three native scratch spans instead of renting. The
+    // per-frame shape this path exists for is a single TLAS rebuild — one
+    // build, one Instances geometry — so 8 and 16 clear it by three orders of
+    // magnitude, while load-time BLAS batches (which are not per-frame and can
+    // afford a pooled rental) fall through to ArrayPool. Worst case on the
+    // stack path is roughly 2.2 KB. Reasoned, not measured: if a consumer
+    // turns up that batches ~64 builds per frame, move these with a
+    // measurement behind them.
+    private const int BuildStackThreshold    = 8;
+    private const int GeometryStackThreshold = 16;
+
+    /// <summary>
+    /// <c>vkCmdBuildAccelerationStructuresKHR</c> — records a batch of
+    /// acceleration-structure builds. Each entry of <paramref name="builds"/>
+    /// names its destination, its mode and flags, its caller-owned scratch
+    /// address, and a <c>(FirstGeometry, GeometryCount)</c> slice of the other
+    /// two spans.
+    /// </summary>
+    /// <param name="builds">The batch. An empty span is a no-op.</param>
+    /// <param name="geometries">
+    /// The flat geometry span the builds slice into.
+    /// </param>
+    /// <param name="ranges">
+    /// One <see cref="AccelerationStructureBuildRange"/> per geometry, indexed
+    /// <b>identically</b> to <paramref name="geometries"/> — the two spans must
+    /// be the same length. Cast in place to
+    /// <c>VkAccelerationStructureBuildRangeInfoKHR</c>, never copied.
+    /// </param>
+    /// <remarks>
+    /// <para><b>The CSR contract.</b> One
+    /// <see cref="AccelerationStructureBuild.FirstGeometry"/> /
+    /// <see cref="AccelerationStructureBuild.GeometryCount"/> pair slices both
+    /// <paramref name="geometries"/> and <paramref name="ranges"/>, because
+    /// Vulkan pairs exactly one range with each geometry. See
+    /// <see cref="AccelerationStructureBuild"/> for the worked
+    /// example.</para>
+    /// <para><b>Scratch rules, none of which the wrapper can check.</b> Size
+    /// each build's scratch from
+    /// <see cref="AccelerationStructureBuildSizes.BuildScratchSize"/> (or
+    /// <see cref="AccelerationStructureBuildSizes.UpdateScratchSize"/> for
+    /// <see cref="AccelerationStructureBuildMode.Update"/>); align the
+    /// <b>address</b> to
+    /// <see cref="AccelerationStructureLimits.MinScratchOffsetAlignment"/>
+    /// (<c>VUID-vkCmdBuildAccelerationStructuresKHR-pInfos-03710</c>); create
+    /// the buffer with <see cref="BufferUsage.StorageBuffer"/> |
+    /// <see cref="BufferUsage.ShaderDeviceAddress"/>; and give <b>every build in
+    /// this one call a non-overlapping scratch range</b>
+    /// (<c>-scratchData-03704</c>), because builds within one call may execute
+    /// concurrently.</para>
+    /// <para><b>Scope and queue.</b> Must be recorded <b>outside</b> a
+    /// <see cref="BeginRendering"/> / <see cref="EndRendering"/> scope
+    /// (<c>VUID-vkCmdBuildAccelerationStructuresKHR-renderpass</c>), from a
+    /// pool whose queue family supports <c>VK_QUEUE_COMPUTE_BIT</c>
+    /// (<c>-commandBuffer-cmdpool</c>).</para>
+    /// <para><b>The barrier a consumer needs.</b> A build is not visible to
+    /// anything that reads it until you barrier
+    /// <see cref="Stage.AccelerationStructureBuild"/> /
+    /// <see cref="Access.AccelerationStructureWrite"/> → the consuming stage /
+    /// <see cref="Access.AccelerationStructureRead"/>. For a ray-query
+    /// traversal the consuming stage is the shader stage that runs the query
+    /// (<see cref="Stage.ComputeShader"/> /
+    /// <see cref="Stage.FragmentShader"/>), never an RT-pipeline stage; for a
+    /// TLAS build over freshly built BLASes, or for a compacted-size query, it
+    /// is <see cref="Stage.AccelerationStructureBuild"/> again.</para>
+    /// <para><b>Lifetime.</b> The destination structures <em>and their
+    /// buffers</em>, any update sources and theirs, every scratch range, and
+    /// every buffer behind an address in <paramref name="geometries"/> must
+    /// stay alive, resident and unmodified until the build completes on the
+    /// GPU.</para>
+    /// <para>Allocates zero per call when
+    /// <paramref name="builds"/> has <c>≤ 8</c> entries and
+    /// <paramref name="geometries"/> has <c>≤ 16</c>; larger batches rent from
+    /// <see cref="ArrayPool{T}"/>.</para>
+    /// <para>All three parameters are <c>scoped</c>: nothing here outlives the
+    /// call, and saying so is what lets a caller pass a <c>stackalloc</c> to a
+    /// <c>ref struct</c> receiver — the per-frame TLAS shape this method exists
+    /// for. Without it the compiler must assume the recorder could capture the
+    /// spans (CS9080) and only heap arrays would compile.</para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// <c>VK_KHR_acceleration_structure</c> was not enabled on this device.
+    /// </exception>
+    public void BuildAccelerationStructures(
+        scoped ReadOnlySpan<AccelerationStructureBuild>      builds,
+        scoped ReadOnlySpan<AccelerationStructureGeometry>   geometries,
+        scoped ReadOnlySpan<AccelerationStructureBuildRange> ranges)
+    {
+        // Unconditional, deliberately not behind AhjoValidation: IsEnabled is
+        // false in Release, which is exactly the build where dispatching
+        // through a null pointer is an access violation (the DrawMeshTasks
+        // precedent).
+        var fn = Fns.CmdBuildAccelerationStructures;
+        if (fn == null) ThrowAccelerationStructureUnsupported("BuildAccelerationStructures");
+
+        // An empty batch is a no-op — the CopyBuffer empty-span precedent, and
+        // vkCmdBuildAccelerationStructuresKHR requires infoCount > 0 anyway.
+        if (builds.IsEmpty) return;
+
+        // Unconditional, for the same reason the null-pointer check above is:
+        // these two are MEMORY SAFETY, not valid usage. The translator turns
+        // FirstGeometry/GeometryCount straight into a pointer offset and a
+        // count over the native geometry buffer, so an out-of-range slice
+        // makes the driver read past the end of a stackalloc (or a pooled
+        // array) and interpret whatever is there as sType and device
+        // addresses. Nothing can diagnose that: the pointers are structurally
+        // valid, so the validation layer sees a well-formed call. That is
+        // what makes this unlike the ResetQueryPool range guard, where an
+        // out-of-range value reaches the driver as a value and the layer
+        // catches it — and AhjoValidation.IsEnabled is false in Release,
+        // exactly the build where this would corrupt.
+        ValidateBuildSlices(builds, geometries, ranges);
+
+        // The remaining guards are valid-usage checks the layer also catches,
+        // so they stay gated.
+        if (AhjoValidation.IsEnabled) AssertBuildsValid(builds, geometries, ranges);
+
+        int buildCount = builds.Length;
+        int geoCount   = geometries.Length;
+
+        if (buildCount <= BuildStackThreshold && geoCount <= GeometryStackThreshold)
+        {
+            Span<VkAccelerationStructureBuildGeometryInfoKHR> infos =
+                stackalloc VkAccelerationStructureBuildGeometryInfoKHR[buildCount];
+            Span<VkAccelerationStructureGeometryKHR> natives =
+                stackalloc VkAccelerationStructureGeometryKHR[geoCount];
+            Span<nint> ppRanges = stackalloc nint[buildCount];
+            RecordBuilds(fn, Handle, builds, geometries, ranges, infos, natives, ppRanges);
+            return;
+        }
+
+        var infoPool   = System.Buffers.ArrayPool<VkAccelerationStructureBuildGeometryInfoKHR>.Shared;
+        var geoPool    = System.Buffers.ArrayPool<VkAccelerationStructureGeometryKHR>.Shared;
+        var rangePool  = System.Buffers.ArrayPool<nint>.Shared;
+
+        VkAccelerationStructureBuildGeometryInfoKHR[] rentedInfos = infoPool.Rent(buildCount);
+        try
+        {
+            VkAccelerationStructureGeometryKHR[] rentedGeos = geoPool.Rent(geoCount);
+            try
+            {
+                nint[] rentedRanges = rangePool.Rent(buildCount);
+                try
+                {
+                    RecordBuilds(
+                        fn, Handle, builds, geometries, ranges,
+                        rentedInfos.AsSpan(0, buildCount),
+                        rentedGeos.AsSpan(0, geoCount),
+                        rentedRanges.AsSpan(0, buildCount));
+                }
+                finally { rangePool.Return(rentedRanges); }
+            }
+            finally { geoPool.Return(rentedGeos); }
+        }
+        finally { infoPool.Return(rentedInfos); }
+    }
+
+    // The post-carve half of BuildAccelerationStructures, factored out so the
+    // stackalloc and ArrayPool paths share one body (the FlushPush split).
+    // Every span reaching the translator is pinned here and stays pinned
+    // across the native call — the native structs point into all of them.
+    private static void RecordBuilds(
+        delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, uint, VkAccelerationStructureBuildGeometryInfoKHR*, VkAccelerationStructureBuildRangeInfoKHR**, void> fn,
+        VkCommandBuffer_T*                                       cb,
+        scoped ReadOnlySpan<AccelerationStructureBuild>          builds,
+        scoped ReadOnlySpan<AccelerationStructureGeometry>       geometries,
+        scoped ReadOnlySpan<AccelerationStructureBuildRange>     ranges,
+        scoped Span<VkAccelerationStructureBuildGeometryInfoKHR> infos,
+        scoped Span<VkAccelerationStructureGeometryKHR>          natives,
+        scoped Span<nint>                                        ppRanges)
+    {
+        fixed (AccelerationStructureBuildRange* pRangesManaged = ranges)
+        fixed (VkAccelerationStructureGeometryKHR* pNatives = natives)
+        fixed (VkAccelerationStructureBuildGeometryInfoKHR* pInfos = infos)
+        fixed (nint* pppRanges = ppRanges)
+        {
+            // AccelerationStructureBuildRange is an exact layout mirror of
+            // VkAccelerationStructureBuildRangeInfoKHR (four uints, pinned by
+            // a test), so this is a pointer cast, not a copy.
+            var pRanges = (VkAccelerationStructureBuildRangeInfoKHR*)pRangesManaged;
+            var ppr     = (VkAccelerationStructureBuildRangeInfoKHR**)pppRanges;
+
+            AccelerationStructureBuildTranslator.BuildGeometryInfos(
+                builds, geometries, pRanges, pNatives, pInfos, ppr);
+
+            fn(cb, (uint)builds.Length, pInfos, ppr);
+        }
+    }
+
+    /// <summary>
+    /// The subset of <see cref="BuildAccelerationStructures"/>'s checks that
+    /// must run in <b>every</b> build configuration, because the translator
+    /// consumes these values as raw pointer arithmetic over caller-sized
+    /// buffers rather than passing them to the driver as values. A violation
+    /// here is out-of-bounds memory, not a validation error, so it throws
+    /// rather than routing through <see cref="AhjoValidation"/>.
+    /// </summary>
+    private static void ValidateBuildSlices(
+        scoped ReadOnlySpan<AccelerationStructureBuild>      builds,
+        scoped ReadOnlySpan<AccelerationStructureGeometry>   geometries,
+        scoped ReadOnlySpan<AccelerationStructureBuildRange> ranges)
+    {
+        // ppBuildRangeInfos[b] is sliced from the ranges span at the same
+        // offset and count as pGeometries is from the geometry span, so a
+        // shorter ranges span is read out of bounds by the driver.
+        if (ranges.Length != geometries.Length)
+            throw new ArgumentException(
+                $"BuildAccelerationStructures: ranges has {ranges.Length} entries but geometries has "
+                + $"{geometries.Length}. Vulkan pairs exactly one build range with each geometry, so the "
+                + "two spans must be the same length and are indexed identically.", nameof(ranges));
+
+        for (int b = 0; b < builds.Length; b++)
+        {
+            ref readonly AccelerationStructureBuild build = ref builds[b];
+
+            if (build.GeometryCount == 0)
+                throw new ArgumentException(
+                    $"BuildAccelerationStructures: builds[{b}].GeometryCount is 0; a build must carry at "
+                    + "least one geometry.", nameof(builds));
+
+            // Widened to ulong before adding: uint arithmetic would wrap
+            // (e.g. FirstGeometry = 0xFFFF_FFFE, GeometryCount = 4 -> 2) and
+            // let an out-of-range slice past the guard.
+            if ((ulong)build.FirstGeometry + build.GeometryCount > (ulong)geometries.Length)
+                throw new ArgumentOutOfRangeException(nameof(builds),
+                    $"BuildAccelerationStructures: builds[{b}] slices geometries["
+                    + $"{build.FirstGeometry}, {(ulong)build.FirstGeometry + build.GeometryCount}) "
+                    + $"but only {geometries.Length} geometries were passed. The slice is used as a raw "
+                    + "pointer offset into the native geometry buffer, so an out-of-range value would "
+                    + "have the driver read uninitialized memory.");
+        }
+    }
+
+    private static void AssertBuildsValid(
+        scoped ReadOnlySpan<AccelerationStructureBuild>      builds,
+        scoped ReadOnlySpan<AccelerationStructureGeometry>   geometries,
+        scoped ReadOnlySpan<AccelerationStructureBuildRange> ranges)
+    {
+        // Span lengths and every build's slice are already proven in range by
+        // the unconditional ValidateBuildSlices, so the indexing below is safe.
+        _ = ranges;
+
+        for (int b = 0; b < builds.Length; b++)
+        {
+            ref readonly AccelerationStructureBuild build = ref builds[b];
+
+            if (build.Destination.IsNull)
+                AhjoValidation.Fail("CommandRecorder",
+                    $"BuildAccelerationStructures: builds[{b}].Destination is a null handle. Create one "
+                    + "with Device.CreateAccelerationStructure.");
+
+            if (build.Mode == AccelerationStructureBuildMode.Update)
+            {
+                if (build.Source.IsNull)
+                    AhjoValidation.Fail("CommandRecorder",
+                        $"BuildAccelerationStructures: builds[{b}].Mode is Update but Source is a null "
+                        + "handle; an update must name the structure it refits "
+                        + "(VUID-vkCmdBuildAccelerationStructuresKHR-pInfos-04630). The source must also "
+                        + "have been built with AccelerationStructureBuildFlags.AllowUpdate "
+                        + "(-pInfos-03667), which the wrapper cannot see.");
+            }
+            else if (!build.Source.IsNull)
+            {
+                AhjoValidation.Fail("CommandRecorder",
+                    $"BuildAccelerationStructures: builds[{b}].Mode is Build but Source is non-null; a "
+                    + "from-scratch build must leave Source at default. Set Mode = Update to refit.");
+            }
+
+            // The type/kind pairing. This is the guard that catches the
+            // AccelerationStructureType.TopLevel == 0 footgun.
+            if (build.Type == AccelerationStructureType.TopLevel)
+            {
+                if (build.GeometryCount != 1)
+                    AhjoValidation.Fail("CommandRecorder",
+                        $"BuildAccelerationStructures: builds[{b}].Type is TopLevel but GeometryCount is "
+                        + $"{build.GeometryCount}; a top-level build must carry exactly one geometry "
+                        + "(VUID-VkAccelerationStructureBuildGeometryInfoKHR-type-03790). Note TopLevel is "
+                        + "the DEFAULT value of AccelerationStructureType — a bottom-level build must set "
+                        + "Type = AccelerationStructureType.BottomLevel explicitly.");
+                else if (geometries[(int)build.FirstGeometry].Kind != GeometryKind.Instances)
+                    AhjoValidation.Fail("CommandRecorder",
+                        $"BuildAccelerationStructures: builds[{b}].Type is TopLevel but its geometry is "
+                        + $"{geometries[(int)build.FirstGeometry].Kind}, not Instances; a top-level build's "
+                        + "geometry must be Instances "
+                        + "(VUID-VkAccelerationStructureBuildGeometryInfoKHR-type-03789). Note TopLevel is "
+                        + "the DEFAULT value of AccelerationStructureType — a bottom-level build must set "
+                        + "Type = AccelerationStructureType.BottomLevel explicitly.");
+            }
+            else if (build.Type == AccelerationStructureType.BottomLevel)
+            {
+                for (uint g = 0; g < build.GeometryCount; g++)
+                {
+                    int gi = (int)(build.FirstGeometry + g);
+                    if (geometries[gi].Kind == GeometryKind.Instances)
+                        AhjoValidation.Fail("CommandRecorder",
+                            $"BuildAccelerationStructures: builds[{b}].Type is BottomLevel but "
+                            + $"geometries[{gi}] is Instances; instance geometry belongs to a top-level "
+                            + "build only "
+                            + "(VUID-VkAccelerationStructureBuildGeometryInfoKHR-type-03791).");
+                }
+            }
+
+            // Scratch aliasing, exact matches only. Builds batched into one
+            // call may execute concurrently, so their scratch ranges must not
+            // overlap (VUID-vkCmdBuildAccelerationStructuresKHR-scratchData-03704).
+            // General overlap is undecidable here — ScratchAddress is a bare
+            // device address with no length attached, and the wrapper never
+            // sees the sizes — but two builds pointing at the SAME address is
+            // decidable, is the natural first mistake with a batched API (reuse
+            // one scratch buffer for the whole batch), and is a violation
+            // whenever either build actually consumes scratch. O(n squared),
+            // but only under AhjoValidation and only over the batch.
+            if (build.ScratchAddress != 0)
+            {
+                for (int other = 0; other < b; other++)
+                    if (builds[other].ScratchAddress == build.ScratchAddress)
+                        AhjoValidation.Fail("CommandRecorder",
+                            $"BuildAccelerationStructures: builds[{b}] and builds[{other}] share the "
+                            + $"scratch address 0x{build.ScratchAddress:X}. Builds in one call may run "
+                            + "concurrently, so each needs its own non-overlapping scratch range "
+                            + "(VUID-vkCmdBuildAccelerationStructuresKHR-scratchData-03704): suballocate "
+                            + "one scratch buffer per build, each sized from "
+                            + "AccelerationStructureBuildSizes.BuildScratchSize (or UpdateScratchSize) and "
+                            + "aligned to AccelerationStructureLimits.MinScratchOffsetAlignment. (The "
+                            + "wrapper flags only exact matches; it cannot see the ranges' sizes, so a "
+                            + "partial overlap still reaches the driver. If both builds genuinely need "
+                            + "zero scratch this check is over-strict — pass 0 for those.)");
+            }
+        }
+    }
+
+    /// <summary>
+    /// <c>vkCmdWriteAccelerationStructuresPropertiesKHR</c> — writes one query
+    /// per entry of <paramref name="structures"/> into <paramref name="pool"/>,
+    /// starting at <paramref name="firstQuery"/>. With a
+    /// <see cref="QueryType.AccelerationStructureCompactedSize"/> pool each
+    /// result is the structure's compacted size in <b>bytes</b>.
+    /// </summary>
+    /// <param name="structures">The structures to measure. Empty is a
+    /// no-op.</param>
+    /// <param name="pool">
+    /// The destination pool. Its <see cref="QueryPool.Type"/> supplies the
+    /// command's <c>queryType</c>, which is why this method takes no such
+    /// parameter and therefore cannot mismatch the pool
+    /// (<c>VUID-vkCmdWriteAccelerationStructuresPropertiesKHR-queryPool-02493</c>).
+    /// A borrowed pool is rejected: the wrapper never learned its type and has
+    /// nothing valid to pass.
+    /// </param>
+    /// <param name="firstQuery">First query index to write.</param>
+    /// <remarks>
+    /// <para><b>Reset first, and submit the reset.</b> The queries must be
+    /// <em>unavailable</em> when this executes
+    /// (<c>-queryPool-02494</c>), which is what a <b>submitted</b>
+    /// <see cref="ResetQueryPool"/> makes them.</para>
+    /// <para><b>Every structure must have been built with
+    /// <see cref="AccelerationStructureBuildFlags.AllowCompaction"/></b>
+    /// for a compacted-size query (<c>-accelerationStructures-03431</c>), and
+    /// must have finished building before this command executes
+    /// (<c>-pAccelerationStructures-04964</c>) — so a barrier is required
+    /// between the build and this command.</para>
+    /// <para><b>The compaction flow, end to end.</b></para>
+    /// <list type="number">
+    ///   <item><description>Build the BLAS with
+    ///     <see cref="AccelerationStructureBuildFlags.AllowCompaction"/>.</description></item>
+    ///   <item><description>Barrier
+    ///     <see cref="Stage.AccelerationStructureBuild"/> /
+    ///     <see cref="Access.AccelerationStructureWrite"/> →
+    ///     <see cref="Stage.AccelerationStructureBuild"/> /
+    ///     <see cref="Access.AccelerationStructureRead"/>.</description></item>
+    ///   <item><description><see cref="ResetQueryPool"/> over the range, then
+    ///     this command.</description></item>
+    ///   <item><description>Submit; wait on the fence.</description></item>
+    ///   <item><description><see cref="QueryPool.GetResults(uint, Span{ulong})"/>
+    ///     — each value is the compacted size in bytes.</description></item>
+    ///   <item><description>Allocate a buffer of that size,
+    ///     <see cref="Device.CreateAccelerationStructure"/> over it, then
+    ///     <see cref="CopyAccelerationStructure"/> with
+    ///     <see cref="AccelerationStructureCopyMode.Compact"/>; submit and
+    ///     wait.</description></item>
+    ///   <item><description><b>Only now</b> dispose the original structure and
+    ///     free its buffer — and remember the compacted copy has a
+    ///     <em>different</em> device address, so any TLAS over it must be
+    ///     rebuilt.</description></item>
+    /// </list>
+    /// <para>Must be recorded outside a rendering scope, from a
+    /// compute-capable pool. Allocates zero per call for <c>≤ 8</c>
+    /// structures.</para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// <c>VK_KHR_acceleration_structure</c> was not enabled on this device, or
+    /// <paramref name="pool"/> is null or borrowed.
+    /// </exception>
+    public void WriteAccelerationStructuresProperties(
+        scoped ReadOnlySpan<AccelerationStructure> structures, in QueryPool pool, uint firstQuery)
+    {
+        var fn = Fns.CmdWriteAccelerationStructuresProperties;
+        if (fn == null) ThrowAccelerationStructureUnsupported("WriteAccelerationStructuresProperties");
+
+        // accelerationStructureCount must be > 0
+        // (VUID-...-accelerationStructureCount-arraylength), so an empty span
+        // returns rather than dispatching a zero-count call.
+        if (structures.IsEmpty) return;
+
+        // Unconditional, not AhjoValidation-gated: without a type there is no
+        // queryType to pass, so this is a "cannot proceed", not a "you are
+        // probably wrong" (the QueryPool.ThrowIfBorrowed voice).
+        if (pool.IsNull)
+            throw new InvalidOperationException(
+                "WriteAccelerationStructuresProperties: query pool is a null handle. Create one with "
+                + "Device.CreateQueryPool(QueryType.AccelerationStructureCompactedSize, count).");
+        if (pool.Type == QueryType.Unknown)
+            throw new InvalidOperationException(
+                "WriteAccelerationStructuresProperties requires a pool whose type the wrapper knows; a "
+                + "FromRaw-constructed (borrowed) pool reports QueryType.Unknown, and the wrapper has no "
+                + "valid queryType to pass to vkCmdWriteAccelerationStructuresPropertiesKHR "
+                + "(VUID-vkCmdWriteAccelerationStructuresPropertiesKHR-queryPool-02493). Create the pool "
+                + "with Device.CreateQueryPool(QueryType.AccelerationStructureCompactedSize, count).");
+        // Unconditional for the same reason as the Unknown case above, which
+        // is a failure of identical character: the pool's type IS the
+        // queryType this command passes, so a mismatched pool sends the driver
+        // a queryType that cannot match the pool it names
+        // (VUID-vkCmdWriteAccelerationStructuresPropertiesKHR-queryPool-02493,
+        // -queryType-06742). Gating it would let a Timestamp pool through in
+        // Release, where AhjoValidation.IsEnabled is false.
+        if (pool.Type != QueryType.AccelerationStructureCompactedSize)
+            throw new InvalidOperationException(
+                $"WriteAccelerationStructuresProperties: the pool's type is {pool.Type}, but this command "
+                + "needs QueryType.AccelerationStructureCompactedSize — the pool's own type is what is "
+                + "passed as the command's queryType, and the two must match "
+                + "(VUID-vkCmdWriteAccelerationStructuresPropertiesKHR-queryPool-02493 / -queryType-06742). "
+                + "Create the pool with "
+                + "Device.CreateQueryPool(QueryType.AccelerationStructureCompactedSize, count).");
+
+        if (AhjoValidation.IsEnabled)
+        {
+            // Widened to ulong before adding, as elsewhere in this file.
+            if (pool.QueryCount != 0 && (ulong)firstQuery + (uint)structures.Length > pool.QueryCount)
+                AhjoValidation.Fail("CommandRecorder",
+                    $"WriteAccelerationStructuresProperties: range [{firstQuery}, "
+                    + $"{(ulong)firstQuery + (uint)structures.Length}) exceeds the pool's QueryCount "
+                    + $"({pool.QueryCount}) "
+                    + "(VUID-vkCmdWriteAccelerationStructuresPropertiesKHR-query-04880).");
+
+            for (int i = 0; i < structures.Length; i++)
+                if (structures[i].IsNull)
+                    AhjoValidation.Fail("CommandRecorder",
+                        $"WriteAccelerationStructuresProperties: structures[{i}] is a null handle.");
+        }
+
+        int count = structures.Length;
+        if (count <= BuildStackThreshold)
+        {
+            Span<nint> handles = stackalloc nint[count];
+            FlushWriteProperties(fn, Handle, structures, handles, pool, firstQuery);
+            return;
+        }
+
+        nint[] rented = System.Buffers.ArrayPool<nint>.Shared.Rent(count);
+        try
+        {
+            FlushWriteProperties(fn, Handle, structures, rented.AsSpan(0, count), pool, firstQuery);
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<nint>.Shared.Return(rented);
+        }
+    }
+
+    private static void FlushWriteProperties(
+        delegate* unmanaged[Stdcall]<VkCommandBuffer_T*, uint, VkAccelerationStructureKHR_T**, VkQueryType, VkQueryPool_T*, uint, void> fn,
+        VkCommandBuffer_T*                         cb,
+        scoped ReadOnlySpan<AccelerationStructure> structures,
+        scoped Span<nint>                          handles,
+        in QueryPool                               pool,
+        uint                                       firstQuery)
+    {
+        for (int i = 0; i < structures.Length; i++)
+            handles[i] = (nint)structures[i].Handle;
+
+        fixed (nint* pHandles = handles)
+            fn(cb, (uint)structures.Length, (VkAccelerationStructureKHR_T**)pHandles,
+               (VkQueryType)pool.Type, pool.Handle, firstQuery);
+    }
+
+    /// <summary>
+    /// <c>vkCmdCopyAccelerationStructureKHR</c> — copies
+    /// <paramref name="source"/> into <paramref name="destination"/>, either
+    /// verbatim (<see cref="AccelerationStructureCopyMode.Clone"/>) or
+    /// compacted (<see cref="AccelerationStructureCopyMode.Compact"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>For <see cref="AccelerationStructureCopyMode.Compact"/></b> the
+    /// source must have been built with
+    /// <see cref="AccelerationStructureBuildFlags.AllowCompaction"/>
+    /// (<c>VUID-VkCopyAccelerationStructureInfoKHR-src-03411</c>) and
+    /// <paramref name="destination"/> must have been created over a range of
+    /// exactly the size read back from
+    /// <see cref="WriteAccelerationStructuresProperties"/>. Neither is
+    /// checkable by the wrapper.</para>
+    /// <para><b>Ordering.</b> The source must have finished building
+    /// (<c>-src-04963</c>), so a barrier is required before this command; and
+    /// the source <em>and its buffer</em> must stay alive until the copy has
+    /// completed on the GPU — only then may either be disposed. The
+    /// destination's memory must not overlap the source's
+    /// (<c>-dst-07791</c>).</para>
+    /// <para><b>The compacted copy has a different device address.</b> It lives
+    /// in a different buffer, so
+    /// <see cref="AccelerationStructure.GetDeviceAddress"/> returns a new
+    /// value and every TLAS whose instance entries referenced the original must
+    /// be <em>fully rebuilt</em> against the new address — there is no
+    /// diagnostic for getting this wrong.</para>
+    /// <para><b>Barrier with <see cref="Stage.AccelerationStructureBuild"/>,
+    /// not <see cref="Stage.AccelerationStructureCopy"/>.</b> The copy stage
+    /// bit belongs to <c>VK_KHR_ray_tracing_maintenance1</c>, which the enable
+    /// recipe for this surface does not turn on, so using it is a validation
+    /// error (<c>VUID-VkMemoryBarrier2-srcStageMask-10752</c>) on an otherwise
+    /// correctly configured device. This command executes in
+    /// <see cref="Stage.AccelerationStructureBuild"/> as well, so that bit
+    /// synchronizes it correctly with no extra extension.</para>
+    /// <para>Must be recorded outside a rendering scope, from a
+    /// compute-capable pool.</para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// <c>VK_KHR_acceleration_structure</c> was not enabled on this device.
+    /// </exception>
+    public void CopyAccelerationStructure(
+        in AccelerationStructure source,
+        in AccelerationStructure destination,
+        AccelerationStructureCopyMode mode)
+    {
+        var fn = Fns.CmdCopyAccelerationStructure;
+        if (fn == null) ThrowAccelerationStructureUnsupported("CopyAccelerationStructure");
+
+        if (AhjoValidation.IsEnabled)
+        {
+            if (source.IsNull)
+                AhjoValidation.Fail("CommandRecorder",
+                    "CopyAccelerationStructure: source is a null handle.");
+            if (destination.IsNull)
+                AhjoValidation.Fail("CommandRecorder",
+                    "CopyAccelerationStructure: destination is a null handle.");
+        }
+
+        var info = new VkCopyAccelerationStructureInfoKHR
+        {
+            sType = VkStructureType.VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR,
+            src   = source.Handle,
+            dst   = destination.Handle,
+            mode  = (VkCopyAccelerationStructureModeKHR)mode,
+        };
+        fn(Handle, &info);
     }
 
     // ---- Copy / blit / clear / fill (copy_commands2 path) ----

@@ -59,7 +59,7 @@ public sealed class HandleConventionsTests
     [Fact]
     public void BorrowContract_HoldsForEveryHandleType()
     {
-        // The full matrix (#118): for each of the seventeen IVulkanHandle
+        // The full matrix (#118): for each of the eighteen IVulkanHandle
         // struct types, a FromRaw'd (borrowed) handle and default(T) report
         // OwnsHandle == false, and — for the IDisposable types — Dispose is
         // a no-op rather than a vkDestroy*/vmaDestroy* dispatched through a
@@ -84,6 +84,7 @@ public sealed class HandleConventionsTests
         AssertBorrowContract<DescriptorSet>();
         AssertBorrowContract<Event>();
         AssertBorrowContract<QueryPool>();
+        AssertBorrowContract<AccelerationStructure>();
     }
 
     [Fact]
@@ -108,7 +109,14 @@ public sealed class HandleConventionsTests
         // caller-owned and destroys on Dispose.
         Assert.True(new Event((VkEvent_T*)0x2000, device, EventCreateFlags.DeviceOnly).OwnsHandle);
         // QueryPool is caller-owned like Event (#198), not pool-owned.
-        Assert.True(new QueryPool((VkQueryPool_T*)0x2000, device, queryCount: 4).OwnsHandle);
+        Assert.True(new QueryPool(
+            (VkQueryPool_T*)0x2000, device, queryCount: 4, QueryType.Timestamp).OwnsHandle);
+        // AccelerationStructure is caller-owned too (#202), and is the first
+        // handle that destroys through a stored extension function pointer
+        // rather than a static DllImport. A null destroy pointer here is fine:
+        // the test never disposes these sentinels.
+        Assert.True(new AccelerationStructure(
+            (VkAccelerationStructureKHR_T*)0x2000, device, null, size: 256).OwnsHandle);
 
         // Pool-owned types never own, even when device-bound.
         Assert.False(new Fence((VkFence_T*)0x2000, device).OwnsHandle);

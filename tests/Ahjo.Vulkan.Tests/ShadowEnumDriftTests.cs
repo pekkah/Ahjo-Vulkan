@@ -127,4 +127,123 @@ public sealed class ShadowEnumDriftTests
         Assert.Equal((uint)VkMemoryPropertyFlagBits.VK_MEMORY_PROPERTY_PROTECTED_BIT, (uint)MemoryProperties.Protected);
         Assert.Equal(0u, (uint)MemoryProperties.None);
     }
+
+    [Fact]
+    public void QueryType_MatchesNative()
+    {
+        Assert.Equal((int)VkQueryType.VK_QUERY_TYPE_TIMESTAMP, (int)QueryType.Timestamp);
+        Assert.Equal(
+            (int)VkQueryType.VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
+            (int)QueryType.AccelerationStructureCompactedSize);
+
+        // Unknown is the borrowed-pool sentinel. 0 is safe only because
+        // VkQueryType 0 is VK_QUERY_TYPE_OCCLUSION and this wrapper never
+        // creates an occlusion pool — if that ever changes, this assert is the
+        // place the conflict surfaces.
+        Assert.Equal(0, (int)QueryType.Unknown);
+        Assert.Equal(0, (int)VkQueryType.VK_QUERY_TYPE_OCCLUSION);
+    }
+
+    [Fact]
+    public void Stage_AccelerationStructureBits_MatchNative()
+    {
+        Assert.Equal(
+            Vk.VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+            (ulong)Stage.AccelerationStructureBuild);
+        Assert.Equal(
+            Vk.VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_COPY_BIT_KHR,
+            (ulong)Stage.AccelerationStructureCopy);
+    }
+
+    [Fact]
+    public void Access_AccelerationStructureBits_MatchNative()
+    {
+        Assert.Equal(
+            Vk.VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR,
+            (ulong)Access.AccelerationStructureRead);
+        Assert.Equal(
+            Vk.VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+            (ulong)Access.AccelerationStructureWrite);
+    }
+
+    [Fact]
+    public void AccelerationStructureType_MatchesNative()
+    {
+        Assert.Equal(
+            (int)VkAccelerationStructureTypeKHR.VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
+            (int)AccelerationStructureType.TopLevel);
+        Assert.Equal(
+            (int)VkAccelerationStructureTypeKHR.VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+            (int)AccelerationStructureType.BottomLevel);
+        Assert.Equal(
+            (int)VkAccelerationStructureTypeKHR.VK_ACCELERATION_STRUCTURE_TYPE_GENERIC_KHR,
+            (int)AccelerationStructureType.Generic);
+
+        // The footgun the recorder's type/kind guard exists to catch: Vulkan
+        // numbers TOP_LEVEL 0, so default(AccelerationStructureType) is a TLAS.
+        Assert.Equal(AccelerationStructureType.TopLevel, default(AccelerationStructureType));
+    }
+
+    [Fact]
+    public void AccelerationStructureBuildFlags_MatchesNative()
+    {
+        Assert.Equal(
+            (uint)VkBuildAccelerationStructureFlagBitsKHR.VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR,
+            (uint)AccelerationStructureBuildFlags.AllowUpdate);
+        Assert.Equal(
+            (uint)VkBuildAccelerationStructureFlagBitsKHR.VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR,
+            (uint)AccelerationStructureBuildFlags.AllowCompaction);
+        Assert.Equal(
+            (uint)VkBuildAccelerationStructureFlagBitsKHR.VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+            (uint)AccelerationStructureBuildFlags.PreferFastTrace);
+        Assert.Equal(
+            (uint)VkBuildAccelerationStructureFlagBitsKHR.VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR,
+            (uint)AccelerationStructureBuildFlags.PreferFastBuild);
+        Assert.Equal(
+            (uint)VkBuildAccelerationStructureFlagBitsKHR.VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR,
+            (uint)AccelerationStructureBuildFlags.LowMemory);
+        Assert.Equal(0u, (uint)AccelerationStructureBuildFlags.None);
+    }
+
+    [Fact]
+    public void AccelerationStructureBuildMode_MatchesNative()
+    {
+        Assert.Equal(
+            (int)VkBuildAccelerationStructureModeKHR.VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+            (int)AccelerationStructureBuildMode.Build);
+        Assert.Equal(
+            (int)VkBuildAccelerationStructureModeKHR.VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR,
+            (int)AccelerationStructureBuildMode.Update);
+    }
+
+    [Fact]
+    public void GeometryFlags_MatchesNative()
+    {
+        Assert.Equal(
+            (uint)VkGeometryFlagBitsKHR.VK_GEOMETRY_OPAQUE_BIT_KHR,
+            (uint)GeometryFlags.Opaque);
+        Assert.Equal(
+            (uint)VkGeometryFlagBitsKHR.VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR,
+            (uint)GeometryFlags.NoDuplicateAnyHitInvocation);
+        Assert.Equal(0u, (uint)GeometryFlags.None);
+    }
+
+    [Fact]
+    public void GeometryKind_MatchesNative()
+    {
+        Assert.Equal((int)VkGeometryTypeKHR.VK_GEOMETRY_TYPE_TRIANGLES_KHR, (int)GeometryKind.Triangles);
+        Assert.Equal((int)VkGeometryTypeKHR.VK_GEOMETRY_TYPE_AABBS_KHR, (int)GeometryKind.Aabbs);
+        Assert.Equal((int)VkGeometryTypeKHR.VK_GEOMETRY_TYPE_INSTANCES_KHR, (int)GeometryKind.Instances);
+    }
+
+    [Fact]
+    public void AccelerationStructureCopyMode_MatchesNative()
+    {
+        Assert.Equal(
+            (int)VkCopyAccelerationStructureModeKHR.VK_COPY_ACCELERATION_STRUCTURE_MODE_CLONE_KHR,
+            (int)AccelerationStructureCopyMode.Clone);
+        Assert.Equal(
+            (int)VkCopyAccelerationStructureModeKHR.VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR,
+            (int)AccelerationStructureCopyMode.Compact);
+    }
 }
