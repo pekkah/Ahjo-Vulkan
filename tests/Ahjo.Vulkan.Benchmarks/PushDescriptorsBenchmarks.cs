@@ -191,10 +191,10 @@ public unsafe class PushDescriptorsBenchmarks
                 VkDescriptorType.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, in info),
         ];
 
-        // `scoped` narrows the recorder's safe-to-escape to this method so
-        // the method-local span above can flow into PushDescriptorSet
-        // without tripping CS8350 (mirrors CommandRecorderBenchmarks).
-        using scoped var rec = _cmdPool.Begin();
+        // The method-local span above flows into PushDescriptorSet because
+        // the recording surface is `readonly` (#209); the recorder local
+        // needs no `scoped` (mirrors CommandRecorderBenchmarks).
+        using var rec = _cmdPool.Begin();
         for (int i = 0; i < CallsPerInvoke; i++)
             rec.PushDescriptorSet(
                 VkPipelineBindPoint.VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -237,7 +237,7 @@ public unsafe class PushDescriptorsBenchmarks
     [Benchmark(OperationsPerInvoke = CallsPerInvoke)]
     public void PushDescriptorSet_SpanWrites_16()
     {
-        using scoped var rec = _cmdPool.Begin();
+        using var rec = _cmdPool.Begin();
         for (int i = 0; i < CallsPerInvoke; i++)
             rec.PushDescriptorSet(
                 VkPipelineBindPoint.VK_PIPELINE_BIND_POINT_COMPUTE,

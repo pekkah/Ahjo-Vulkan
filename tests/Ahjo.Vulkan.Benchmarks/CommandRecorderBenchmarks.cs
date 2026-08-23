@@ -121,14 +121,20 @@ public class CommandRecorderBenchmarks
     {
         var vp = new VkViewport { width = 64, height = 64, maxDepth = 1.0f };
 
-        Span<ColorAttachment> color = stackalloc ColorAttachment[1];
-        color[0] = new ColorAttachment
-        {
-            View    = _view,
-            Layout  = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            LoadOp  = VkAttachmentLoadOp.VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-            StoreOp = VkAttachmentStoreOp.VK_ATTACHMENT_STORE_OP_DONT_CARE,
-        };
+        // Collection expression, not stackalloc — this is the shape #209 makes
+        // available to a consumer inside a render loop (a reusable InlineArray
+        // local rather than a per-iteration localloc), so the row measures what
+        // the samples now actually write.
+        ReadOnlySpan<ColorAttachment> color =
+        [
+            new ColorAttachment
+            {
+                View    = _view,
+                Layout  = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                LoadOp  = VkAttachmentLoadOp.VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                StoreOp = VkAttachmentStoreOp.VK_ATTACHMENT_STORE_OP_DONT_CARE,
+            },
+        ];
 
         var info = new RenderingInfo
         {
@@ -137,10 +143,10 @@ public class CommandRecorderBenchmarks
             ColorAttachments = color,
         };
 
-        // `scoped` narrows the recorder's safe-to-escape to this method
-        // so the method-local stackalloc above (carried inside info) can
-        // flow into BeginRendering without tripping CS8350.
-        using scoped var rec = _cmdPool.Begin();
+        // The recording surface is `readonly` (#209), so the method-local
+        // stack span carried inside info flows into BeginRendering without
+        // the caller declaring the recorder local `scoped`.
+        using var rec = _cmdPool.Begin();
         rec.BeginRendering(in info);
         for (int i = 0; i < CommandsPerPass; i++)
             rec.SetViewport(in vp);
@@ -154,9 +160,10 @@ public class CommandRecorderBenchmarks
     /// 8 disjoint 256-byte regions → under <c>CopyBuffer</c>'s 16-element
     /// threshold, so this stays on the <c>stackalloc VkBufferCopy2[16]</c>
     /// branch of <c>RentForOverflow</c>. The whole region span is built into
-    /// a method-local <c>stackalloc</c>; <c>scoped</c> on the recorder lets
-    /// it flow into the ref-struct <c>CopyBuffer</c> call without tripping
-    /// CS8350. No submit — record + reset only.
+    /// a method-local <c>stackalloc</c> and flows into the ref-struct
+    /// <c>CopyBuffer</c> call because the recording surface is
+    /// <c>readonly</c> (#209) — no <c>scoped</c> recorder local needed.
+    /// No submit — record + reset only.
     /// </summary>
     [Benchmark]
     public void CopyBuffer_8Regions()
@@ -165,7 +172,7 @@ public class CommandRecorderBenchmarks
         for (int i = 0; i < regions.Length; i++)
             regions[i] = BufferCopyRegion.Of(size: 256, srcOffset: (ulong)i * 256, dstOffset: (ulong)i * 256);
 
-        using scoped var rec = _cmdPool.Begin();
+        using var rec = _cmdPool.Begin();
         rec.CopyBuffer(in _copySrc, in _copyDst, regions);
         rec.End();
 
@@ -188,7 +195,7 @@ public class CommandRecorderBenchmarks
         for (int i = 0; i < regions.Length; i++)
             regions[i] = BufferCopyRegion.Of(size: 256, srcOffset: (ulong)i * 256, dstOffset: (ulong)i * 256);
 
-        using scoped var rec = _cmdPool.Begin();
+        using var rec = _cmdPool.Begin();
         rec.CopyBuffer(in _copySrc, in _copyDst, regions);
         rec.End();
 
