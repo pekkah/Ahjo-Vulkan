@@ -328,7 +328,7 @@ internal static unsafe class Program
                         srcStage: Stage.TopOfPipe,             srcAccess: Access.None,
                         dstStage: Stage.ColorAttachmentOutput, dstAccess: Access.ColorAttachmentWrite);
 
-                    ColorAttachment[] color = [new ColorAttachment
+                    ReadOnlySpan<ColorAttachment> color = [new ColorAttachment
                     {
                         View       = swapView,
                         Layout     = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,

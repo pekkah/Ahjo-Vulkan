@@ -228,11 +228,7 @@ public unsafe class MeshShaderBenchmarks
         // before the reset drains _spent → _idle, or it never recycles. This
         // also keeps the benchmark valid under AHJO_VULKAN_TIER=validation,
         // where ResetForFrame asserts on an outstanding recorder.
-        //
-        // `scoped` narrows the recorder's safe-to-escape to this method so the
-        // method-local stackalloc carried inside info can flow into
-        // BeginRendering without tripping CS8350.
-        using (scoped var rec = _cmdPool.Begin())
+        using (var rec = _cmdPool.Begin())
         {
             rec.BeginRendering(in info);
             rec.BindPipeline(in _pipeline);
@@ -275,7 +271,7 @@ public unsafe class MeshShaderBenchmarks
             ColorAttachments = color,
         };
 
-        using (scoped var rec = _cmdPool.Begin())
+        using (var rec = _cmdPool.Begin())
         {
             rec.BeginRendering(in info);
             rec.BindPipeline(in _pipeline);
@@ -311,7 +307,7 @@ public unsafe class MeshShaderBenchmarks
             ColorAttachments = color,
         };
 
-        using (scoped var rec = _cmdPool.Begin())
+        using (var rec = _cmdPool.Begin())
         {
             rec.BeginRendering(in info);
             rec.BindPipeline(in _pipeline);

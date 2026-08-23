@@ -305,7 +305,7 @@ public sealed unsafe class CommandRecorderTests
             srcStage:  Stage.TopOfPipe,             srcAccess: Access.None,
             dstStage:  Stage.ColorAttachmentOutput, dstAccess: Access.ColorAttachmentWrite));
 
-        ColorAttachment[] color = [new ColorAttachment
+        ReadOnlySpan<ColorAttachment> color = [new ColorAttachment
         {
             View       = view,
             Layout     = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -432,7 +432,7 @@ public sealed unsafe class CommandRecorderTests
                     srcStage: Stage.TopOfPipe,             srcAccess: Access.None,
                     dstStage: Stage.ColorAttachmentOutput, dstAccess: Access.ColorAttachmentWrite));
 
-                ColorAttachment[] color = [new ColorAttachment
+                ReadOnlySpan<ColorAttachment> color = [new ColorAttachment
                 {
                     View       = view,
                     Layout     = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -575,7 +575,7 @@ public sealed unsafe class CommandRecorderTests
                     srcStage: Stage.TopOfPipe,             srcAccess: Access.None,
                     dstStage: Stage.ColorAttachmentOutput, dstAccess: Access.ColorAttachmentWrite));
 
-                ColorAttachment[] color = [new ColorAttachment
+                ReadOnlySpan<ColorAttachment> color = [new ColorAttachment
                 {
                     View       = view,
                     Layout     = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -711,7 +711,7 @@ public sealed unsafe class CommandRecorderTests
             srcStage:  Stage.TopOfPipe,             srcAccess: Access.None,
             dstStage:  Stage.ColorAttachmentOutput, dstAccess: Access.ColorAttachmentWrite));
 
-        ColorAttachment[] color = [new ColorAttachment
+        ReadOnlySpan<ColorAttachment> color = [new ColorAttachment
         {
             View       = view,
             Layout     = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -789,6 +789,388 @@ public sealed unsafe class CommandRecorderTests
             Assert.True(errors.Count == 0,
                 "Validation errors recorded: " + string.Join("; ", errors.ConvertAll(e => e.Message)));
     }
+
+    /// <summary>
+    /// Issue 209: the behavioural payoff of the <c>readonly</c> recording
+    /// surface. A stack-backed <see cref="ColorAttachment"/> span reaches
+    /// <see cref="CommandRecorder.BeginRendering"/> without a heap array and
+    /// without the caller declaring the recorder local <c>scoped</c>, so a
+    /// render-pass open/close records zero bytes per frame. Record-only —
+    /// nothing is submitted; the assertion is on the allocation counter, not
+    /// on the GPU.
+    /// </summary>
+    /// <remarks>
+    /// Run at <b>two</b> span lengths on purpose. Whether a collection
+    /// expression lowers to an <c>InlineArray</c> stack local or to a heap
+    /// array is a Roslyn lowering decision that can differ with element count,
+    /// and neither <c>ScopedSpanProbe</c> nor a one-element case would notice a
+    /// two-element span silently going to the heap — it would still compile
+    /// and still pass validation.
+    /// </remarks>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void BeginRendering_StackBackedColorAttachments_IsZeroAllocation(int attachmentCount)
+    {
+        TestGate.RequireDriver();
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+
+        using var image0 = CreateColorTarget(device, 64, 64);
+        using var view0  = CreateColorView(device, in image0);
+        using var image1 = CreateColorTarget(device, 64, 64);
+        using var view1  = CreateColorView(device, in image1);
+        using var pool   = new CommandBufferPool(device, family);
+
+        void RecordOnce()
+        {
+            using (var rec = pool.Begin())
+            {
+                // The whole point: a collection-expression span, not a
+                // ColorAttachment[]. Backed by an InlineArray local, so it is
+                // reusable across iterations rather than growing the frame the
+                // way a stackalloc in a loop body would. Built at length 2 and
+                // sliced, so the two-element lowering is exercised even in the
+                // one-attachment case.
+                ReadOnlySpan<ColorAttachment> both =
+                [
+                    new ColorAttachment
+                    {
+                        View       = view0,
+                        Layout     = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        LoadOp     = VkAttachmentLoadOp.VK_ATTACHMENT_LOAD_OP_CLEAR,
+                        StoreOp    = VkAttachmentStoreOp.VK_ATTACHMENT_STORE_OP_STORE,
+                        ClearColor = ClearColor(0, 0, 0, 1),
+                    },
+                    new ColorAttachment
+                    {
+                        View       = view1,
+                        Layout     = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        LoadOp     = VkAttachmentLoadOp.VK_ATTACHMENT_LOAD_OP_CLEAR,
+                        StoreOp    = VkAttachmentStoreOp.VK_ATTACHMENT_STORE_OP_STORE,
+                        ClearColor = ClearColor(1, 0, 0, 1),
+                    },
+                ];
+                ReadOnlySpan<ColorAttachment> color = both[..attachmentCount];
+
+                rec.BeginRendering(new RenderingInfo
+                {
+                    RenderArea       = new VkRect2D { extent = new VkExtent2D { width = 64, height = 64 } },
+                    LayerCount       = 1,
+                    ColorAttachments = color,
+                });
+                rec.EndRendering();
+                rec.End();
+            }
+            // Dispose (above, on scope exit) retires the buffer to _spent;
+            // ResetForFrame then drains _spent into _idle. Reversing the order
+            // leaks the buffer out of the pool's rotation.
+            pool.ResetForFrame();
+        }
+
+        bool priorValidation = AhjoValidation.Enabled;
+        AhjoValidation.Enabled = false;
+        try
+        {
+            // Warm: JIT + tier-up on every path the measured loop touches.
+            for (int i = 0; i < 32; i++) RecordOnce();
+
+            // Two measured passes, the MeshPipeline_Build_IsZeroAllocation
+            // shape: a tier-1 to tier-2 promotion can still fire on the first
+            // measurement-sized loop and charge a one-shot allocation to this
+            // thread. Only the second pass is asserted on.
+            long before1 = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 128; i++) RecordOnce();
+            _ = GC.GetAllocatedBytesForCurrentThread() - before1;
+
+            long before2 = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 128; i++) RecordOnce();
+            long after2 = GC.GetAllocatedBytesForCurrentThread();
+
+            Assert.Equal(0, after2 - before2);
+        }
+        finally
+        {
+            AhjoValidation.Enabled = priorValidation;
+        }
+    }
+
+    /// <summary>
+    /// Issue 209: the multi-attachment shape under the validation layer. Two
+    /// color attachments in one collection-expression span exercise
+    /// <c>BeginRendering</c>'s <c>count &gt; 0</c> path into the eight-slot
+    /// stack slab, against a pipeline declaring two color formats. Submitted,
+    /// so the layer gets to judge the attachment/format match rather than the
+    /// test merely not crashing.
+    /// </summary>
+    [Fact]
+    public void BeginRendering_MultipleColorAttachments_StackBacked()
+    {
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
+            "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
+        TestGate.RequireValidationLayer();
+        TestGate.RequireSpirv(VertSpvPath);
+        TestGate.RequireSpirv(FragSpvPath);
+
+        var errors = new List<DebugMessage>();
+        using var instance = Instance.Create(new InstanceDescription
+        {
+            ApiVersion       = VulkanVersion.V1_4,
+            EnableValidation = true,
+            DebugCallback    = m =>
+            {
+                if ((m.Severity & VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0)
+                    lock (errors) errors.Add(m);
+            },
+        });
+
+        using var device = CreateGraphicsDevice(instance, out uint family);
+
+        const uint W = 64, H = 64;
+        using var image0 = CreateColorTarget(device, W, H);
+        using var view0  = CreateColorView(device, in image0);
+        using var image1 = CreateColorTarget(device, W, H);
+        using var view1  = CreateColorView(device, in image1);
+
+        using var vBlob = SpirvBlob.Load(VertSpvPath);
+        using var fBlob = SpirvBlob.Load(FragSpvPath);
+        using var vMod  = device.CreateShaderModule(vBlob.Words);
+        using var fMod  = device.CreateShaderModule(fBlob.Words);
+        using var layout = device.CreatePipelineLayout(default);
+
+        ReadOnlySpan<VkFormat> colorFormats =
+            [VkFormat.VK_FORMAT_R8G8B8A8_UNORM, VkFormat.VK_FORMAT_R8G8B8A8_UNORM];
+        using var pipeline = device.BuildGraphicsPipeline()
+            .WithStages(in vMod, in fMod)
+            .WithDynamicRendering(colorFormats)
+            .WithLayout(in layout)
+            .Build();
+
+        using var cmdPool   = new CommandBufferPool(device, family);
+        using var fencePool = new FencePool(device);
+        var fence = fencePool.Acquire();
+        try
+        {
+            var rec = cmdPool.Begin();
+            try
+            {
+                rec.PipelineBarrier(ImageBarrier.Transition(in image0,
+                    from:     VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
+                    to:       VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    srcStage: Stage.TopOfPipe,             srcAccess: Access.None,
+                    dstStage: Stage.ColorAttachmentOutput, dstAccess: Access.ColorAttachmentWrite));
+                rec.PipelineBarrier(ImageBarrier.Transition(in image1,
+                    from:     VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
+                    to:       VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    srcStage: Stage.TopOfPipe,             srcAccess: Access.None,
+                    dstStage: Stage.ColorAttachmentOutput, dstAccess: Access.ColorAttachmentWrite));
+
+                ReadOnlySpan<ColorAttachment> color =
+                [
+                    new ColorAttachment
+                    {
+                        View       = view0,
+                        Layout     = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        LoadOp     = VkAttachmentLoadOp.VK_ATTACHMENT_LOAD_OP_CLEAR,
+                        StoreOp    = VkAttachmentStoreOp.VK_ATTACHMENT_STORE_OP_STORE,
+                        ClearColor = ClearColor(0, 0, 0, 1),
+                    },
+                    new ColorAttachment
+                    {
+                        View       = view1,
+                        Layout     = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        LoadOp     = VkAttachmentLoadOp.VK_ATTACHMENT_LOAD_OP_CLEAR,
+                        StoreOp    = VkAttachmentStoreOp.VK_ATTACHMENT_STORE_OP_STORE,
+                        ClearColor = ClearColor(1, 0, 0, 1),
+                    },
+                ];
+
+                rec.BeginRendering(new RenderingInfo
+                {
+                    RenderArea       = new VkRect2D { extent = new VkExtent2D { width = W, height = H } },
+                    LayerCount       = 1,
+                    ColorAttachments = color,
+                });
+                rec.SetViewport(new VkViewport { x = 0, y = 0, width = W, height = H, minDepth = 0, maxDepth = 1 });
+                rec.SetScissor(new VkRect2D { extent = new VkExtent2D { width = W, height = H } });
+                rec.BindPipeline(in pipeline);
+                rec.Draw(vertexCount: 3);
+                rec.EndRendering();
+
+                var queue = device.GetQueue(family, 0);
+                queue.Submit2(ref rec, in fence);
+            }
+            finally { rec.Dispose(); }
+
+            Assert.Equal(WaitState.Signaled, fence.Wait(TimeSpan.FromSeconds(5)));
+        }
+        finally { fencePool.Release(fence); }
+
+        lock (errors)
+            Assert.True(errors.Count == 0,
+                "Validation errors recorded: " + string.Join("; ", errors.ConvertAll(e => e.Message)));
+    }
+
+    /// <summary>
+    /// Issue 209: the <c>pDepth</c> branch under the new call shape. One color
+    /// attachment as a collection-expression span plus a
+    /// <see cref="DepthAttachment"/>, against a pipeline declaring the matching
+    /// depth format. Submitted so the validation layer judges the depth
+    /// layout/aspect/format triple.
+    /// </summary>
+    [Fact]
+    public void BeginRendering_WithDepthAttachment_StackBacked()
+    {
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver(
+            "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
+        TestGate.RequireValidationLayer();
+        TestGate.RequireSpirv(VertSpvPath);
+        TestGate.RequireSpirv(FragSpvPath);
+
+        var errors = new List<DebugMessage>();
+        using var instance = Instance.Create(new InstanceDescription
+        {
+            ApiVersion       = VulkanVersion.V1_4,
+            EnableValidation = true,
+            DebugCallback    = m =>
+            {
+                if ((m.Severity & VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0)
+                    lock (errors) errors.Add(m);
+            },
+        });
+
+        using var device = CreateGraphicsDevice(instance, out uint family);
+
+        const uint W = 64, H = 64;
+        const VkFormat DepthFormat = VkFormat.VK_FORMAT_D32_SFLOAT;
+
+        using var image = CreateColorTarget(device, W, H);
+        using var view  = CreateColorView(device, in image);
+
+        using var depthImage = device.Allocator.CreateImage(
+            new ImageDescription
+            {
+                ImageType     = VkImageType.VK_IMAGE_TYPE_2D,
+                Format        = DepthFormat,
+                Width         = W, Height = H, Depth = 1,
+                MipLevels     = 1, ArrayLayers = 1,
+                Samples       = VkSampleCountFlagBits.VK_SAMPLE_COUNT_1_BIT,
+                Tiling        = VkImageTiling.VK_IMAGE_TILING_OPTIMAL,
+                Usage         = ImageUsage.DepthStencilAttachment,
+                InitialLayout = VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
+            },
+            new AllocationDescription { Usage = MemoryUsage.AutoPreferDevice });
+        using var depthView = depthImage.CreateView(device, new ImageViewDescription
+        {
+            ViewType = VkImageViewType.VK_IMAGE_VIEW_TYPE_2D,
+            Aspect   = VkImageAspectFlagBits.VK_IMAGE_ASPECT_DEPTH_BIT,
+            BaseMipLevel = 0, LevelCount = 1, BaseArrayLayer = 0, LayerCount = 1,
+        });
+
+        using var vBlob = SpirvBlob.Load(VertSpvPath);
+        using var fBlob = SpirvBlob.Load(FragSpvPath);
+        using var vMod  = device.CreateShaderModule(vBlob.Words);
+        using var fMod  = device.CreateShaderModule(fBlob.Words);
+        using var layout = device.CreatePipelineLayout(default);
+
+        ReadOnlySpan<VkFormat> colorFormats = [VkFormat.VK_FORMAT_R8G8B8A8_UNORM];
+        using var pipeline = device.BuildGraphicsPipeline()
+            .WithStages(in vMod, in fMod)
+            .WithDepthStencil(testEnable: true, writeEnable: true,
+                compareOp: VkCompareOp.VK_COMPARE_OP_LESS_OR_EQUAL)
+            .WithDynamicRendering(colorFormats, depthFormat: DepthFormat)
+            .WithLayout(in layout)
+            .Build();
+
+        using var cmdPool   = new CommandBufferPool(device, family);
+        using var fencePool = new FencePool(device);
+        var fence = fencePool.Acquire();
+        try
+        {
+            var rec = cmdPool.Begin();
+            try
+            {
+                rec.PipelineBarrier(ImageBarrier.Transition(in image,
+                    from:     VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
+                    to:       VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    srcStage: Stage.TopOfPipe,             srcAccess: Access.None,
+                    dstStage: Stage.ColorAttachmentOutput, dstAccess: Access.ColorAttachmentWrite));
+                rec.PipelineBarrier(ImageBarrier.Transition(in depthImage,
+                    from:     VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
+                    to:       VkImageLayout.VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                    srcStage: Stage.EarlyFragmentTests | Stage.LateFragmentTests, srcAccess: Access.None,
+                    dstStage: Stage.EarlyFragmentTests | Stage.LateFragmentTests,
+                    dstAccess: Access.DepthStencilAttachmentWrite,
+                    aspect:   VkImageAspectFlagBits.VK_IMAGE_ASPECT_DEPTH_BIT));
+
+                ReadOnlySpan<ColorAttachment> color = [new ColorAttachment
+                {
+                    View       = view,
+                    Layout     = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    LoadOp     = VkAttachmentLoadOp.VK_ATTACHMENT_LOAD_OP_CLEAR,
+                    StoreOp    = VkAttachmentStoreOp.VK_ATTACHMENT_STORE_OP_STORE,
+                    ClearColor = ClearColor(0, 0, 0, 1),
+                }];
+
+                rec.BeginRendering(new RenderingInfo
+                {
+                    RenderArea       = new VkRect2D { extent = new VkExtent2D { width = W, height = H } },
+                    LayerCount       = 1,
+                    ColorAttachments = color,
+                    DepthAttachment  = new DepthAttachment
+                    {
+                        View       = depthView,
+                        Layout     = VkImageLayout.VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                        LoadOp     = VkAttachmentLoadOp.VK_ATTACHMENT_LOAD_OP_CLEAR,
+                        StoreOp    = VkAttachmentStoreOp.VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                        ClearDepth = 1.0f,
+                    },
+                });
+                rec.SetViewport(new VkViewport { x = 0, y = 0, width = W, height = H, minDepth = 0, maxDepth = 1 });
+                rec.SetScissor(new VkRect2D { extent = new VkExtent2D { width = W, height = H } });
+                rec.BindPipeline(in pipeline);
+                rec.Draw(vertexCount: 3);
+                rec.EndRendering();
+
+                var queue = device.GetQueue(family, 0);
+                queue.Submit2(ref rec, in fence);
+            }
+            finally { rec.Dispose(); }
+
+            Assert.Equal(WaitState.Signaled, fence.Wait(TimeSpan.FromSeconds(5)));
+        }
+        finally { fencePool.Release(fence); }
+
+        lock (errors)
+            Assert.True(errors.Count == 0,
+                "Validation errors recorded: " + string.Join("; ", errors.ConvertAll(e => e.Message)));
+    }
+
+    private static Image CreateColorTarget(Device device, uint width, uint height) =>
+        device.Allocator.CreateImage(
+            new ImageDescription
+            {
+                ImageType     = VkImageType.VK_IMAGE_TYPE_2D,
+                Format        = VkFormat.VK_FORMAT_R8G8B8A8_UNORM,
+                Width         = width, Height = height, Depth = 1,
+                MipLevels     = 1, ArrayLayers = 1,
+                Samples       = VkSampleCountFlagBits.VK_SAMPLE_COUNT_1_BIT,
+                Tiling        = VkImageTiling.VK_IMAGE_TILING_OPTIMAL,
+                Usage         = ImageUsage.ColorAttachment,
+                InitialLayout = VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
+            },
+            new AllocationDescription { Usage = MemoryUsage.AutoPreferDevice });
+
+    private static ImageView CreateColorView(Device device, in Image image) =>
+        image.CreateView(device, new ImageViewDescription
+        {
+            ViewType = VkImageViewType.VK_IMAGE_VIEW_TYPE_2D,
+            Aspect   = VkImageAspectFlagBits.VK_IMAGE_ASPECT_COLOR_BIT,
+            BaseMipLevel = 0, LevelCount = 1, BaseArrayLayer = 0, LayerCount = 1,
+        });
 
     private static VkClearColorValue ClearColor(float r, float g, float b, float a)
     {

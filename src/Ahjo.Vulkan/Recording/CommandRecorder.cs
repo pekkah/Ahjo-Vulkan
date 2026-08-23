@@ -29,6 +29,18 @@ namespace Ahjo.Vulkan;
 /// <c>VK_KHR_acceleration_structure</c> — BuildAccelerationStructures,
 /// WriteAccelerationStructuresProperties and
 /// CopyAccelerationStructure.</para>
+/// <para><b>Why the recording surface is <c>readonly</c>.</b> Every member
+/// that only records a command is marked <c>readonly</c>, so <c>this</c> is
+/// passed as <c>ref readonly</c> rather than as a writable <c>ref</c> to a
+/// <c>ref struct</c> — a writable ref-to-ref-struct receiver would force
+/// caller-wide safe-context on every ref-struct argument in the same
+/// invocation, including one passed by <c>in</c>, where <c>scoped</c>
+/// cannot help. The consequence is that a stack-backed
+/// <see cref="RenderingInfo"/> — a <c>stackalloc</c> or collection-expression
+/// span of attachments — reaches <see cref="BeginRendering"/> without the
+/// caller having to declare the recorder local <c>scoped</c> (issue #209).
+/// <see cref="End"/> and <see cref="Dispose"/> are the only non-<c>readonly</c>
+/// members; they mutate the lifecycle flags.</para>
 /// </remarks>
 public unsafe ref struct CommandRecorder : IDisposable
 {
@@ -45,7 +57,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         _retired = false;
     }
 
-    public bool IsNull => Handle == null;
+    public readonly bool IsNull => Handle == null;
 
     /// <summary>
     /// Per-device cached <c>vkCmd*</c> entry points. Dispatching through
@@ -53,7 +65,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// by <c>ref readonly</c> so a recording call reads the function field
     /// directly off the owning <see cref="Device"/> with no struct copy.
     /// </summary>
-    private ref readonly DeviceFunctionTable Fns => ref _pool.Device.Functions;
+    private readonly ref readonly DeviceFunctionTable Fns => ref _pool.Device.Functions;
 
     /// <summary>
     /// Raw <c>VkCommandBuffer</c> as a platform-sized integer. Lets callers
@@ -65,7 +77,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <see cref="CommandBufferPool.ResetForFrame"/> on the recording
     /// thread can race ahead.
     /// </summary>
-    public nint RawHandle => (nint)Handle;
+    public readonly nint RawHandle => (nint)Handle;
 
     /// <summary>
     /// Calls <c>vkEndCommandBuffer</c>. Idempotent. Does not retire the
@@ -123,7 +135,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// Pair with <see cref="EndLabel"/>; prefer <see cref="LabelScope"/>
     /// for clean nesting via <c>using</c>.
     /// </summary>
-    public void BeginLabel(scoped ReadOnlySpan<byte> name, in Color color = default)
+    public readonly void BeginLabel(scoped ReadOnlySpan<byte> name, in Color color = default)
     {
         var fn = Fns.CmdBeginDebugUtilsLabel;
         if (fn == null || name.IsEmpty) return;
@@ -148,7 +160,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <c>vkCmdEndDebugUtilsLabelEXT</c>. No-op when
     /// <c>VK_EXT_debug_utils</c> is not loaded.
     /// </summary>
-    public void EndLabel()
+    public readonly void EndLabel()
     {
         var fn = Fns.CmdEndDebugUtilsLabel;
         if (fn == null) return;
@@ -162,7 +174,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// open a scope — captures show it as a flag on the timeline at the
     /// recorded position.
     /// </summary>
-    public void InsertLabel(scoped ReadOnlySpan<byte> name, in Color color = default)
+    public readonly void InsertLabel(scoped ReadOnlySpan<byte> name, in Color color = default)
     {
         var fn = Fns.CmdInsertDebugUtilsLabel;
         if (fn == null || name.IsEmpty) return;
@@ -191,7 +203,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// neither begin nor dispose touches the marker stack, so begin/end
     /// stay balanced for any enclosing scope.
     /// </summary>
-    public DisposableLabel LabelScope(scoped ReadOnlySpan<byte> name, in Color color = default)
+    public readonly DisposableLabel LabelScope(scoped ReadOnlySpan<byte> name, in Color color = default)
     {
         BeginLabel(name, in color);
         // Hand Dispose a non-null End pointer ONLY when BeginLabel actually
@@ -206,13 +218,13 @@ public unsafe ref struct CommandRecorder : IDisposable
 
     // ---- Dynamic state ----
 
-    public void SetViewport(in VkViewport viewport)
+    public readonly void SetViewport(in VkViewport viewport)
     {
         fixed (VkViewport* p = &viewport)
             Fns.CmdSetViewport(Handle, 0, 1, p);
     }
 
-    public void SetScissor(in VkRect2D scissor)
+    public readonly void SetScissor(in VkRect2D scissor)
     {
         fixed (VkRect2D* p = &scissor)
             Fns.CmdSetScissor(Handle, 0, 1, p);
@@ -220,13 +232,13 @@ public unsafe ref struct CommandRecorder : IDisposable
 
     // ---- Bind family ----
 
-    public void BindPipeline(in ComputePipeline pipeline)
+    public readonly void BindPipeline(in ComputePipeline pipeline)
         => Fns.CmdBindPipeline(Handle, VkPipelineBindPoint.VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Handle);
 
-    public void BindPipeline(in GraphicsPipeline pipeline)
+    public readonly void BindPipeline(in GraphicsPipeline pipeline)
         => Fns.CmdBindPipeline(Handle, VkPipelineBindPoint.VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Handle);
 
-    public void BindDescriptorSets(
+    public readonly void BindDescriptorSets(
         VkPipelineBindPoint                bindPoint,
         in PipelineLayout                  layout,
         uint                               firstSet,
@@ -294,7 +306,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <paramref name="stages"/>; otherwise it relies on the driver /
     /// validation layer.
     /// </summary>
-    public void PushConstants<T>(in PipelineLayout layout, ShaderStages stages, in T data, uint offset = 0)
+    public readonly void PushConstants<T>(in PipelineLayout layout, ShaderStages stages, in T data, uint offset = 0)
         where T : unmanaged
     {
         // The push-constant size ceiling lives on the layout (its declared
@@ -352,7 +364,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// offset 0; otherwise <paramref name="offsets"/> must match
     /// <paramref name="buffers"/> in length.
     /// </summary>
-    public void BindVertexBuffers(
+    public readonly void BindVertexBuffers(
         uint                         firstBinding,
         scoped ReadOnlySpan<Buffer>  buffers,
         scoped ReadOnlySpan<ulong>   offsets = default)
@@ -391,7 +403,7 @@ public unsafe ref struct CommandRecorder : IDisposable
                 (VkBuffer_T**)pBuffers, pOffsets);
     }
 
-    public void BindIndexBuffer(in Buffer buffer, ulong offset, VkIndexType indexType)
+    public readonly void BindIndexBuffer(in Buffer buffer, ulong offset, VkIndexType indexType)
         => Fns.CmdBindIndexBuffer(Handle, buffer.Handle, offset, indexType);
 
     /// <summary>
@@ -402,7 +414,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// must have been created with
     /// <see cref="DescriptorSetLayoutDescription.PushDescriptor"/>.
     /// </summary>
-    public void PushDescriptors<T>(
+    public readonly void PushDescriptors<T>(
         in DescriptorTemplate<T> template,
         in PipelineLayout        layout,
         in T                     data)
@@ -430,7 +442,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <c>≤ 8</c> entries; longer runs rent from
     /// <see cref="ArrayPool{T}"/>.</para>
     /// </remarks>
-    public void PushDescriptorSet(
+    public readonly void PushDescriptorSet(
         VkPipelineBindPoint                  bindPoint,
         in PipelineLayout                    layout,
         uint                                 set,
@@ -522,10 +534,10 @@ public unsafe ref struct CommandRecorder : IDisposable
 
     // ---- Draw / Dispatch ----
 
-    public void Draw(uint vertexCount, uint instanceCount = 1, uint firstVertex = 0, uint firstInstance = 0)
+    public readonly void Draw(uint vertexCount, uint instanceCount = 1, uint firstVertex = 0, uint firstInstance = 0)
         => Fns.CmdDraw(Handle, vertexCount, instanceCount, firstVertex, firstInstance);
 
-    public void DrawIndexed(
+    public readonly void DrawIndexed(
         uint indexCount,
         uint instanceCount = 1,
         uint firstIndex    = 0,
@@ -540,7 +552,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <paramref name="stride"/> bytes apart. The buffer must have been
     /// created with <see cref="BufferUsage.IndirectBuffer"/>.
     /// </summary>
-    public void DrawIndirect(in Buffer buffer, ulong offset, uint drawCount, uint stride)
+    public readonly void DrawIndirect(in Buffer buffer, ulong offset, uint drawCount, uint stride)
         => Fns.CmdDrawIndirect(Handle, buffer.Handle, offset, drawCount, stride);
 
     /// <summary>
@@ -558,7 +570,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <c>VkPhysicalDeviceVulkan12Features.drawIndirectCount</c> in
     /// <see cref="DeviceDescription.ConfigureFeatures"/>).
     /// </summary>
-    public void DrawIndirectCount(
+    public readonly void DrawIndirectCount(
         in Buffer buffer,
         ulong     offset,
         in Buffer countBuffer,
@@ -576,7 +588,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// having bound an index buffer via
     /// <see cref="BindIndexBuffer"/> beforehand.
     /// </summary>
-    public void DrawIndexedIndirect(in Buffer buffer, ulong offset, uint drawCount, uint stride)
+    public readonly void DrawIndexedIndirect(in Buffer buffer, ulong offset, uint drawCount, uint stride)
         => Fns.CmdDrawIndexedIndirect(Handle, buffer.Handle, offset, drawCount, stride);
 
     /// <summary>
@@ -596,7 +608,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// responsible for having bound an index buffer via
     /// <see cref="BindIndexBuffer"/> beforehand.
     /// </summary>
-    public void DrawIndexedIndirectCount(
+    public readonly void DrawIndexedIndirectCount(
         in Buffer buffer,
         ulong     offset,
         in Buffer countBuffer,
@@ -635,7 +647,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <see cref="MeshShaderLimits.MaxMeshWorkGroupCountX"/> and its siblings
     /// when it does not.</para>
     /// </remarks>
-    public void DrawMeshTasks(uint groupCountX, uint groupCountY = 1, uint groupCountZ = 1)
+    public readonly void DrawMeshTasks(uint groupCountX, uint groupCountY = 1, uint groupCountZ = 1)
     {
         var fn = Fns.CmdDrawMeshTasks;
         if (fn == null) ThrowMeshShaderUnsupported();
@@ -675,7 +687,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <see cref="PhysicalDevice.TryGetMeshShaderLimits"/> and bound whatever
     /// writes the buffer (compute shader or host fill).</para>
     /// </remarks>
-    public void DrawMeshTasksIndirect(in Buffer buffer, ulong offset, uint drawCount, uint stride)
+    public readonly void DrawMeshTasksIndirect(in Buffer buffer, ulong offset, uint drawCount, uint stride)
     {
         var fn = Fns.CmdDrawMeshTasksIndirect;
         if (fn == null) ThrowMeshShaderUnsupported();
@@ -718,7 +730,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// compute-writes-the-count shape this overload exists for, that is the
     /// compute shader, not this call site.</para>
     /// </remarks>
-    public void DrawMeshTasksIndirectCount(
+    public readonly void DrawMeshTasksIndirectCount(
         in Buffer buffer,
         ulong     offset,
         in Buffer countBuffer,
@@ -731,7 +743,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         fn(Handle, buffer.Handle, offset, countBuffer.Handle, countBufferOffset, maxDrawCount, stride);
     }
 
-    public void Dispatch(uint groupCountX, uint groupCountY = 1, uint groupCountZ = 1)
+    public readonly void Dispatch(uint groupCountX, uint groupCountY = 1, uint groupCountZ = 1)
         => Fns.CmdDispatch(Handle, groupCountX, groupCountY, groupCountZ);
 
     /// <summary>
@@ -739,7 +751,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <c>VkDispatchIndirectCommand</c> from <paramref name="buffer"/> at
     /// <paramref name="offset"/>.
     /// </summary>
-    public void DispatchIndirect(in Buffer buffer, ulong offset)
+    public readonly void DispatchIndirect(in Buffer buffer, ulong offset)
         => Fns.CmdDispatchIndirect(Handle, buffer.Handle, offset);
 
     // ---- Pipeline barriers + split barriers (sync2) ----
@@ -761,7 +773,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// barriers the caller supplies. Pass <c>default</c> for any kind
     /// you don't need.
     /// </summary>
-    public void PipelineBarrier(
+    public readonly void PipelineBarrier(
         scoped ReadOnlySpan<MemoryBarrier> memory,
         scoped ReadOnlySpan<BufferBarrier> buffer,
         scoped ReadOnlySpan<ImageBarrier>  image)
@@ -775,11 +787,11 @@ public unsafe ref struct CommandRecorder : IDisposable
     }
 
     /// <summary>Image-only convenience overload — the dominant case.</summary>
-    public void PipelineBarrier(scoped ReadOnlySpan<ImageBarrier> image)
+    public readonly void PipelineBarrier(scoped ReadOnlySpan<ImageBarrier> image)
         => PipelineBarrier(default, default, image);
 
     /// <summary>Single image-barrier convenience overload.</summary>
-    public void PipelineBarrier(in ImageBarrier image)
+    public readonly void PipelineBarrier(in ImageBarrier image)
         => PipelineBarrier(default, default,
             MemoryMarshal.CreateReadOnlySpan(ref Unsafe.AsRef(in image), 1));
 
@@ -821,7 +833,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <see cref="AhjoValidation.Enabled"/> an empty mix (or a null event)
     /// fails instead.</para>
     /// </remarks>
-    public void SetEvent(
+    public readonly void SetEvent(
         in Event evt,
         scoped ReadOnlySpan<MemoryBarrier> memory,
         scoped ReadOnlySpan<BufferBarrier> buffer,
@@ -857,7 +869,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <para>Requires a non-transfer-only queue family — see
     /// <see cref="SetEvent"/>.</para>
     /// </remarks>
-    public void WaitEvent(
+    public readonly void WaitEvent(
         in Event evt,
         scoped ReadOnlySpan<MemoryBarrier> memory,
         scoped ReadOnlySpan<BufferBarrier> buffer,
@@ -886,7 +898,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <para>Requires a non-transfer-only queue family — see
     /// <see cref="SetEvent"/>.</para>
     /// </remarks>
-    public void ResetEvent(in Event evt, Stage stageMask)
+    public readonly void ResetEvent(in Event evt, Stage stageMask)
     {
         // VUID-vkCmdResetEvent2-event-parameter has no VK_NULL_HANDLE
         // exemption, so a null handle is rejected here for the same reason
@@ -912,7 +924,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// Performs no empty-mix check — see <see cref="PipelineBarrier"/>, which
     /// keeps that early return at its public entry point.
     /// </remarks>
-    private void RecordDependency(
+    private readonly void RecordDependency(
         DependencyOp                       op,
         VkEvent_T*                         @event,
         scoped ReadOnlySpan<MemoryBarrier> memory,
@@ -1010,7 +1022,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// record it (<c>VUID-vkCmdResetQueryPool-commandBuffer-cmdpool</c>),
     /// unlike <see cref="WriteTimestamp"/>.</para>
     /// </remarks>
-    public void ResetQueryPool(in QueryPool pool, uint firstQuery, uint queryCount)
+    public readonly void ResetQueryPool(in QueryPool pool, uint firstQuery, uint queryCount)
     {
         if (AhjoValidation.IsEnabled)
         {
@@ -1054,7 +1066,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// families (<c>VUID-vkCmdWriteTimestamp2-commandBuffer-cmdpool</c>
     /// includes transfer).</para>
     /// </remarks>
-    public void WriteTimestamp(in QueryPool pool, Stage stage, uint query)
+    public readonly void WriteTimestamp(in QueryPool pool, Stage stage, uint query)
     {
         if (AhjoValidation.IsEnabled)
         {
@@ -1170,7 +1182,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <exception cref="InvalidOperationException">
     /// <c>VK_KHR_acceleration_structure</c> was not enabled on this device.
     /// </exception>
-    public void BuildAccelerationStructures(
+    public readonly void BuildAccelerationStructures(
         scoped ReadOnlySpan<AccelerationStructureBuild>      builds,
         scoped ReadOnlySpan<AccelerationStructureGeometry>   geometries,
         scoped ReadOnlySpan<AccelerationStructureBuildRange> ranges)
@@ -1479,7 +1491,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <c>VK_KHR_acceleration_structure</c> was not enabled on this device, or
     /// <paramref name="pool"/> is null or borrowed.
     /// </exception>
-    public void WriteAccelerationStructuresProperties(
+    public readonly void WriteAccelerationStructuresProperties(
         scoped ReadOnlySpan<AccelerationStructure> structures, in QueryPool pool, uint firstQuery)
     {
         var fn = Fns.CmdWriteAccelerationStructuresProperties;
@@ -1612,7 +1624,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// <exception cref="InvalidOperationException">
     /// <c>VK_KHR_acceleration_structure</c> was not enabled on this device.
     /// </exception>
-    public void CopyAccelerationStructure(
+    public readonly void CopyAccelerationStructure(
         in AccelerationStructure source,
         in AccelerationStructure destination,
         AccelerationStructureCopyMode mode)
@@ -1647,7 +1659,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// any length (caller's stackalloc, array, ArrayPool rental).
     /// Empty span is a no-op.
     /// </summary>
-    public void CopyBuffer(in Buffer src, in Buffer dst, params ReadOnlySpan<BufferCopyRegion> regions)
+    public readonly void CopyBuffer(in Buffer src, in Buffer dst, params ReadOnlySpan<BufferCopyRegion> regions)
     {
         if (regions.IsEmpty) return;
 
@@ -1677,7 +1689,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     }
 
     /// <summary>Whole-buffer copy from <paramref name="src"/> offset 0 → <paramref name="dst"/> offset 0.</summary>
-    public void CopyBuffer(in Buffer src, in Buffer dst)
+    public readonly void CopyBuffer(in Buffer src, in Buffer dst)
     {
         // VkBufferCopy2::size must be > 0 — a zero-size source is typically a
         // Buffer.FromRaw handle whose size the wrapper never recorded. Reject
@@ -1702,7 +1714,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         CopyBuffer(in src, in dst, r);
     }
 
-    public void CopyBufferToImage(
+    public readonly void CopyBufferToImage(
         in Buffer                       src,
         in Image                        dst,
         VkImageLayout                   dstLayout,
@@ -1736,7 +1748,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         }
     }
 
-    public void CopyImageToBuffer(
+    public readonly void CopyImageToBuffer(
         in Image                        src,
         VkImageLayout                   srcLayout,
         in Buffer                       dst,
@@ -1770,7 +1782,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         }
     }
 
-    public void CopyImage(
+    public readonly void CopyImage(
         in Image                       src, VkImageLayout srcLayout,
         in Image                       dst, VkImageLayout dstLayout,
         params ReadOnlySpan<ImageCopyRegion> regions)
@@ -1848,7 +1860,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// bounded by mip count + 2 (per-iteration src-layout transition
     /// plus the final batched transitions).</para>
     /// </remarks>
-    public void GenerateMips(
+    public readonly void GenerateMips(
         in Image              image,
         VkImageLayout         finalLayout,
         VkFilter              filter = VkFilter.VK_FILTER_LINEAR,
@@ -2044,7 +2056,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// linear — the right call for downscale / upscale of color targets.
     /// Use nearest for integer formats or single-texel reads.
     /// </summary>
-    public void BlitImage(
+    public readonly void BlitImage(
         in Image                             src, VkImageLayout srcLayout,
         in Image                             dst, VkImageLayout dstLayout,
         scoped ReadOnlySpan<ImageBlitRegion> regions,
@@ -2086,7 +2098,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// from <paramref name="offset"/>) — Vulkan rounds down to a 4-byte
     /// boundary internally.
     /// </summary>
-    public void FillBuffer(in Buffer dst, uint data, ulong offset = 0, ulong size = ~0ul)
+    public readonly void FillBuffer(in Buffer dst, uint data, ulong offset = 0, ulong size = ~0ul)
         => Fns.CmdFillBuffer(Handle, dst.Handle, offset, size, data);
 
     /// <summary>
@@ -2095,7 +2107,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// (or <c>GENERAL</c>); the wrapper does not enforce that — that's
     /// the caller's barrier responsibility.
     /// </summary>
-    public void ClearColorImage(
+    public readonly void ClearColorImage(
         in Image                                     image,
         VkImageLayout                                layout,
         in VkClearColorValue                         color,
@@ -2108,7 +2120,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     }
 
     /// <summary>Whole-image color clear (mip 0+, layer 0+, color aspect).</summary>
-    public void ClearColorImage(in Image image, VkImageLayout layout, in VkClearColorValue color)
+    public readonly void ClearColorImage(in Image image, VkImageLayout layout, in VkClearColorValue color)
     {
         var range = new VkImageSubresourceRange
         {
@@ -2119,7 +2131,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         ClearColorImage(in image, layout, in color, MemoryMarshal.CreateReadOnlySpan(ref range, 1));
     }
 
-    public void ClearDepthStencilImage(
+    public readonly void ClearDepthStencilImage(
         in Image                                     image,
         VkImageLayout                                layout,
         in VkClearDepthStencilValue                  depthStencil,
@@ -2140,7 +2152,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// Pass an explicit aspect mask to override — e.g. clear only depth on
     /// a combined format.
     /// </summary>
-    public void ClearDepthStencilImage(
+    public readonly void ClearDepthStencilImage(
         in Image                    image,
         VkImageLayout               layout,
         in VkClearDepthStencilValue depthStencil,
@@ -2179,7 +2191,18 @@ public unsafe ref struct CommandRecorder : IDisposable
 
     // ---- Dynamic rendering ----
 
-    public void BeginRendering(in RenderingInfo info)
+    /// <summary>
+    /// Begins a dynamic-rendering pass (<c>vkCmdBeginRendering</c>). Pair
+    /// with <see cref="EndRendering"/>.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="RenderingInfo.ColorAttachments"/> may be stack-backed — a
+    /// <c>stackalloc</c> or a collection-expression span — because this
+    /// member is <c>readonly</c>; no heap array is needed at the call site.
+    /// The <see cref="RenderingInfo"/> is consumed synchronously: nothing it
+    /// points at is retained past this call.
+    /// </remarks>
+    public readonly void BeginRendering(in RenderingInfo info)
     {
         // Spec floor for maxColorAttachments is 8; some GPUs allow more.
         // Stack-budget the common case and fall back to ArrayPool to keep
@@ -2220,7 +2243,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         }
     }
 
-    public void EndRendering() => Fns.CmdEndRendering(Handle);
+    public readonly void EndRendering() => Fns.CmdEndRendering(Handle);
 
     // ---- Internal: bounded-stackalloc / ArrayPool fallback ----
 

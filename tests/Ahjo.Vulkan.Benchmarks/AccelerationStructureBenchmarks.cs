@@ -359,7 +359,7 @@ public unsafe class AccelerationStructureBenchmarks
         // not End, so the buffer must reach _spent before the reset drains
         // _spent -> _idle, or it never recycles and the pool ping-pongs two
         // buffers (#188/#199, docs/benchmarks.md).
-        using (scoped var rec = _cmdPool.Begin())
+        using (var rec = _cmdPool.Begin())
         {
             Span<AccelerationStructureBuild> builds = stackalloc AccelerationStructureBuild[1];
             builds[0] = new AccelerationStructureBuild
@@ -410,7 +410,7 @@ public unsafe class AccelerationStructureBenchmarks
     [Benchmark(OperationsPerInvoke = BuildsPerInvoke)]
     public void BuildBlasBatch_16x1_1024()
     {
-        using (scoped var rec = _cmdPool.Begin())
+        using (var rec = _cmdPool.Begin())
         {
             for (int i = 0; i < BuildsPerInvoke; i++)
                 rec.BuildAccelerationStructures(_batchBuilds, _batchGeos, _batchRanges);

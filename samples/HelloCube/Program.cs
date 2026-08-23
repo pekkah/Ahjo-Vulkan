@@ -396,7 +396,7 @@ internal static unsafe class Program
                         dstStage: Stage.EarlyFragmentTests | Stage.LateFragmentTests, dstAccess: Access.DepthStencilAttachmentWrite,
                         aspect:  VkImageAspectFlagBits.VK_IMAGE_ASPECT_DEPTH_BIT));
 
-                    ColorAttachment[] color = [new ColorAttachment
+                    ReadOnlySpan<ColorAttachment> color = [new ColorAttachment
                     {
                         View       = swapView,
                         Layout     = VkImageLayout.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,

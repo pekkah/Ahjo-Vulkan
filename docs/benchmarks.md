@@ -69,7 +69,16 @@ rows were captured for #201 on .NET 10.0.8 (SDK 10.0.204) / Windows 11
 (`Build_MeshPipeline_WithSpecialization` last, in the review-fix pass, on the
 same host and toolchain — the other four re-read 16.15 / 21.88 / 24.23 ns and
 36.13 µs on that pass's single confirming run, all within their recorded
-spreads, so they were left at their minimum-of-N figures); the `HandleOwnership.*` rows came
+spreads, so they were left at their minimum-of-N figures). The **#209** recapture
+(`CommandRecorder.*`, the three `MeshShader.DrawMeshTasks*` rows and the four
+`PipelineBarrier.*` rows) ran on .NET 10.0.8 (SDK 10.0.204) / **Windows 11
+10.0.26200.9168**, AMD Ryzen 9 7900X, BenchmarkDotNet v0.14.0 — i.e. the **same
+CPU, OS build and toolchain as the #201 recapture**. That matters for reading the
+paragraph below: because the configuration is identical, a cross-session move
+cannot be blamed on different hardware, and "drift" there means *session
+conditions* (background load, thermals, driver state), evidenced by control rows
+moving in both directions on code whose only edit was a no-codegen keyword.
+Finally, the `HandleOwnership.*` rows came
 from a Linux container. Rows are comparable to their own successors, not to each other —
 re-measure the row you care about before drawing a conclusion from it.
 
@@ -86,9 +95,9 @@ managed-byte count BDN's `MemoryDiagnoser` reports; `-` is zero.
 | `Buffer.AsSpan_WriteThenRead_SeqWriteAlloc`     | 173.4 ns   |        -  | #157 probe, **not a wrapper canary**: store + read-back of the same element on a `HostAccessSequentialWrite` allocation. This is the former `Buffer.Map_AsSpan` (166.8 ns) renamed — the number did not change. |
 | `Buffer.AsSpan_WriteThenRead_RandomAlloc`       |   1.53 ns  |        -  | #157 probe, **not a wrapper canary**: identical body on a `HostAccessRandom` allocation. Only the ratio against the row above carries information. |
 | `CommandBufferPool.Frame_Begin_100Cmds_End_Reset` | 6.44 µs |        -  | Begin → **300** commands → End → ResetForFrame. The name counts loop iterations, not commands: the body is 100 × (`SetViewport` + `SetScissor` + `FillBuffer`) (`CommandBufferPoolBenchmarks.cs:77-82`). No `OperationsPerInvoke`, so the Mean is the whole cycle. |
-| `CommandRecorder.RenderingPass100Cmds`          |   3.23 µs  |        -  | BeginRendering → 100 SetViewport → EndRendering, dynamic rendering path.  |
-| `CommandRecorder.CopyBuffer_8Regions`           | 810.0 ns   |        -  | #141 canary: multi-region CopyBuffer; stackalloc ≤16 path stays 0 B/op.   |
-| `CommandRecorder.CopyBuffer_24Regions`          |   1.57 µs  |        -  | #141 canary: multi-region CopyBuffer; ArrayPool >16 path stays 0 B/op.    |
+| `CommandRecorder.RenderingPass100Cmds`          |   3.02 µs  |        -  | BeginRendering → 100 SetViewport → EndRendering, dynamic rendering path. Recaptured for #209, down from 3.23 µs — **minimum of 3 runs** (3.023 / 3.041 µs clean, StdDev ≤ 0.011 µs; one noisy run read 3.487 µs, StdDev 0.271, 7 outliers to 5.32 µs). #209 also converted this row's attachment span from `stackalloc` to a **collection expression**, the shape the samples now use, so the row measures what a consumer writes; that conversion cost nothing measurable (3.022 µs before it, 3.023 µs after). **The drop from 3.23 µs is host drift, not the change**: `readonly` on a member is metadata that emits identical code, and the two `CopyBuffer` rows in this same class — whose *benchmark bodies* #209 did not touch, and whose production methods gained only the `readonly` keyword — re-read 784.3 ns and 1,546.3 ns in the same session, −3.2% and −1.5%. |
+| `CommandRecorder.CopyBuffer_8Regions`           | 810.0 ns   |        -  | #141 canary: multi-region CopyBuffer; stackalloc ≤16 path stays 0 B/op. Re-read at **784.3 ns** in the #209 session (−3.2%) and deliberately left at 810.0 — it serves as a drift control for the `RenderingPass100Cmds` row above, which is only meaningful if it keeps its original figure. |
+| `CommandRecorder.CopyBuffer_24Regions`          |   1.57 µs  |        -  | #141 canary: multi-region CopyBuffer; ArrayPool >16 path stays 0 B/op. Re-read at **1,546.3 ns** in the #209 session (−1.5%) and left at 1.57 µs for the same drift-control reason as the row above. |
 | `MeshShader.DrawMeshTasks_1024`                 |  15.49 ns  |        -  | #201 canary: `vkCmdDrawMeshTasksEXT` × 1024 inside one BeginRendering scope with a mesh pipeline bound. Pointer load + unconditional null test + native call; the null test is not behind `AhjoValidation`, so it is measured here rather than compiled away. Recording only, never submitted. **Minimum of 5 runs** (15.49 / 15.52 / 15.53 ns on the three quiet runs; two noisy runs read 23.2 and 24.9 ns with every row in the same run elevated). Needs `VK_EXT_mesh_shader` — see the driver-dependency caveat. Includes the per-invoke bracket; see the note below the table. |
 | `MeshShader.DrawMeshTasksIndirect_1024`         |  21.43 ns  |        -  | #201 canary: `vkCmdDrawMeshTasksIndirectEXT` × 1024 with `drawCount: 1`, `stride: 12`. `drawCount` is 1 on purpose — above 1 needs the `multiDrawIndirect` feature (VUID-vkCmdDrawMeshTasksIndirectEXT-drawCount-02718), which would narrow the host requirement for no wrapper-side difference. **Minimum of 5 runs** (range 21.43–24.43 ns). Includes the per-invoke bracket; see the note below the table. |
 | `MeshShader.DrawMeshTasksIndirectCount_1024`    |  23.20 ns  |        -  | #201 canary: `vkCmdDrawMeshTasksIndirectCountEXT` × 1024 with `maxDrawCount: 1`, `stride: 12` — Ahjo's actual shape (compute writes the count, raster reads it). **Minimum of 5 runs** (range 23.20–24.05 ns, StdDev 0.04–0.90 ns). Was 34.52 ns and strongly bimodal (BDN mValue 3.33) when first captured, before the recorder-disposal fix — the recorder was disposed *after* `ResetForFrame` rather than before, so the command buffer never made it back to `_idle` and the pool settled into alternating two buffers instead of re-recording one. **What the fix is credited with is the bimodality, not the mean.** The bimodality claim is well-evidenced: mValue 3.33 pre-fix, not flagged in any of the 5 post-fix runs, with the StdDev collapsing to 0.04–0.90 ns. The **mean** shift is not: 34.52 ns came from a different session on Windows 11 10.0.26200.8894, and the same host drift moved `PipelineBarrier.SingleImageTransition` from 178.8 to 143.9 ns — a 20% drop with **no code change at all** (see that row). An unknown share of 34.52 → 23.20 is therefore drift, and a clean pre-fix control is no longer recoverable (this file's benchmark body also gained `SetViewport`/`SetScissor` since, which changes what is measured) — so do not try to reconstruct one. The minimum-of-5 discipline is retained rather than re-argued. Needs `VK_EXT_mesh_shader` **and** the `drawIndirectCount` feature (VUID-vkCmdDrawMeshTasksIndirectCountEXT-None-04445) — the wrapper does not enable the latter by default. |
@@ -118,6 +127,30 @@ managed-byte count BDN's `MemoryDiagnoser` reports; `-` is zero.
 | `HandleOwnership.OwnershipPredicate`            |   0.47 ns  |        -  | `OwnsHandle` — the Dispose guard / borrow check.                        |
 | `HandleOwnership.ConstrainedGenericDispatch`    |   3.69 ns  |        -  | `ObjectName.Set`-shaped `struct, IVulkanHandle<T>` dispatch — devirtualized, box-free under the relaxed constraint. |
 
+**The `scoped var rec` workaround is gone (#209).** `CommandRecorder.RenderingPass100Cmds` and the three
+`MeshShader.DrawMeshTasks*` rows used to declare their recorder local `scoped` — before #209 that was the only way to
+hand `BeginRendering(in RenderingInfo)` a stack-backed attachment span without a heap array. Marking the recording
+surface `readonly` removed the constraint, so those four rows now record the shape a consumer actually writes
+(`using var rec = …`). **Every row re-ran at `Allocated` = `-`**, which is the load-bearing result: the rows were
+already `-` (they had the workaround), and the allocation #209 actually eliminates is at the *call site*, which these
+rows never paid. What the change buys the table is that the benchmark and the sample code finally agree.
+
+On the Means, from the #209 recapture: no row moved in a way attributable to the change, though several moved.
+`PipelineBarrier.LargeBatch_8x8x1` read 2.7916 µs against a recorded 2.718–2.768 µs range — 0.9% above the top.
+Its *benchmark body* is untouched by #209 and its production methods gained only the `readonly` keyword
+(`CommandRecorder.cs:776`, `:790`, `:794`, plus the shared `RecordDependency` at `:927`), which emits no code, so the
+move is drift and the recorded figure is left alone. The same applies to the two `CopyBuffer` rows, which moved
+−3.2% and −1.5% — see their row notes. **The control that makes "drift" more than an assertion is that these rows
+moved in both directions, by more than the change could explain, on code paths whose only edit was a keyword with no
+codegen.** `MeshShader.DrawMeshTasks_1024` read
+27.03 ns (StdDev 5.07 ns, median 30.13 — *above* the mean) on the first capture; every row in that run was elevated,
+so the whole capture is discarded as contaminated by other processes on the host. Four clean runs followed
+(15.56 / 16.07 / 15.76 / 16.34 ns, StdDev ≤ 0.36 ns). Minimum-of-5 across the clean runs puts the three mesh rows at
+15.56 / 21.45 / 22.93 ns against recorded 15.49 / 21.43 / 23.20 — within 1.2%, and `DrawMeshTasksIndirectCount_1024`
+lands 1.2% *below* its recorded figure. All three are confirmed rather than moved, and are left as recorded.
+**That first capture is a standing reminder that a single reading on a busy host is not a measurement**; the
+minimum-of-5 discipline above exists for exactly this.
+
 **Reading the Mean column.** Many benchmarks here unroll an inner loop and
 declare `OperationsPerInvoke` (e.g. `Buffer.AsSpan_*`, `PipelineBarrier.*`,
 `PushDescriptors.*`, `PushConstants.*`, `SyncPool.*`, `ResultPolicy.*`,
@@ -139,19 +172,19 @@ were already the correct per-call numbers. For
 `End` → `ResetForFrame`, and `OperationsPerInvoke = 1024` divides *all* of that
 by 1024 — so the bracket is a real component of a ~15–24 ns figure, not an
 error bar. A bound on its size, from
-`CommandRecorder.RenderingPass100Cmds` (3.23 µs for
+`CommandRecorder.RenderingPass100Cmds` (3.02 µs for
 Begin → BeginRendering → 100 × SetViewport → EndRendering → End → ResetForFrame,
 `CommandRecorderBenchmarks.cs:9-10`): the mesh bracket nests inside that shape
 except for `BindPipeline` — same `Begin`/`End`/`ResetForFrame`, same
 `BeginRendering`/`EndRendering` pair, and 100 `SetViewport`s more than cover the
 bracket's one `SetViewport` + one `SetScissor`. So the bracket is
-**under ~3.3 ns/op here, plus one `BindPipeline`**. The row this note used to
+**under ~3.0 ns/op here, plus one `BindPipeline`**. The row this note used to
 cite — `CommandBufferPool.Frame_Begin_100Cmds_End_Reset`, 6.44 µs — is not a
 bound: it records 300 commands, not 100, and contains neither a
 `BeginRendering`/`EndRendering` pair nor a `BindPipeline`, so its shape is not a
 superset and "strictly less" was unearned. If you want a bound that covers
 `BindPipeline` too without measuring it, the union of the two rows
-(6.44 + 3.23 µs over 1024 ops) puts the bracket under 9.5 ns/op. **The benchmarks are deliberately not
+(6.44 + 3.02 µs over 1024 ops) puts the bracket under 9.3 ns/op. **The benchmarks are deliberately not
 changed to exclude it** — every unrolled row in this table carries its own
 bracket the same way, and the rows are regression canaries compared against
 themselves, so subtracting it would break comparability with every prior

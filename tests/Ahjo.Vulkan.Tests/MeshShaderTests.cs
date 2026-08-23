@@ -804,7 +804,7 @@ public sealed unsafe class MeshShaderTests
                     srcStage: Stage.TopOfPipe,             srcAccess: Access.None,
                     dstStage: Stage.ColorAttachmentOutput, dstAccess: Access.ColorAttachmentWrite));
 
-                ColorAttachment[] color =
+                ReadOnlySpan<ColorAttachment> color =
                 [
                     new ColorAttachment
                     {

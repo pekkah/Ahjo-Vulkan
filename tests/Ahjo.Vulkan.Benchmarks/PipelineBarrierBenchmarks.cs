@@ -127,10 +127,10 @@ public class PipelineBarrierBenchmarks
         // also keeps the benchmark valid under AHJO_VULKAN_TIER=validation,
         // where ResetForFrame asserts on an outstanding recorder.
         //
-        // `scoped` narrows the recorder's safe-to-escape to this method
-        // so the method-local stackalloc above can flow into
-        // PipelineBarrier without tripping CS8350.
-        using (scoped var rec = _cmdPool.Begin())
+        // The method-local stackalloc above flows into PipelineBarrier
+        // because the recording surface is `readonly` (#209); the recorder
+        // local needs no `scoped`.
+        using (var rec = _cmdPool.Begin())
         {
             for (int i = 0; i < CallsPerInvoke; i++)
                 rec.PipelineBarrier(default, default, bars);
@@ -171,10 +171,10 @@ public class PipelineBarrierBenchmarks
         // also keeps the benchmark valid under AHJO_VULKAN_TIER=validation,
         // where ResetForFrame asserts on an outstanding recorder.
         //
-        // `scoped` narrows the recorder's safe-to-escape to this method so
-        // the method-local stackalloc above can flow into SetEvent/WaitEvent
-        // without tripping CS8350.
-        using (scoped var rec = _cmdPool.Begin())
+        // The method-local stackalloc above flows into SetEvent/WaitEvent
+        // because the recording surface is `readonly` (#209); the recorder
+        // local needs no `scoped`.
+        using (var rec = _cmdPool.Begin())
         {
             for (int i = 0; i < CallsPerInvoke; i++)
             {
