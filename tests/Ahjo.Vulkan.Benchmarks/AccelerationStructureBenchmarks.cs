@@ -399,8 +399,10 @@ public unsafe class AccelerationStructureBenchmarks
     /// <c>AccelerationStructureGeometry.WriteNative</c>'s <c>Instances</c> arm
     /// (three field writes). The <c>Triangles</c> arm is the widest at eight,
     /// and before this row it ran only in <c>[GlobalSetup]</c>, where BDN
-    /// measures nothing. (The <c>Aabbs</c> arm is still unmeasured; it is the
-    /// narrowest and has no per-frame consumer.)</para>
+    /// measures nothing. The <c>Aabbs</c> arm stays unmeasured — narrowest of
+    /// the three, no per-frame consumer; its correctness is covered instead by
+    /// the Tier-3 <c>AccelerationStructureTests.Blas_OverAabbs_*</c> builds
+    /// (issue 206).</para>
     /// <para>The batch is a per-frame shape, not a load-time one: BLAS refits
     /// for skinned and deformable geometry are rebuilt every frame, and nine
     /// animated meshes already cross the threshold.</para>
