@@ -41,4 +41,6 @@ Setup-time allocations (constructors, builder finalization, one-shot config) are
 
 Watch for the usual leaks on hot paths: LINQ, string interpolation, closures capturing locals, `params T[]` where a `ReadOnlySpan<T>` overload would do, boxing through interface casts.
 
+**Span parameters on `CommandRecorder` must be `scoped`.** The recorder is a `ref struct`, so an un-`scoped` span parameter cannot receive a `stackalloc` — the call site fails with CS9080/CS8350 and the caller is forced into a heap array on exactly the path that is supposed to allocate nothing. Nothing in `Recording/` stores a caller span past the call, so `scoped` is always accurate there. `params ReadOnlySpan<T>` is implicitly scoped and needs no modifier. `tests/Ahjo.Vulkan.Tests/ScopedSpanProbe.cs` is the compile-time guard: every span entry point is called there with a stack span, so dropping the modifier breaks the build.
+
 `tests/Ahjo.Vulkan.Benchmarks/` has a `[MemoryDiagnoser]` benchmark per hot-path subsystem and `docs/benchmarks.md` records the baseline (every `Allocated` cell should read `-`). When changing a hot path, run the matching benchmark (`/run-bench`) or use the `bench-coverage-checker` agent to confirm coverage hasn't slipped. Before a PR that touches Recording/, Sync/, Pools/, Memory/, Resources/, or Pipelines/, also run the `vulkan-validation-reviewer` agent.

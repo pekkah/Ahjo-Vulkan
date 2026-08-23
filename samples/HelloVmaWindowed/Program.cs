@@ -353,7 +353,7 @@ internal static unsafe class Program
 
                     rec.BindPipeline(in pipeline);
 
-                    DescriptorWrite[] writes =
+                    ReadOnlySpan<DescriptorWrite> writes =
                     [
                         DescriptorWrite.Buffer(
                             binding: 0, arrayElement: 0,

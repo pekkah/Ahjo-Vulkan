@@ -117,7 +117,7 @@ public sealed unsafe class DescriptorWriteTests
 
                 // Non-templated push descriptor: one storage-buffer write.
                 var bufferInfo = BufferDescriptorWrite.Of(in buffer);
-                DescriptorWrite[] writes =
+                ReadOnlySpan<DescriptorWrite> writes =
                 [
                     DescriptorWrite.Buffer(
                         binding: 0, arrayElement: 0,

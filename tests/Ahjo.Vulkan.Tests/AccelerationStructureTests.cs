@@ -916,11 +916,7 @@ public sealed unsafe class AccelerationStructureTests
         {
             using var cmdPool = new CommandBufferPool(_device, _family);
 
-            // Heap array rather than stackalloc: PipelineBarrier's span
-            // parameters are not `scoped`, so a stack span cannot reach a
-            // ref-struct receiver. Setup-time here, so it costs nothing that
-            // matters.
-            MemoryBarrier[] barriers =
+            ReadOnlySpan<MemoryBarrier> barriers =
             [
                 new MemoryBarrier
                 {

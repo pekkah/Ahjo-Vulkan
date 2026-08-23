@@ -499,7 +499,7 @@ internal static unsafe class Program
                 // BufferDescriptorWrite.Of(in Buffer) reads `.Handle` and
                 // `.Size` off the VMA-allocated buffer, so the descriptor
                 // covers the entire UBO range automatically.
-                DescriptorWrite[] writes =
+                ReadOnlySpan<DescriptorWrite> writes =
                 [
                     DescriptorWrite.Buffer(
                         binding: 0, arrayElement: 0,
