@@ -589,6 +589,119 @@ public sealed unsafe class AccelerationStructureTests
     }
 
     /// <summary>
+    /// Issue 206: the <see cref="GeometryKind.Aabbs"/> arm of
+    /// <see cref="AccelerationStructureGeometry.WriteNative"/> had no build
+    /// behind it — <c>Triangles</c> and <c>Instances</c> are both reached by
+    /// Tier-3 tests, procedural geometry by nothing. The field writes are three
+    /// lines, but a wrong <c>stride</c> or a mis-set <c>data</c> address
+    /// produces a structurally valid <c>VkAccelerationStructureGeometryKHR</c>
+    /// that builds into garbage, which no unit test can see. The layer plus a
+    /// real driver is the only oracle for that.
+    /// </summary>
+    [Fact]
+    public void Blas_OverAabbs_BuildsWithoutValidationErrors()
+    {
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer();
+
+        var errors = new List<DebugMessage>();
+        using var instance = CreateValidatedInstance(errors);
+        using Device? device = TryCreateAccelerationStructureDevice(instance, out uint family);
+        TestGate.RequireDeviceFeature(device is not null, RtSkipReason);
+
+        using var fixture = new AabbBlasFixture(device!, family, aabbCount: 2);
+
+        Assert.NotEqual(0ul, fixture.Sizes.AccelerationStructureSize);
+        Assert.NotEqual(0ul, fixture.Sizes.BuildScratchSize);
+
+        fixture.RecordBuildAndSubmit(AccelerationStructureBuildRange.Of(2));
+
+        Assert.NotEqual(0ul, fixture.Blas.GetDeviceAddress(device!));
+        AssertNoValidationErrors(errors);
+    }
+
+    /// <summary>
+    /// <see cref="AccelerationStructureBuildRange"/> is one shared layout mirror
+    /// across all three geometry kinds, and Vulkan overloads its fields per
+    /// kind: for AABBs <see cref="AccelerationStructureBuildRange.PrimitiveCount"/>
+    /// counts AABBs and
+    /// <see cref="AccelerationStructureBuildRange.PrimitiveOffset"/> is a
+    /// <b>byte</b> offset into the AABB array — not the triangle meanings of the
+    /// same two fields. This pins both, as far as each is observable.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The count is layer-checkable, the offset is not.</b> The layer
+    /// derives the destination's required size from <c>primitiveCount</c>, so a
+    /// count in the wrong unit trips
+    /// <c>VUID-vkCmdBuildAccelerationStructuresKHR-dstAccelerationStructure-03707</c>
+    /// ("was created with size (N), but ... requires a minimum size of (M)").
+    /// It does <b>not</b> validate <c>primitiveOffset</c> at all: offsets of 1
+    /// and 4 (illegal — the AABB rule is a multiple of 8) and 9999 (past the end
+    /// of the buffer) were all recorded without a single message on an RT host
+    /// with the layer enabled. So the offset half asserts what can be asserted —
+    /// that a byte offset of one whole <c>VkAabbPositionsKHR</c> builds clean —
+    /// and the byte-versus-index reading is otherwise pinned mechanically by
+    /// <see cref="BuildRange_MirrorsNativeLayout"/>. Proving it observably needs
+    /// a ray query that reports which box it hit (issue 207).</para>
+    /// </remarks>
+    [Fact]
+    public void Blas_OverAabbs_BuildRangeUsesAabbCountAndByteOffset()
+    {
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer();
+
+        var errors = new List<DebugMessage>();
+        using var instance = CreateValidatedInstance(errors);
+        using Device? device = TryCreateAccelerationStructureDevice(instance, out uint family);
+        TestGate.RequireDeviceFeature(device is not null, RtSkipReason);
+
+        // maxPrimitiveCounts is in AABBs: sizing for more AABBs must ask for
+        // more memory. If the count were in bytes or vertices this would not
+        // track the element count.
+        Span<AccelerationStructureGeometry> sizingGeo =
+            [AccelerationStructureGeometry.Aabbs(address: 0x1000, stride: (ulong)sizeof(VkAabbPositionsKHR))];
+        Span<uint> two  = [2];
+        Span<uint> many = [256];
+        AccelerationStructureBuildSizes forTwo = device!.GetAccelerationStructureBuildSizes(
+            AccelerationStructureType.BottomLevel,
+            AccelerationStructureBuildFlags.PreferFastTrace, sizingGeo, two);
+        AccelerationStructureBuildSizes forMany = device.GetAccelerationStructureBuildSizes(
+            AccelerationStructureType.BottomLevel,
+            AccelerationStructureBuildFlags.PreferFastTrace, sizingGeo, many);
+        Assert.True(forMany.AccelerationStructureSize > forTwo.AccelerationStructureSize,
+            "maxPrimitiveCounts is an AABB count, so sizing for 256 AABBs must exceed sizing for 2 "
+            + $"(got {forMany.AccelerationStructureSize} vs {forTwo.AccelerationStructureSize}).");
+
+        // Three AABBs in the buffer, the structure sized for a two-primitive
+        // build: the build below consumes the last two, so the offset has to
+        // skip exactly one element's worth of BYTES.
+        using var fixture = new AabbBlasFixture(device, family, aabbCount: 3, maxPrimitiveCount: 2);
+
+        fixture.RecordBuildAndSubmit(new AccelerationStructureBuildRange
+        {
+            PrimitiveCount  = 2,
+            PrimitiveOffset = (uint)sizeof(VkAabbPositionsKHR),
+        });
+
+        Assert.NotEqual(0ul, fixture.Blas.GetDeviceAddress(device));
+        AssertNoValidationErrors(errors);
+
+        // The count in the wrong unit. Recorded and thrown away, never
+        // submitted: the size check fires at
+        // vkCmdBuildAccelerationStructuresKHR, so the layer sees it without a
+        // driver ever consuming a malformed build.
+        fixture.RecordBuildWithoutSubmitting(AccelerationStructureBuildRange.Of(
+            (uint)(3 * sizeof(VkAabbPositionsKHR))));
+
+        lock (errors)
+        {
+            Assert.NotEmpty(errors);
+            Assert.Contains(errors, e =>
+                e.Message.Contains("minimum size", StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
     /// A TLAS over one instance referencing the BLAS by device address. The
     /// oracle is the validation layer: a clean submit means the instance
     /// buffer, the <c>Instances</c> geometry and the barrier were all accepted.
@@ -962,6 +1075,160 @@ public sealed unsafe class AccelerationStructureTests
             Scratch.Dispose();
             _backing.Dispose();
             _vertices.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// The procedural-geometry counterpart of <see cref="BlasFixture"/>: a
+    /// packed <c>VkAabbPositionsKHR</c> array, the sized backing and scratch
+    /// buffers, and an <see cref="AccelerationStructureGeometry.Aabbs"/>
+    /// description over it. Unlike <see cref="BlasFixture"/> the build range is
+    /// supplied per call, because the AABB tests are exactly about what
+    /// <see cref="AccelerationStructureBuildRange.PrimitiveOffset"/> means.
+    /// </summary>
+    private sealed class AabbBlasFixture : IDisposable
+    {
+        private readonly Device _device;
+        private readonly uint   _family;
+        private readonly Buffer _aabbs;
+        private readonly Buffer _backing;
+        private readonly Buffer _scratch;
+
+        public AccelerationStructure           Blas     { get; }
+        public AccelerationStructureGeometry   Geometry { get; }
+        public AccelerationStructureBuildSizes Sizes    { get; }
+
+        /// <param name="aabbCount">AABBs written into the buffer.</param>
+        /// <param name="maxPrimitiveCount">What the build is sized for; defaults
+        /// to <paramref name="aabbCount"/>. A build that starts at a non-zero
+        /// primitiveOffset consumes fewer AABBs than the buffer holds, and
+        /// sizing for the buffer rather than for the build would hide a wrong
+        /// offset behind slack scratch.</param>
+        public AabbBlasFixture(Device device, uint family, int aabbCount, int? maxPrimitiveCount = null)
+        {
+            _device = device;
+            _family = family;
+
+            _aabbs = device.Allocator.CreateBuffer(
+                new BufferDescription
+                {
+                    Size  = (ulong)(aabbCount * sizeof(VkAabbPositionsKHR)),
+                    Usage = BufferUsage.AccelerationStructureBuildInputReadOnly
+                          | BufferUsage.ShaderDeviceAddress | BufferUsage.TransferDst,
+                },
+                new AllocationDescription
+                {
+                    Usage = MemoryUsage.AutoPreferHost,
+                    Flags = AllocationFlags.HostAccessSequentialWrite | AllocationFlags.Mapped,
+                });
+
+            // Unit cubes marching along +X, one per AABB, so every element is
+            // distinct and a stride that reads the wrong element produces a
+            // different structure rather than a duplicate of element 0.
+            Span<VkAabbPositionsKHR> boxes = _aabbs.AsSpan<VkAabbPositionsKHR>();
+            for (int i = 0; i < aabbCount; i++)
+                boxes[i] = new VkAabbPositionsKHR
+                {
+                    minX = i, minY = 0f, minZ = 0f,
+                    maxX = i + 1, maxY = 1f, maxZ = 1f,
+                };
+            _aabbs.Flush();
+
+            ulong aabbAddress = _aabbs.GetDeviceAddress(device);
+            // VUID-vkCmdBuildAccelerationStructuresKHR-pInfos-03714: the AABB
+            // data address must be 8-byte aligned. The fixture hands over the
+            // buffer's base unchanged, so assert the allocator's base satisfies
+            // it rather than assume it — same reasoning as BlasFixture's scratch
+            // alignment assert.
+            Assert.Equal(0ul, aabbAddress % 8);
+
+            // Stride 24 is the packed VkAabbPositionsKHR array. The rule is
+            // "multiple of 8", so 24 is the tightest legal packing.
+            Geometry = AccelerationStructureGeometry.Aabbs(
+                address: aabbAddress,
+                stride: (ulong)sizeof(VkAabbPositionsKHR));
+
+            Span<AccelerationStructureGeometry> geos = [Geometry];
+            Span<uint> maxCounts = [(uint)(maxPrimitiveCount ?? aabbCount)];
+            Sizes = device.GetAccelerationStructureBuildSizes(
+                AccelerationStructureType.BottomLevel,
+                AccelerationStructureBuildFlags.PreferFastTrace,
+                geos, maxCounts);
+
+            _backing = CreateAsBuffer(device, Sizes.AccelerationStructureSize);
+            _scratch = CreateScratchBuffer(device, Sizes.BuildScratchSize);
+
+            Assert.True(device.PhysicalDevice.TryGetAccelerationStructureLimits(
+                out AccelerationStructureLimits limits));
+            Assert.Equal(0ul, _scratch.GetDeviceAddress(device) % limits.MinScratchOffsetAlignment);
+
+            Blas = device.CreateAccelerationStructure(
+                AccelerationStructureType.BottomLevel, in _backing, 0,
+                Sizes.AccelerationStructureSize);
+        }
+
+        public void RecordBuildAndSubmit(AccelerationStructureBuildRange range)
+        {
+            using var cmdPool = new CommandBufferPool(_device, _family);
+            var rec = cmdPool.Begin();
+            try
+            {
+                Record(ref rec, range);
+                SubmitAndWait(_device, _family, ref rec);
+            }
+            finally { rec.Dispose(); }
+        }
+
+        /// <summary>
+        /// Records a build and throws the command buffer away. The build-range
+        /// rules are checked by the layer at record time, so a deliberately
+        /// malformed range can be observed without a driver ever executing it.
+        /// </summary>
+        public void RecordBuildWithoutSubmitting(AccelerationStructureBuildRange range)
+        {
+            using var cmdPool = new CommandBufferPool(_device, _family);
+            var rec = cmdPool.Begin();
+            try { Record(ref rec, range); }
+            finally { rec.Dispose(); }
+        }
+
+        private void Record(ref CommandRecorder rec, AccelerationStructureBuildRange range)
+        {
+            Span<AccelerationStructureBuild> builds = stackalloc AccelerationStructureBuild[1];
+            builds[0] = new AccelerationStructureBuild
+            {
+                Type           = AccelerationStructureType.BottomLevel,
+                Flags          = AccelerationStructureBuildFlags.PreferFastTrace,
+                Destination    = Blas,
+                ScratchAddress = _scratch.GetDeviceAddress(_device),
+                FirstGeometry  = 0,
+                GeometryCount  = 1,
+            };
+            Span<AccelerationStructureGeometry> geos = stackalloc AccelerationStructureGeometry[1];
+            geos[0] = Geometry;
+            Span<AccelerationStructureBuildRange> ranges = stackalloc AccelerationStructureBuildRange[1];
+            ranges[0] = range;
+
+            rec.BuildAccelerationStructures(builds, geos, ranges);
+            rec.PipelineBarrier(
+                [
+                    new MemoryBarrier
+                    {
+                        SrcStage  = Stage.AccelerationStructureBuild,
+                        SrcAccess = Access.AccelerationStructureWrite,
+                        DstStage  = Stage.AccelerationStructureBuild,
+                        DstAccess = Access.AccelerationStructureRead,
+                    },
+                ],
+                default, default);
+        }
+
+        public void Dispose()
+        {
+            Blas.Dispose();
+            _scratch.Dispose();
+            _backing.Dispose();
+            _aabbs.Dispose();
         }
     }
 
