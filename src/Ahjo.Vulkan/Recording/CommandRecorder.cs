@@ -123,7 +123,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// Pair with <see cref="EndLabel"/>; prefer <see cref="LabelScope"/>
     /// for clean nesting via <c>using</c>.
     /// </summary>
-    public void BeginLabel(ReadOnlySpan<byte> name, in Color color = default)
+    public void BeginLabel(scoped ReadOnlySpan<byte> name, in Color color = default)
     {
         var fn = Fns.CmdBeginDebugUtilsLabel;
         if (fn == null || name.IsEmpty) return;
@@ -162,7 +162,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// open a scope — captures show it as a flag on the timeline at the
     /// recorded position.
     /// </summary>
-    public void InsertLabel(ReadOnlySpan<byte> name, in Color color = default)
+    public void InsertLabel(scoped ReadOnlySpan<byte> name, in Color color = default)
     {
         var fn = Fns.CmdInsertDebugUtilsLabel;
         if (fn == null || name.IsEmpty) return;
@@ -191,7 +191,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// neither begin nor dispose touches the marker stack, so begin/end
     /// stay balanced for any enclosing scope.
     /// </summary>
-    public DisposableLabel LabelScope(ReadOnlySpan<byte> name, in Color color = default)
+    public DisposableLabel LabelScope(scoped ReadOnlySpan<byte> name, in Color color = default)
     {
         BeginLabel(name, in color);
         // Hand Dispose a non-null End pointer ONLY when BeginLabel actually
@@ -230,8 +230,8 @@ public unsafe ref struct CommandRecorder : IDisposable
         VkPipelineBindPoint    bindPoint,
         in PipelineLayout      layout,
         uint                   firstSet,
-        ReadOnlySpan<DescriptorSet> sets,
-        ReadOnlySpan<uint>     dynamicOffsets = default)
+        scoped ReadOnlySpan<DescriptorSet> sets,
+        scoped ReadOnlySpan<uint> dynamicOffsets = default)
     {
         if (sets.IsEmpty) return;
         AssertSetsMatchLayout(in layout, firstSet, sets);
@@ -255,7 +255,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         }
     }
 
-    private static void AssertSetsMatchLayout(in PipelineLayout layout, uint firstSet, ReadOnlySpan<DescriptorSet> sets)
+    private static void AssertSetsMatchLayout(in PipelineLayout layout, uint firstSet, scoped ReadOnlySpan<DescriptorSet> sets)
     {
         if (!AhjoValidation.IsEnabled) return;
 
@@ -354,8 +354,8 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// </summary>
     public void BindVertexBuffers(
         uint                  firstBinding,
-        ReadOnlySpan<Buffer>  buffers,
-        ReadOnlySpan<ulong>   offsets = default)
+        scoped ReadOnlySpan<Buffer> buffers,
+        scoped ReadOnlySpan<ulong>  offsets = default)
     {
         if (buffers.IsEmpty) return;
         if (!offsets.IsEmpty && offsets.Length != buffers.Length)
@@ -434,7 +434,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         VkPipelineBindPoint           bindPoint,
         in PipelineLayout             layout,
         uint                          set,
-        ReadOnlySpan<DescriptorWrite> writes)
+        scoped ReadOnlySpan<DescriptorWrite> writes)
     {
         if (writes.IsEmpty) return;
 
@@ -504,9 +504,9 @@ public unsafe ref struct CommandRecorder : IDisposable
         VkPipelineBindPoint                                bindPoint,
         VkPipelineLayout_T*                                layout,
         uint                                               set,
-        ReadOnlySpan<DescriptorWrite>                      writes,
-        Span<VkWriteDescriptorSet>                         raws,
-        Span<VkWriteDescriptorSetAccelerationStructureKHR> chains)
+        scoped ReadOnlySpan<DescriptorWrite>                      writes,
+        scoped Span<VkWriteDescriptorSet>                         raws,
+        scoped Span<VkWriteDescriptorSetAccelerationStructureKHR> chains)
     {
         // writes and chains are both pinned across BuildWrites AND the native
         // call: the produced entries point into both.
@@ -762,9 +762,9 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// you don't need.
     /// </summary>
     public void PipelineBarrier(
-        ReadOnlySpan<MemoryBarrier> memory,
-        ReadOnlySpan<BufferBarrier> buffer,
-        ReadOnlySpan<ImageBarrier>  image)
+        scoped ReadOnlySpan<MemoryBarrier> memory,
+        scoped ReadOnlySpan<BufferBarrier> buffer,
+        scoped ReadOnlySpan<ImageBarrier>  image)
     {
         // The empty-mix early return belongs here, not in RecordDependency:
         // skipping the driver call is right for a barrier that orders
@@ -775,7 +775,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     }
 
     /// <summary>Image-only convenience overload — the dominant case.</summary>
-    public void PipelineBarrier(ReadOnlySpan<ImageBarrier> image)
+    public void PipelineBarrier(scoped ReadOnlySpan<ImageBarrier> image)
         => PipelineBarrier(default, default, image);
 
     /// <summary>Single image-barrier convenience overload.</summary>
@@ -823,9 +823,9 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// </remarks>
     public void SetEvent(
         in Event evt,
-        ReadOnlySpan<MemoryBarrier> memory,
-        ReadOnlySpan<BufferBarrier> buffer,
-        ReadOnlySpan<ImageBarrier>  image)
+        scoped ReadOnlySpan<MemoryBarrier> memory,
+        scoped ReadOnlySpan<BufferBarrier> buffer,
+        scoped ReadOnlySpan<ImageBarrier>  image)
     {
         AssertSplitBarrierUsable("SetEvent", in evt, memory, buffer, image);
         RecordDependency(DependencyOp.SetEvent, evt.Handle, memory, buffer, image);
@@ -859,9 +859,9 @@ public unsafe ref struct CommandRecorder : IDisposable
     /// </remarks>
     public void WaitEvent(
         in Event evt,
-        ReadOnlySpan<MemoryBarrier> memory,
-        ReadOnlySpan<BufferBarrier> buffer,
-        ReadOnlySpan<ImageBarrier>  image)
+        scoped ReadOnlySpan<MemoryBarrier> memory,
+        scoped ReadOnlySpan<BufferBarrier> buffer,
+        scoped ReadOnlySpan<ImageBarrier>  image)
     {
         AssertSplitBarrierUsable("WaitEvent", in evt, memory, buffer, image);
         RecordDependency(DependencyOp.WaitEvent, evt.Handle, memory, buffer, image);
@@ -915,9 +915,9 @@ public unsafe ref struct CommandRecorder : IDisposable
     private void RecordDependency(
         DependencyOp                op,
         VkEvent_T*                  @event,
-        ReadOnlySpan<MemoryBarrier> memory,
-        ReadOnlySpan<BufferBarrier> buffer,
-        ReadOnlySpan<ImageBarrier>  image)
+        scoped ReadOnlySpan<MemoryBarrier> memory,
+        scoped ReadOnlySpan<BufferBarrier> buffer,
+        scoped ReadOnlySpan<ImageBarrier>  image)
     {
         const int Threshold = 16;
         Span<VkMemoryBarrier2>       mSlab = stackalloc VkMemoryBarrier2[Threshold];
@@ -971,9 +971,9 @@ public unsafe ref struct CommandRecorder : IDisposable
     private static void AssertSplitBarrierUsable(
         string caller,
         in Event evt,
-        ReadOnlySpan<MemoryBarrier> memory,
-        ReadOnlySpan<BufferBarrier> buffer,
-        ReadOnlySpan<ImageBarrier>  image)
+        scoped ReadOnlySpan<MemoryBarrier> memory,
+        scoped ReadOnlySpan<BufferBarrier> buffer,
+        scoped ReadOnlySpan<ImageBarrier>  image)
     {
         if (!AhjoValidation.IsEnabled) return;
 
@@ -2047,7 +2047,7 @@ public unsafe ref struct CommandRecorder : IDisposable
     public void BlitImage(
         in Image                       src, VkImageLayout srcLayout,
         in Image                       dst, VkImageLayout dstLayout,
-        ReadOnlySpan<ImageBlitRegion>  regions,
+        scoped ReadOnlySpan<ImageBlitRegion> regions,
         VkFilter                       filter = VkFilter.VK_FILTER_LINEAR)
     {
         if (regions.IsEmpty) return;
@@ -2099,7 +2099,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         in Image                              image,
         VkImageLayout                         layout,
         in VkClearColorValue                  color,
-        ReadOnlySpan<VkImageSubresourceRange> ranges)
+        scoped ReadOnlySpan<VkImageSubresourceRange> ranges)
     {
         if (ranges.IsEmpty) return;
         fixed (VkClearColorValue*       pColor = &color)
@@ -2123,7 +2123,7 @@ public unsafe ref struct CommandRecorder : IDisposable
         in Image                              image,
         VkImageLayout                         layout,
         in VkClearDepthStencilValue           depthStencil,
-        ReadOnlySpan<VkImageSubresourceRange> ranges)
+        scoped ReadOnlySpan<VkImageSubresourceRange> ranges)
     {
         if (ranges.IsEmpty) return;
         fixed (VkClearDepthStencilValue* pDs    = &depthStencil)

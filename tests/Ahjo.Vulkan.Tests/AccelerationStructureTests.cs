@@ -916,24 +916,21 @@ public sealed unsafe class AccelerationStructureTests
         {
             using var cmdPool = new CommandBufferPool(_device, _family);
 
-            // Heap array rather than stackalloc: PipelineBarrier's span
-            // parameters are not `scoped`, so a stack span cannot reach a
-            // ref-struct receiver. Setup-time here, so it costs nothing that
-            // matters.
-            MemoryBarrier[] barriers =
-            [
-                new MemoryBarrier
+            var rec = cmdPool.Begin();
+            try
+            {
+                // PipelineBarrier's span parameters are `scoped` (#205), so a
+                // stackalloc reaches the ref-struct receiver directly — no heap
+                // barrier array needed.
+                Span<MemoryBarrier> barriers = stackalloc MemoryBarrier[1];
+                barriers[0] = new MemoryBarrier
                 {
                     SrcStage  = Stage.AccelerationStructureBuild,
                     SrcAccess = Access.AccelerationStructureWrite,
                     DstStage  = Stage.AccelerationStructureBuild,
                     DstAccess = Access.AccelerationStructureRead,
-                },
-            ];
+                };
 
-            var rec = cmdPool.Begin();
-            try
-            {
                 Span<AccelerationStructureBuild> builds = stackalloc AccelerationStructureBuild[1];
                 builds[0] = new AccelerationStructureBuild
                 {

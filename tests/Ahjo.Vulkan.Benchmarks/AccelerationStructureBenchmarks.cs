@@ -81,11 +81,6 @@ public unsafe class AccelerationStructureBenchmarks
     private AccelerationStructureGeometry[]   _batchGeos    = null!;
     private AccelerationStructureBuildRange[] _batchRanges  = null!;
 
-    // Barrier scratch, hoisted: PipelineBarrier's span parameters are not
-    // `scoped`, so a stack span cannot reach the ref-struct recorder. Setup
-    // only — never touched by a measured body.
-    private MemoryBarrier[] _buildBarrier = null!;
-
     [GlobalSetup]
     public void Setup()
     {
@@ -183,17 +178,6 @@ public unsafe class AccelerationStructureBenchmarks
             AccelerationStructureType.BottomLevel, in _blasBacking, 0,
             blasSizes.AccelerationStructureSize);
 
-        _buildBarrier =
-        [
-            new MemoryBarrier
-            {
-                SrcStage  = Stage.AccelerationStructureBuild,
-                SrcAccess = Access.AccelerationStructureWrite,
-                DstStage  = Stage.AccelerationStructureBuild,
-                DstAccess = Access.AccelerationStructureRead,
-            },
-        ];
-
         // Build the BLAS for real and wait, so the instance entry below holds a
         // live device address.
         using (var fencePool = new FencePool(_device))
@@ -218,7 +202,19 @@ public unsafe class AccelerationStructureBenchmarks
                 ranges[0] = AccelerationStructureBuildRange.Of(1);
 
                 rec.BuildAccelerationStructures(builds, geos, ranges);
-                rec.PipelineBarrier(_buildBarrier, default, default);
+
+                // PipelineBarrier's span parameters are `scoped` (#205), so the
+                // build-visibility barrier stackallocs like builds/geos/ranges
+                // above rather than hoisting to a heap field.
+                Span<MemoryBarrier> buildBarrier = stackalloc MemoryBarrier[1];
+                buildBarrier[0] = new MemoryBarrier
+                {
+                    SrcStage  = Stage.AccelerationStructureBuild,
+                    SrcAccess = Access.AccelerationStructureWrite,
+                    DstStage  = Stage.AccelerationStructureBuild,
+                    DstAccess = Access.AccelerationStructureRead,
+                };
+                rec.PipelineBarrier(buildBarrier, default, default);
                 _device.GetQueue(family, 0).Submit2(ref rec, in fence);
                 fence.Wait(TimeSpan.FromSeconds(10));
             }
