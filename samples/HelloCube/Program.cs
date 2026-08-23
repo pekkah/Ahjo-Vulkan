@@ -434,7 +434,7 @@ internal static unsafe class Program
                         if (wireframe) rec.BindPipeline(in wirePipeline);
                         else           rec.BindPipeline(in solidPipeline);
 
-                        DescriptorWrite[] writes =
+                        ReadOnlySpan<DescriptorWrite> writes =
                         [
                             DescriptorWrite.CombinedImageSampler(
                                 binding: 0, arrayElement: 0,
