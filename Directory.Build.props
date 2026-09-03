@@ -46,6 +46,18 @@
     <SlangVersion>v2026.14.1</SlangVersion>
     <SlangWinX64Sha256>5ed0a59d650a0af0aca45d5db4e083b3d8fb5cea05748747dd95dfbe9c580658</SlangWinX64Sha256>
     <SlangLinuxX64Sha256>21f2d7847385a770e569fb61b1507a7794d742d97850bce0432bff0032ca005f</SlangLinuxX64Sha256>
+    <!-- Pinned NVIDIA DLSS (NGX) SDK tag. Independent cadence from the four
+         above. See https://github.com/NVIDIA/DLSS/releases.
+
+         Nothing is cloned or built from this repo: tools/setup-ngx.ps1
+         fetches individual files (headers, the static NGX client library the
+         shim links, the licence text, and — for local development only — the
+         nvngx_dlss feature DLL) by raw URL at this tag and verifies each one
+         against native/ngx/pins.sha256. A bump therefore means re-running
+         that script with -UpdatePins and committing the new pins file.
+
+         The feature DLL is never packed: consumers supply it (issue #214). -->
+    <NgxVersion>v310.7.0</NgxVersion>
     <!-- The libktx feature set, defined ONCE. The local host build
          (BuildKtxForHost) and every CI matrix job invoke that same target,
          so these flags cannot drift between a developer's binary and the
