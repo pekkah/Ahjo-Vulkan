@@ -280,6 +280,17 @@ native/slang/downloaded/
 # native/ktx/staged/.
 native/slang/staged/
 
+# NVIDIA DLSS (NGX) SDK files fetched per-file by tools/setup-ngx.ps1 at the
+# NgxVersion tag and verified against native/ngx/pins.sha256 (committed).
+# Headers staged at native/ngx/include/ and NGX-LICENSE.txt are committed;
+# the static client libs and the nvngx_dlss feature DLLs under staged/ are
+# not — the DLL is consumer-supplied by decision (#214) and must never land
+# in git or a package. Keep these out of any native/**/lib/ path: the
+# "!native/**/lib/**/*.dll" rule above would un-ignore them.
+native/ngx/downloaded/
+native/ngx/staged/
+native/ngx/doc/
+
 # Verify snapshot workflow produces .received.* files on mismatch; they're
 # intentionally transient. .verified.* files are committed and ARE tracked.
 *.received.*
