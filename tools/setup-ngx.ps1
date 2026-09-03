@@ -35,6 +35,14 @@
 .PARAMETER IncludeDocs
     Also fetch the DLSS programming guide PDF into native/ngx/doc/.
 
+.PARAMETER SkipFeatureDll
+    Fetch only the headers, the licence text and the static NGX client
+    library — never the nvngx_dlss / libnvidia-ngx-dlss feature DLL. This is
+    what CI uses (.github/workflows/build-ngx-native.yml): with it, a CI run
+    is structurally incapable of pulling a licence-encumbered feature DLL,
+    rather than merely not being asked to (issue #214). A staging produced
+    this way can build and test the ahjo_ngx shim but cannot run DLSS.
+
 .PARAMETER UpdatePins
     Bump mode: (re)write native/ngx/pins.sha256 from the downloaded files
     instead of verifying against it. Use together with -Platform all
@@ -54,6 +62,7 @@ param(
     [ValidateSet('host', 'win-x64', 'linux-x64', 'all')]
     [string] $Platform = 'host',
     [switch] $IncludeDocs,
+    [switch] $SkipFeatureDll,
     [switch] $UpdatePins,
     [switch] $Force
 )
@@ -100,16 +109,24 @@ $Files = [System.Collections.Generic.List[hashtable]]::new()
 $Files.Add(@{ Path = 'LICENSE.txt'; Stage = 'NGX-LICENSE.txt' })
 foreach ($h in $Headers) { $Files.Add(@{ Path = "include/$h"; Stage = "include/$h" }) }
 
-$WinFiles = @(
-    # /MT static client library (+ debug-CRT variant). The shim links this.
+# Client half: the static client library the ahjo_ngx shim links. Always
+# fetched for a selected platform. nvsdk_ngx_s_dbg.lib is the debug-CRT
+# variant — fetched and pinned against a future debug-shim variant, but the
+# shim always links the /MT release archive (issue #216 OPEN-3).
+$WinClientFiles = @(
     @{ Path = 'lib/Windows_x86_64/x64/nvsdk_ngx_s.lib';     Stage = 'staged/win-x64/nvsdk_ngx_s.lib' }
     @{ Path = 'lib/Windows_x86_64/x64/nvsdk_ngx_s_dbg.lib'; Stage = 'staged/win-x64/nvsdk_ngx_s_dbg.lib' }
-    # Feature DLL: rel = production, dev = watermarked debug overlay build.
+)
+# Feature half: rel = production, dev = watermarked debug overlay build.
+# Dropped entirely by -SkipFeatureDll.
+$WinFeatureFiles = @(
     @{ Path = 'lib/Windows_x86_64/rel/nvngx_dlss.dll';      Stage = 'staged/win-x64/rel/nvngx_dlss.dll' }
     @{ Path = 'lib/Windows_x86_64/dev/nvngx_dlss.dll';      Stage = 'staged/win-x64/dev/nvngx_dlss.dll' }
 )
-$LinuxFiles = @(
+$LinuxClientFiles = @(
     @{ Path = 'lib/Linux_x86_64/libnvsdk_ngx.a';                       Stage = 'staged/linux-x64/libnvsdk_ngx.a' }
+)
+$LinuxFeatureFiles = @(
     @{ Path = "lib/Linux_x86_64/rel/libnvidia-ngx-dlss.so.$Bare";      Stage = "staged/linux-x64/rel/libnvidia-ngx-dlss.so.$Bare" }
     @{ Path = "lib/Linux_x86_64/dev/libnvidia-ngx-dlss.so.$Bare";      Stage = "staged/linux-x64/dev/libnvidia-ngx-dlss.so.$Bare" }
 )
@@ -120,9 +137,16 @@ $DocFiles = @(
 $isWin = ($PSVersionTable.PSVersion.Major -lt 6) -or $IsWindows
 $wantWin   = $Platform -eq 'all' -or $Platform -eq 'win-x64'   -or ($Platform -eq 'host' -and $isWin)
 $wantLinux = $Platform -eq 'all' -or $Platform -eq 'linux-x64' -or ($Platform -eq 'host' -and -not $isWin)
-if ($wantWin)      { foreach ($f in $WinFiles)   { $Files.Add($f) } }
-if ($wantLinux)    { foreach ($f in $LinuxFiles) { $Files.Add($f) } }
-if ($IncludeDocs)  { foreach ($f in $DocFiles)   { $Files.Add($f) } }
+# Client files are unconditional for a selected platform; feature DLLs are
+# added only when the caller has not opted out. pins.sha256 is a superset
+# keyed by upstream path, so a skipped file simply is not verified — the
+# pins file needs no -SkipFeatureDll variant.
+$wantFeatureDll = -not $SkipFeatureDll
+if ($wantWin)                       { foreach ($f in $WinClientFiles)    { $Files.Add($f) } }
+if ($wantWin -and $wantFeatureDll)  { foreach ($f in $WinFeatureFiles)   { $Files.Add($f) } }
+if ($wantLinux)                     { foreach ($f in $LinuxClientFiles)  { $Files.Add($f) } }
+if ($wantLinux -and $wantFeatureDll){ foreach ($f in $LinuxFeatureFiles) { $Files.Add($f) } }
+if ($IncludeDocs)                   { foreach ($f in $DocFiles)          { $Files.Add($f) } }
 
 # ---------------------------------------------------------------------------
 # Pins
@@ -244,7 +268,12 @@ Write-Host ""
 Write-Host "Staged under native/ngx/:" -ForegroundColor Green
 $staged | ForEach-Object { Write-Host "  $_" }
 Write-Host ""
-Write-Host "Feature DLL for running samples/tests locally (not part of any package; see #214):"
-if ($wantWin)   { Write-Host "  $(Join-Path $NgxRoot 'staged' 'win-x64'   'rel' 'nvngx_dlss.dll')" }
-if ($wantLinux) { Write-Host "  $(Join-Path $NgxRoot 'staged' 'linux-x64' 'rel' "libnvidia-ngx-dlss.so.$Bare")" }
-Write-Host "  dev/ builds carry the on-screen debug overlay and must never ship."
+if ($wantFeatureDll) {
+    Write-Host "Feature DLL for running samples/tests locally (not part of any package; see #214):"
+    if ($wantWin)   { Write-Host "  $(Join-Path $NgxRoot 'staged' 'win-x64'   'rel' 'nvngx_dlss.dll')" }
+    if ($wantLinux) { Write-Host "  $(Join-Path $NgxRoot 'staged' 'linux-x64' 'rel' "libnvidia-ngx-dlss.so.$Bare")" }
+    Write-Host "  dev/ builds carry the on-screen debug overlay and must never ship."
+}
+else {
+    Write-Host "Feature DLL skipped (-SkipFeatureDll). This staging can build the shim but cannot run DLSS."
+}

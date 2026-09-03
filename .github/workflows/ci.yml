@@ -143,8 +143,14 @@ jobs:
       # RID by the ktx-native workflow, which is also what proves it.
       # Building it here too would add a ~170 MB clone and a C++ build to
       # every Windows run to produce a binary this job never loads.
+      # SkipNgxNativeBuild is here for the same reason as SkipKtxNativeBuild:
+      # the shim is built, smoke-tested and shipped per RID by the ngx-native
+      # workflow, which is also what proves it. This job never loads it — and
+      # unlike libktx it would not even be built here anyway, because nothing
+      # stages the NGX SDK on this lane, so the flag mostly documents the
+      # intent and keeps the "not staged" message off this job's log.
       - name: Build (Release)
-        run: dotnet build Ahjo.Vulkan.slnx -c Release --nologo -p:SkipKtxNativeBuild=true
+        run: dotnet build Ahjo.Vulkan.slnx -c Release --nologo -p:SkipKtxNativeBuild=true -p:SkipNgxNativeBuild=true
 
       - name: Test — Ahjo.Vulkan.Native.Tests
         run: dotnet test tests/Ahjo.Vulkan.Native.Tests/Ahjo.Vulkan.Native.Tests.csproj -c Release --no-build --nologo -l "console;verbosity=detailed"
@@ -439,3 +445,28 @@ jobs:
   slang-native:
     name: Slang native
     uses: ./.github/workflows/build-slang-native.yml
+
+  # Ahjo.Vulkan.Ngx.Native ships a native binary per RID that WE compile —
+  # unlike every other native package here, where the binary is upstream's or
+  # upstream's own build system produces it. NVIDIA distributes NGX as a static
+  # client library with no DLL, so native/ngx/src/ahjo_ngx.cpp links it into a
+  # shared library exporting exactly 27 symbols. Something has to build and run
+  # that on both RIDs before it reaches NuGet.
+  #
+  # What this lane proves: the shim compiles on MSVC and GCC, loads, resolves
+  # all 27 exports against the two hand-maintained export lists, and agrees
+  # with the C# bindings about every NGX struct layout down to individual field
+  # offsets — which is the whole point of running it on both RIDs.
+  #
+  # What it does NOT prove: that DLSS runs. Evaluating a feature needs an
+  # NVIDIA driver and the consumer-supplied feature DLL, and no hosted runner
+  # has either. That gap is named in docs/ci-coverage.md rather than papered
+  # over. It provisions no Vulkan loader and no ICD, on purpose: the shim links
+  # no vulkan-1.
+  #
+  # The definition lives in build-ngx-native.yml because publish.yml calls the
+  # same workflow for its artifacts: one place decides how the binary is built,
+  # and CI and the release path cannot disagree about it.
+  ngx-native:
+    name: NGX native
+    uses: ./.github/workflows/build-ngx-native.yml

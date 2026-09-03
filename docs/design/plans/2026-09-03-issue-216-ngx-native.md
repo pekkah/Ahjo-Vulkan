@@ -677,16 +677,25 @@ Plus, by hand:
 
 ## OPEN — stop and ask rather than improvise
 
-- **OPEN-1 — the driverless behaviour of
-  `ahjo_ngx_vulkan_get_feature_instance_extension_requirements_utf8`.** Spec
-  OPEN-1. It has never been executed on a host without an NVIDIA driver, because
-  the shim did not exist. Write the test as specified in 12.3 and run it. If it
-  returns a non-`Success` result: done, nothing to ask. If it faults, hangs, or
-  returns `Success` with a bogus count, **stop**: report what happened, and
-  propose reducing the lane to the four driver-free assertions
-  (`ahjo_ngx_version_api`, `ahjo_ngx_layout`, `ahjo_ngx_result_to_utf8`, export
-  resolution) plus a `docs/ci-coverage.md` note. Do not weaken the assertion to
-  "any result is acceptable" — that is a green tick over an unknown.
+- **OPEN-1 — RESOLVED 2026-09-03: the call is driver-independent; the premise
+  was wrong.** Spec OPEN-1 carries the full record.
+
+  *As originally written:* the driverless behaviour of
+  `ahjo_ngx_vulkan_get_feature_instance_extension_requirements_utf8` had never
+  been executed, because the shim did not exist. Step 12.3 was to assert a
+  non-`Success` result, and to stop and report on a fault, a hang, or a
+  `Success` with a bogus count.
+
+  *Outcome:* neither branch applied. The call returns `Success` with
+  `extensionCount` 1 and `VK_KHR_get_physical_device_properties2` specVersion 2
+  on a driverless `windows-latest` runner **and** on an RTX 4070 Ti with driver
+  610.47 — identical, because it is a static query answered out of NVIDIA's
+  client library that never loads the driver-side core. Step 12.3's test now
+  asserts only the host-independent property (returns without faulting; a
+  `Success` carries a plausible count and a non-null array) and is named
+  `GetFeatureInstanceExtensionRequirements_ReturnsCleanly_OnAnyHost`. The
+  contingency — reducing the lane to the four driver-free assertions — was not
+  needed. Nothing was weakened to "any result is acceptable".
 - **OPEN-2 — `NVSDK_NGX_VULKAN_AllocateParameters` before `Init`.** Spec
   OPEN-2. It is exported and bound, but nothing asserts on it. Leave it that
   way; do not add a lane assertion on a guess about whether it needs the driver.

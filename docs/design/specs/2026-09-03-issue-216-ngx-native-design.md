@@ -524,7 +524,21 @@ The `ngx-native` lane (`build-ngx-native.yml`, called by both `ci.yml` and
 `ktx-native` / `slang-native` rule) additionally calls
 `ahjo_ngx_result_to_utf8` and
 `ahjo_ngx_vulkan_get_feature_instance_extension_requirements_utf8` and requires
-a non-`Success` result without a crash or a hang. It **does not** call
+that the latter return without a crash or a hang, and that a `Success` carry a
+plausible extension count and a non-null array.
+
+> **Amended 2026-09-03 (OPEN-1 resolved).** This decision originally said the
+> lane must require a **non-`Success`** result from that call. That was wrong,
+> and CI measured it: a driverless `windows-latest` runner returns `Success`
+> with `extensionCount` 1 and `VK_KHR_get_physical_device_properties2`
+> specVersion 2 — byte-identical to a host with an RTX 4070 Ti on driver
+> 610.47. The call is a pre-instance static query answered out of NVIDIA's
+> static client library and never loads the driver-side NGX core. The
+> assertion is therefore host-independent, and the `AHJO_NGX_EXPECT_NO_DRIVER`
+> declaration briefly introduced to express the old expectation has been
+> removed. `AHJO_NGX_REQUIRE_SHIM` is unaffected. See OPEN-1 below.
+
+It **does not** call
 `GetFeatureRequirements`: that needs a `VkInstance` the lane deliberately has no
 ICD to create (E15). Real `GetFeatureRequirements` / create / evaluate coverage
 is a local-NVIDIA-hardware item, recorded as such in `docs/ci-coverage.md`,
@@ -619,16 +633,38 @@ mechanical line each in the docs the plan already edits: `/regen-bindings` omits
 
 ## OPEN
 
-- **OPEN-1 — `GetFeatureInstanceExtensionRequirements` on a driverless runner.**
-  It takes no Vulkan object and is documented as pre-instance, so it should
-  return a failure result rather than fault when NGX cannot load the driver-side
-  core library. That has not been executed on a driverless host — the shim does
-  not exist yet. If the CI lane faults on this call, the correct response is to
-  reduce the lane to the four calls that need nothing from the driver
-  (`ahjo_ngx_version_api`, `ahjo_ngx_layout`, `ahjo_ngx_result_to_utf8`, export
-  resolution) and say so in `docs/ci-coverage.md` — **not** to weaken the
-  assertion into "any result is fine". The implementer should report back rather
-  than choose.
+- **OPEN-1 — RESOLVED 2026-09-03 by measurement. The premise was wrong.**
+
+  *As originally written:* `GetFeatureInstanceExtensionRequirements` takes no
+  Vulkan object and is documented as pre-instance, so it should return a
+  **failure** result rather than fault when NGX cannot load the driver-side
+  core library. That had not been executed on a driverless host, because the
+  shim did not exist yet.
+
+  *What was measured.* Two hosts, and they agree to the byte:
+
+  | Host | Result |
+  |---|---|
+  | `windows-latest` CI runner, no NVIDIA driver | `Success`, `extensionCount` 1, `VK_KHR_get_physical_device_properties2` specVersion 2 |
+  | RTX 4070 Ti, driver 610.47 | `Success`, `extensionCount` 1, `VK_KHR_get_physical_device_properties2` specVersion 2 |
+
+  So "no driver implies not `Success`" was never true. The call is a
+  pre-instance **static query answered out of NVIDIA's static client library**;
+  it never loads the driver-side NGX core at all, which is precisely why it is
+  safe to call before `VkInstance` creation — the same property that made it
+  the only NGX entry point this lane may call.
+
+  *What changed.* The lane asserts the host-independent property instead: the
+  call returns rather than faulting or hanging, and a `Success` carries a
+  plausible count and a non-null array. An `AHJO_NGX_EXPECT_NO_DRIVER`
+  declaration was added to express the old expectation and then removed once CI
+  measured both host kinds; `AHJO_NGX_REQUIRE_SHIM` is a separate concern and
+  is unaffected. D6 above carries the amendment.
+
+  *Why this entry stays.* It recorded a genuine unknown, and the record is more
+  useful showing the unknown was closed by measurement than showing it never
+  existed. The contingency it described — reducing the lane to the four
+  driver-free calls — was not needed and was not applied.
 - **OPEN-2 — `NVSDK_NGX_VULKAN_AllocateParameters` before `Init`.** Whether it
   succeeds, fails cleanly, or requires the driver is unknown. It stays out of
   the lane's assertions in the first iteration; do not add it on a guess.

@@ -1,0 +1,158 @@
+name: Build NGX Native
+
+# Per-RID build of the ahjo_ngx shim, plus the smoke suite that executes it.
+# Each job stages the pinned NVIDIA NGX SDK for one RID, compiles
+# native/ngx/src/ahjo_ngx.cpp against its static client library, runs
+# Ahjo.Vulkan.Ngx.Native.Tests against the result, and uploads it as a
+# workflow artifact named ngx-native-<rid>. publish.yml downloads both and
+# aggregates them into a single multi-RID nupkg.
+#
+# Building and testing in the SAME job is deliberate, for the reason
+# build-ktx-native.yml gives: the artifact that reaches NuGet is then, by
+# construction, a binary something has loaded and called. VMA's issue #144 is
+# the counterexample — a Linux .so packed by a job that only knew how to
+# compile, which SIGSEGVed on its first real call.
+#
+# THE FEATURE DLL NEVER ENTERS CI. The setup step passes -SkipFeatureDll, so
+# the fetch manifest does not contain nvngx_dlss.dll / libnvidia-ngx-dlss.so
+# at all. That is structural rather than a matter of not asking for it, which
+# is what issue #214 requires: consumers supply the feature DLL, and nothing
+# in this repository commits, packs or downloads one.
+#
+# WHAT THIS LANE PROVES, AND WHAT IT CANNOT. It proves the shim compiles on
+# both RIDs, loads, resolves all 27 exports, and that MSVC and GCC agree with
+# the C# bindings about every NGX struct layout down to individual field
+# offsets. It CANNOT evaluate DLSS: that needs an NVIDIA driver, and no
+# GitHub-hosted runner has one. Real create/evaluate coverage is a
+# local-NVIDIA-hardware item, recorded as such in docs/ci-coverage.md.
+#
+# Triggers:
+#   - workflow_call: invoked by ci.yml (proof) and publish.yml (artifacts)
+#   - workflow_dispatch: manual run to refresh artifacts during dev
+#   - push to main, paths-filtered: rebuild whenever the shim, the pinned NGX
+#     tag, the project, the tests, the fetch script or this workflow changes.
+
+on:
+  workflow_call: {}
+  workflow_dispatch: {}
+  push:
+    branches: [main, master]
+    paths:
+      - 'native/ngx/**'
+      - 'src/Ahjo.Vulkan.Ngx.Native/**'
+      - 'tests/Ahjo.Vulkan.Ngx.Native.Tests/**'
+      - 'tools/setup-ngx.ps1'
+      - 'Directory.Build.props'
+      - '.github/workflows/build-ngx-native.yml'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  DOTNET_NOLOGO: "true"
+
+jobs:
+  build:
+    name: Build + smoke ngx (${{ matrix.rid }})
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      # Don't let one RID's failure hide the other's result — the layout tests
+      # exist precisely to catch MSVC and GCC disagreeing, which needs both
+      # results.
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            runs-on: windows-latest
+          - rid: linux-x64
+            runs-on: ubuntu-latest
+          # No other RID is absent for the usual "add the lane first" reason:
+          # NVIDIA publishes NGX client libraries for Windows_x86_64 and
+          # Linux_x86_64 and nothing else (#214), so this matrix is already
+          # the complete set of RIDs that can exist.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The cached content is the SDK's static CLIENT LIBRARY — someone else's
+      # input to our build — not our output. Keyed on everything that can
+      # change which bytes get fetched: the pinned NgxVersion (in
+      # Directory.Build.props), the checksums it is verified against, and the
+      # script that does the fetching.
+      #
+      # The shim itself is deliberately NOT cached and is rebuilt every run: it
+      # is a single translation unit, it costs seconds, and it is the thing the
+      # tests execute. Caching our own artifact would be caching the answer.
+      - name: Cache staged NGX client library
+        id: cache-ngx
+        uses: actions/cache@v4
+        with:
+          path: native/ngx/staged/${{ matrix.rid }}
+          key: ngx-${{ matrix.rid }}-${{ hashFiles('Directory.Build.props', 'native/ngx/pins.sha256', 'tools/setup-ngx.ps1') }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: Directory.Packages.props
+
+      # -SkipFeatureDll is what makes it structurally impossible for this lane
+      # to pull a feature DLL: the rel/ and dev/ entries are dropped from the
+      # fetch manifest entirely, not merely left unused. See #214, and
+      # tools/setup-ngx.ps1's own comment-based help.
+      #
+      # Each fetched file is verified against native/ngx/pins.sha256, which is
+      # committed; pins.sha256 is a superset keyed by upstream path, so
+      # skipping the feature DLL verifies fine against it.
+      - name: Stage NGX SDK (no feature DLL)
+        shell: pwsh
+        run: ./tools/setup-ngx.ps1 -Platform ${{ matrix.rid }} -SkipFeatureDll
+
+      # Compiles the shim via cmake and builds the managed bindings. cmake and
+      # a C++ toolchain are preinstalled on both hosted images.
+      - name: Build ahjo_ngx shim + bindings
+        run: dotnet build src/Ahjo.Vulkan.Ngx.Native/Ahjo.Vulkan.Ngx.Native.csproj -c Release --nologo
+
+      - name: List build output
+        shell: bash
+        run: ls -la native/ngx/build/${{ matrix.rid }} || true
+
+      # No Vulkan provisioning, deliberately: the shim links no vulkan-1 — it
+      # only *includes* the Vulkan headers, the same reason
+      # VMA_STATIC_VULKAN_FUNCTIONS=0 exists in native/vma/src/vma.cpp. This
+      # lane needs no ICD, no loader and no device, and AHJO_VULKAN_TIER stays
+      # unset because there is no Vulkan surface here to declare. If this suite
+      # ever needs a loader, something got linked in that the package's
+      # contract says is not there.
+      #
+      # AHJO_NGX_REQUIRE_SHIM=1 — "the shim must exist". A property of THIS
+      # LANE that the lane states, rather than something the suite sniffs for:
+      # the same principle as AHJO_VULKAN_TIER (#158), and for the same reason,
+      # that a heuristic can be wrong in a way nobody notices.
+      #
+      # It is load-bearing. Without it, a failed SDK fetch or a broken cmake
+      # step would leave the shim unbuilt and the whole suite would SKIP,
+      # reporting green while executing nothing. With it, an unloadable
+      # ahjo_ngx fails the job.
+      #
+      # There is deliberately no companion "this host has no NVIDIA driver"
+      # variable. One existed briefly, on the assumption that NGX's
+      # pre-instance discovery call could not succeed without a driver. This
+      # lane disproved it: windows-latest returns Success with extensionCount 1
+      # and VK_KHR_get_physical_device_properties2 — byte-identical to what an
+      # RTX 4070 Ti returns. The call is answered from NVIDIA's static client
+      # library and never loads the driver-side NGX core, so there is no
+      # host-dependent behaviour left to declare. See issue #216 spec, OPEN-1
+      # (resolved).
+      - name: Test — Ahjo.Vulkan.Ngx.Native.Tests
+        env:
+          AHJO_NGX_REQUIRE_SHIM: "1"
+        run: dotnet test tests/Ahjo.Vulkan.Ngx.Native.Tests/Ahjo.Vulkan.Ngx.Native.Tests.csproj -c Release --nologo -l "console;verbosity=detailed"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ngx-native-${{ matrix.rid }}
+          path: native/ngx/build/${{ matrix.rid }}/
+          if-no-files-found: error
+          retention-days: 14

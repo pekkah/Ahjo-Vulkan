@@ -290,6 +290,17 @@ native/slang/staged/
 native/ngx/downloaded/
 native/ngx/staged/
 native/ngx/doc/
+# cmake scratch + the built ahjo_ngx shim, per RID. Rebuilt from source on
+# every CI run and produced locally on demand; the release artifact is the
+# upload from build-ngx-native.yml, not this directory.
+native/ngx/build/
+
+# ahjo_ngx.map is a hand-written linker VERSION SCRIPT (the Linux half of the
+# shim's export contract), not a generated linker map file, so the "*.map"
+# rule above must not swallow it. Without this negation the Linux build has no
+# --version-script on a fresh clone and MapFile_ListsExactlyTheRequiredExports
+# fails with the file simply absent.
+!native/ngx/src/ahjo_ngx.map
 
 # Verify snapshot workflow produces .received.* files on mismatch; they're
 # intentionally transient. .verified.* files are committed and ARE tracked.
