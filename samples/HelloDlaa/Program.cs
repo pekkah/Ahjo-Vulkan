@@ -28,10 +28,27 @@ namespace Ahjo.Vulkan.Samples.HelloDlaa;
 /// LINQ, no interpolated strings, no per-frame console output — spec E12. The
 /// existing windowed samples do allocate in their loops
 /// (<c>HelloVmaWindowed/Program.cs:366</c>); this one deliberately does not.</para>
+/// <para>That holds on the <b>steady-state</b> path — the one where
+/// <c>AcquireNextImage</c> returns <see cref="AcquireResult.Success"/>. The
+/// <see cref="AcquireResult.OutOfDate"/> / <see cref="AcquireResult.Suboptimal"/>
+/// branches route into <c>RebuildForExtent</c>, which allocates freely (a new
+/// <c>JitterSequence</c>, new <c>FrameTargets</c>, a new <c>DlssFeature</c>, an
+/// interpolated status line) because it is a resize path, not a frame path. A
+/// driver or compositor that returned <c>VK_SUBOPTIMAL_KHR</c> <i>persistently</i>
+/// rather than converging would turn this into an allocating loop. That does not
+/// happen on the hardware this was measured on; it is not an unconditional
+/// property of the code.</para>
 /// </remarks>
 internal static unsafe class Program
 {
     private const uint FramesInFlight = 2;
+
+    /// <summary>
+    /// How long to sleep between retries while the window is minimized and the
+    /// swapchain has no presentable extent. A real application blocks on its
+    /// event queue instead; a sample that spun here would peg a core.
+    /// </summary>
+    private const int MinimizedPollMilliseconds = 16;
 
     // Validation messages fire from arbitrary driver threads — static counters
     // keep the callback closure captureless.
@@ -337,6 +354,13 @@ internal static unsafe class Program
             // form of BindVertexBuffers is what makes that possible.
             var previousUnjitteredMvp = Matrix4x4.Identity;
             bool havePrevious = false;
+            // The readback buffer is host-visible VMA memory and is NOT
+            // zero-initialized. Only the CopyImageToBuffer below ever fills it,
+            // and that runs on one frame -- so any early exit (Esc, a close, an
+            // OutOfDate bail on the final frame) would otherwise write a PNG
+            // full of whatever bytes VMA handed back. No Vulkan rule is broken;
+            // the artefact is just silently garbage, which is worse.
+            bool captured = false;
             // Set by EVERY path that recreates the swapchain, including the
             // OutOfDate/Suboptimal ones -- and that is the point. Those change
             // the extent without an SDL resize event, so testing window.Width
@@ -344,22 +368,40 @@ internal static unsafe class Program
             // change" and leave every per-extent resource sized for the old
             // one. The present blit would then silently rescale.
             bool rebuildPending = false;
+            // Non-presentability has to be STICKY, because nothing else in the
+            // loop can rediscover it. After a minimize:
+            //   * ConsumeResize() is false -- SdlWindow.PumpEvents only raises
+            //     the flag for a non-zero size that differs from the last one,
+            //     so neither the minimize nor a restore at the same size sets
+            //     it; and
+            //   * swap.Extent == window.Width/Height -- SdlWindow keeps its
+            //     last non-zero size, and Swapchain.Recreate returns Minimized
+            //     BEFORE assigning its extent field, so both sides keep their
+            //     last good values and compare equal.
+            // Every term of the test below therefore goes false while the
+            // window is minimized, and without this flag the loop would fall
+            // straight through to AcquireNextImage and throw.
+            bool presentable = true;
 
             while (!window.ShouldClose)
             {
                 window.PumpEvents();
                 if (window.ShouldClose) break;
 
-                if (window.ConsumeResize() || swap.Extent.width != window.Width || swap.Extent.height != window.Height)
+                // Consumed into a local BEFORE the || chain: inside it, a
+                // short-circuit on an earlier term would swallow the event and
+                // leave _resized set for a frame that no longer needs it.
+                bool resized = window.ConsumeResize();
+
+                if (!presentable || resized ||
+                    swap.Extent.width != window.Width || swap.Extent.height != window.Height)
                 {
-                    if (!TryRecreate(device, swap, ring, in surface, window, preferred))
+                    presentable = TryRecreate(device, swap, ring, in surface, window, preferred);
+                    if (!presentable)
                     {
-                        // Minimized: there is no presentable swapchain and
-                        // AcquireNextImage would throw. Testing swap.Extent
-                        // here would NOT catch it -- see TryRecreate's remarks.
-                        // A real application blocks on the event queue instead
-                        // of sleeping.
-                        System.Threading.Thread.Sleep(16);
+                        // Still minimized. Sleep rather than spin; a real
+                        // application blocks on the event queue instead.
+                        System.Threading.Thread.Sleep(MinimizedPollMilliseconds);
                         continue;
                     }
                     rebuildPending = true;
@@ -385,8 +427,9 @@ internal static unsafe class Program
                     fc.MarkImageAcquireSignaled();
                 if (acq is AcquireResult.OutOfDate or AcquireResult.Suboptimal)
                 {
-                    if (TryRecreate(device, swap, ring, in surface, window, preferred))
-                        rebuildPending = true;
+                    presentable = TryRecreate(device, swap, ring, in surface, window, preferred);
+                    if (presentable) rebuildPending = true;
+                    else             System.Threading.Thread.Sleep(MinimizedPollMilliseconds);
                     continue;
                 }
                 if (acq != AcquireResult.Success) continue;
@@ -569,6 +612,7 @@ internal static unsafe class Program
                     // readback copy shares that barrier rather than adding one.
                     if (captureThisFrame)
                     {
+                        captured = true;
                         rec.CopyImageToBuffer(
                             in slot.Presentation, VkImageLayout.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                             in readback,
@@ -643,10 +687,10 @@ internal static unsafe class Program
                 finally { rec.Dispose(); }
 
                 var pres = swap.Present(queue, imageIndex);
-                if (pres is AcquireResult.OutOfDate or AcquireResult.Suboptimal
-                    && TryRecreate(device, swap, ring, in surface, window, preferred))
+                if (pres is AcquireResult.OutOfDate or AcquireResult.Suboptimal)
                 {
-                    rebuildPending = true;
+                    presentable = TryRecreate(device, swap, ring, in surface, window, preferred);
+                    if (presentable) rebuildPending = true;
                 }
 
                 previousUnjitteredMvp = unjitteredMvp;
@@ -659,7 +703,13 @@ internal static unsafe class Program
             device.WaitIdle();
             Console.WriteLine($"Rendered {frame} frames.");
 
-            if (options.CapturePath is not null && !readback.IsNull)
+            if (options.CapturePath is not null && !captured)
+            {
+                Console.Error.WriteLine(
+                    $"No capture written: the run ended before frame {options.MaxFrames}, so the readback " +
+                    "copy never executed. Let it run to --frames, or pass a smaller --frames.");
+            }
+            else if (options.CapturePath is not null && !readback.IsNull)
             {
                 // WaitIdle gives availability, not visibility: device writes to
                 // a non-coherent host-visible allocation reach the host only

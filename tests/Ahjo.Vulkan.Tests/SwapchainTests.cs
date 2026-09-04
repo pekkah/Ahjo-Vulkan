@@ -671,7 +671,11 @@ public sealed unsafe class SwapchainTests
         using var swap = new Swapchain(device, in desc);
 
         uint outOfRange = swap.ImageCount;
-        Assert.Throws<ArgumentOutOfRangeException>(() => swap.GetImage(outOfRange));
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(() => swap.GetImage(outOfRange));
+        // The point of the explicit guard over letting the array throw:
+        // IndexOutOfRangeException from `_images` would name nothing the caller
+        // can see. Assert the parameter name, since that is the whole benefit.
+        Assert.Equal("index", ex.ParamName);
     }
 
     /// <summary>
