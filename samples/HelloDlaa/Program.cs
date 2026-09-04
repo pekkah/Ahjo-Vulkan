@@ -432,6 +432,15 @@ internal static unsafe class Program
                     else             System.Threading.Thread.Sleep(MinimizedPollMilliseconds);
                     continue;
                 }
+                if (acq == AcquireResult.SurfaceLost)
+                {
+                    ReportSurfaceLost();
+                    break;
+                }
+                // Everything left is Timeout or NotReady. Neither touches the
+                // swapchain's state -- it stays Ready -- and neither acquired an
+                // image or signalled the acquire semaphore, so retrying next
+                // iteration is correct and there is nothing to recycle.
                 if (acq != AcquireResult.Success) continue;
 
                 FrameTargets slot = targets[fc.SlotIndex]!;
@@ -687,6 +696,15 @@ internal static unsafe class Program
                 finally { rec.Dispose(); }
 
                 var pres = swap.Present(queue, imageIndex);
+                if (pres == AcquireResult.SurfaceLost)
+                {
+                    ReportSurfaceLost();
+                    break;
+                }
+                // Present can only report Success, Suboptimal, OutOfDate or
+                // SurfaceLost: Timeout and NotReady are gated `when fromAcquire`
+                // in MapPresentationResult, so a present returning either is a
+                // broken ICD and throws rather than mapping to a benign retry.
                 if (pres is AcquireResult.OutOfDate or AcquireResult.Suboptimal)
                 {
                     presentable = TryRecreate(device, swap, ring, in surface, window, preferred);
@@ -744,6 +762,35 @@ internal static unsafe class Program
         // Only the completed path can downgrade to 3; an earlier `return 2` or
         // `return 5` already named a more specific failure.
         return System.Threading.Volatile.Read(ref s_validationErrors) == 0 ? exitCode : 3;
+    }
+
+    /// <summary>
+    /// <c>VK_ERROR_SURFACE_LOST_KHR</c> reached the frame loop. This is
+    /// <b>terminal, not retryable</b>, and the sample stops.
+    /// </summary>
+    /// <remarks>
+    /// <para><c>SurfaceLost</c> maps to <c>SwapchainState.Poisoned</c> without
+    /// throwing, so unlike a hard error it flows back as an ordinary
+    /// <see cref="AcquireResult"/> and has to be handled here or it falls
+    /// through — and the next <c>AcquireNextImage</c> then throws out of
+    /// <c>ThrowIfNotPresentable</c>, which rejects <c>Poisoned</c> exactly as it
+    /// rejects <c>Minimized</c>.</para>
+    /// <para><b>Do not turn this into a retry.</b> <c>Recreate</c> over the same
+    /// <c>VkSurfaceKHR</c> cannot succeed: recovery means destroying and
+    /// rebuilding the surface as well — a strict superset of the
+    /// <c>OutOfDate</c> path, and the window system's business rather than this
+    /// sample's. Routing it through <c>TryRecreate</c> would only fail
+    /// differently.</para>
+    /// <para>Exit code stays 0 (or 3 if the validation layer complained on the
+    /// way): a lost surface is an environment failure, not a defect in the
+    /// sample, which is the same posture the no-DLSS skip paths take.</para>
+    /// </remarks>
+    private static void ReportSurfaceLost()
+    {
+        Console.Error.WriteLine(
+            "The window surface was lost (VK_ERROR_SURFACE_LOST_KHR — typically a display-driver " +
+            "restart, a session switch or a monitor change). A swapchain over a lost surface cannot " +
+            "be recreated, so this sample exits rather than retrying.");
     }
 
     /// <summary>
