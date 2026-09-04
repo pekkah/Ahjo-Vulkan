@@ -381,6 +381,13 @@ public sealed unsafe class Swapchain : IDisposable
     /// <see cref="Recreate"/> first
     /// (<see cref="AcquireResult.OutOfDate"/>).
     /// </summary>
+    /// <remarks>
+    /// All six <see cref="AcquireResult"/> members are reachable from here.
+    /// The handling each one obliges the caller to — the state the swapchain is
+    /// left in, and whether a bare <c>continue</c> is safe — is tabulated in the
+    /// remarks on <see cref="AcquireResult"/> and is not repeated per call site
+    /// (#220).
+    /// </remarks>
     public AcquireResult AcquireNextImage(
         in BinarySemaphore  signaled,
         TimeSpan            timeout,
@@ -467,6 +474,11 @@ public sealed unsafe class Swapchain : IDisposable
     /// swapchain-aware
     /// <see cref="FrameContext.Submit(Queue, ref CommandRecorder, Swapchain, uint, Stage, Stage)"/>.
     /// </summary>
+    /// <remarks>
+    /// Forwards to
+    /// <see cref="Present(Queue, uint, in BinarySemaphore)"/>; the result set a
+    /// present can report is documented there.
+    /// </remarks>
     public AcquireResult Present(Queue queue, uint imageIndex)
         => Present(queue, imageIndex, in _renderingDone[imageIndex]);
 
@@ -479,12 +491,28 @@ public sealed unsafe class Swapchain : IDisposable
     /// change?" branch is symmetric with the acquire path.
     /// </summary>
     /// <remarks>
-    /// Most callers should use the no-semaphore
+    /// <para>Most callers should use the no-semaphore
     /// <see cref="Present(Queue, uint)"/> overload, which pulls the
     /// per-image semaphore from the swapchain. This explicit overload
     /// stays for the rare case where a caller wants to drive a custom
     /// signal/wait pair (multi-swapchain bridging, headless capture
-    /// hooks, etc.).
+    /// hooks, etc.).</para>
+    /// <para>The shape is symmetric with <see cref="AcquireNextImage"/> but the
+    /// result set is not: a present can report only
+    /// <see cref="AcquireResult.Success"/>,
+    /// <see cref="AcquireResult.Suboptimal"/>,
+    /// <see cref="AcquireResult.OutOfDate"/> and
+    /// <see cref="AcquireResult.SurfaceLost"/> — four of the six members.
+    /// <c>VK_TIMEOUT</c> and <c>VK_NOT_READY</c> belong to
+    /// <c>vkAcquireNextImageKHR</c>'s result set only, so a present returning
+    /// either is treated as a broken ICD and throws
+    /// <see cref="VulkanException"/> rather than mapping to a benign retry.
+    /// There is deliberately no benign catch-all on this side (#220).</para>
+    /// <para><c>VK_ERROR_DEVICE_LOST</c> is outside
+    /// <see cref="AcquireResult"/> entirely, on this path and on the acquire
+    /// path alike: the device is marked lost, the swapchain moves to
+    /// <see cref="SwapchainState.Poisoned"/>, and a
+    /// <see cref="VulkanException"/> is thrown.</para>
     /// </remarks>
     public AcquireResult Present(Queue queue, uint imageIndex, in BinarySemaphore waitSemaphore)
     {
