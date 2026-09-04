@@ -15,6 +15,13 @@ public ref struct DeviceDescription
     public ReadOnlySpan<Utf8Name> Extensions;
 
     /// <summary>
+    /// Allocator options applied when <see cref="Device.Allocator"/> is first
+    /// created. Default = <c>default</c>, which is byte-identical to the
+    /// pre-issue-#218 behaviour.
+    /// </summary>
+    public AllocatorDescription Allocator;
+
+    /// <summary>
     /// Optional callback invoked exactly once during
     /// <see cref="PhysicalDevice.CreateDevice"/> after the wrapper has
     /// pushed its 1.4 default feature structs onto the chain. Push

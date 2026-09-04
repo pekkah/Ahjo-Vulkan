@@ -96,9 +96,10 @@
     (Ahjo.Vulkan.Vma.Native), src/Ahjo.Vulkan.Ktx.Native
     (Ahjo.Vulkan.Ktx.Native), src/Ahjo.Vulkan.Slang.Native
     (Ahjo.Vulkan.Slang.Native), src/Ahjo.Vulkan.Slang
-    (Ahjo.Vulkan.Slang) and src/Ahjo.Vulkan.Ngx.Native
-    (Ahjo.Vulkan.Ngx.Native) — seven in all. Samples, tests, and the
-    Utilities helper library stay unpublished.
+    (Ahjo.Vulkan.Slang), src/Ahjo.Vulkan.Ngx.Native
+    (Ahjo.Vulkan.Ngx.Native) and src/Ahjo.Vulkan.Ngx (Ahjo.Vulkan.Ngx) —
+    eight in all. Samples, tests, and the Utilities helper library stay
+    unpublished.
 
     Version: the publish workflow (.github/workflows/publish.yml) overrides
     MinVer's tag-derived version via `MinVerVersionOverride` when needed.

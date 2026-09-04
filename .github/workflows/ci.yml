@@ -172,6 +172,24 @@ jobs:
       - name: Test — Ahjo.Vulkan.Slang.Tests
         run: dotnet test tests/Ahjo.Vulkan.Slang.Tests/Ahjo.Vulkan.Slang.Tests.csproj -c Release --no-build --nologo -l "console;verbosity=detailed"
 
+      # NGX wrapper coverage. The NGX SDK is proprietary and this lane stages
+      # none of it, so the shim-dependent and NVIDIA-dependent tests skip
+      # through TestGate ([gate:platform] and [gate:feature] respectively).
+      # What CI proves here is real and is the whole of what a driverless,
+      # NVIDIA-less runner can prove: shadow-enum drift against the generated
+      # enums, NgxDescription validation, the NgxExtensionSet copy-and-
+      # NUL-terminate contract, and the SwiftShader device plumbing (an
+      # extension set reaching vkCreateDevice, and the EnableMemoryBudget
+      # pairing check). Every DLSS create/evaluate is local-hardware only —
+      # docs/ci-coverage.md says so, and #32 is why it is recorded rather than
+      # faked.
+      #
+      # No trx logger, deliberately: the coverage summary below parses
+      # wrapper.trx only, and this suite does not join it — same as the Slang
+      # wrapper step above.
+      - name: Test — Ahjo.Vulkan.Ngx.Tests
+        run: dotnet test tests/Ahjo.Vulkan.Ngx.Tests/Ahjo.Vulkan.Ngx.Tests.csproj -c Release --no-build --nologo -l "console;verbosity=detailed"
+
       # Turns the run's skips into the headline verdict instead of a number
       # nobody reads out of the log (issue 158). Two conditions fail this step:
       #

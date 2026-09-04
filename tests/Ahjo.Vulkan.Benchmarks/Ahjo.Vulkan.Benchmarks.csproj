@@ -16,6 +16,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Ahjo.Vulkan\Ahjo.Vulkan.csproj" />
+    <!-- DlssEvaluateBenchmarks only. Host-gated: its [GlobalSetup] throws
+         without an NVIDIA GPU, a DLSS-capable driver and a consumer-supplied
+         nvngx_dlss.dll, which is why it is its own class (issue #218). -->
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan.Ngx\Ahjo.Vulkan.Ngx.csproj" />
   </ItemGroup>
 
   <!--

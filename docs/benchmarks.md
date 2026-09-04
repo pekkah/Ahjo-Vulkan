@@ -24,7 +24,7 @@ dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*Chain
 
 # Driver-bound: needs a real Vulkan ICD on the host. Fails at GlobalSetup
 # if the host cannot create a VkInstance.
-dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*FrameRing*|*PushDescriptors*|*PipelineBarrier*|*CommandRecorder*|*BufferBenchmarks*|*MeshShader*|*AccelerationStructure*"
+dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*FrameRing*|*PushDescriptors*|*PipelineBarrier*|*CommandRecorder*|*BufferBenchmarks*|*MeshShader*|*AccelerationStructure*|*DlssEvaluate*"
 ```
 
 `BenchmarkDotNet.Artifacts/` is gitignored — the run produces CSV / Markdown
@@ -78,6 +78,43 @@ paragraph below: because the configuration is identical, a cross-session move
 cannot be blamed on different hardware, and "drift" there means *session
 conditions* (background load, thermals, driver state), evidenced by control rows
 moving in both directions on code whose only edit was a no-codegen keyword.
+
+The two **`DlssEvaluate.*`** rows were captured for **#218** on .NET 10.0.8
+(SDK 10.0.204) / Windows 11 10.0.26200.9278, RTX 4070 Ti / driver 610.47,
+BenchmarkDotNet v0.14.0, against the `rel/` `nvngx_dlss.dll` of NGX `v310.7.0`.
+They carry a **stricter host gate than any other row**: not just an NVIDIA GPU
+and a DLSS-capable driver, but a feature DLL this repo does not ship and never
+will (#214). `DlssEvaluateBenchmarks` is therefore its own class and its
+`[GlobalSetup]` throws with an actionable message rather than skipping, the
+`MeshShaderBenchmarks` precedent. #218's `Ahjo.Vulkan` edits were controlled for in the same session, and the
+control set is chosen for what actually changed. The only *structural* change is
+that `Allocator` gained an `internal readonly uint HeapCount`, growing the struct
+16 → 24 bytes — and `Allocator` is embedded **by value** in `Buffer`, `Image`,
+`MemoryBlock` and (transitively) `StagedUpload`, so `Buffer` went 56 → 64 bytes
+and the offsets of every field after `Handle` moved. `CommandRecorder.*` rows
+read only `Buffer.Handle`, whose offset did not move, so they cannot see this;
+the rows that can are the `Buffer.AsSpan_*` family and
+`StagingUploader.Upload_4KiB_Float`, which returns a by-value `StagedUpload`.
+All of them were re-read:
+
+| Row | Baseline | Re-read | Allocated |
+|---|---|---|---|
+| `Buffer.AsSpan_ViewOnly` | 1.54 ns | **1.10 ns** | `-` |
+| `Buffer.AsSpan_SequentialWrite` | 1.85 ns | **1.12 ns** | `-` |
+| `Buffer.AsSpan_WriteThenRead_SeqWriteAlloc` | 173.4 ns | **171.5 ns** | `-` |
+| `Buffer.AsSpan_WriteThenRead_RandomAlloc` | 1.53 ns | **0.93 ns** | `-` |
+| `StagingUploader.Upload_4KiB_Float` | *(no baseline row)* | **295.1 ns** | `-` |
+| `CommandRecorder.RenderingPass100Cmds` | 3.02 µs | **3.023 µs** | `-` |
+| `CommandRecorder.CopyBuffer_8Regions` | 810.0 ns | **779.9 ns** | `-` |
+| `CommandRecorder.CopyBuffer_24Regions` | 1.57 µs | **1.504 µs** | `-` |
+
+Every layout-sensitive row came back at or below its baseline, so the eight-byte
+growth costs nothing measurable — and every `Allocated` cell stayed `-`, which is
+the load-bearing half. The baselines are **left unchanged**: a single session
+below baseline is drift, not a new figure. `StagingUploader.Upload_4KiB_Float`
+has no baseline row in this table at all (a pre-existing gap — it is in the
+driver-bound filter list but not the table); it is quoted here as a control
+rather than added, because one capture is not a baseline.
 Finally, the `HandleOwnership.*` rows came
 from a Linux container. Rows are comparable to their own successors, not to each other —
 re-measure the row you care about before drawing a conclusion from it.
@@ -105,6 +142,9 @@ managed-byte count BDN's `MemoryDiagnoser` reports; `-` is zero.
 | `MeshShader.Build_MeshPipeline_WithSpecialization` |  35.55 µs  |        -  | #201: `Build_MeshPipeline` plus **mesh and task** specialization, so the mesh path's `_meshSpecEntries` / `_taskSpecEntries` `fixed` statements are measured in their non-empty form — without this row two of the four extra `fixed` statements only ever run over a null array. The `SpecializationInfo<T>` values are stack locals (the wrapper stores a raw pointer to the caller's storage, so a field on the benchmark instance would be unpinned); the per-`T` map-entry array is cached statically and warmed in `[GlobalSetup]`, the `SpecializationInfo.Build_WithSpecialization` shape. `mesh_tri.task` declares no spec constants — an unused `constantID` is a spec-defined no-op, which is what lets one fixture drive both stages. **Minimum of 5 runs** (35.55 / 36.31 / 36.63 / 37.37 µs on the four quiet runs; one noisy run read 48.14 µs with StdDev 8.28 µs), `-` on all five. Sits within `Build_MeshPipeline`'s own spread, which is the expected result: two extra non-null `fixed` statements and two 4-byte `pData` blocks are not measurable against a 35 µs `vkCreateGraphicsPipelines`. The row exists for the allocation column, not the Mean. Same `taskShader` requirement as the row above. |
 | `AccelerationStructure.BuildTlas_1024`          |   2.84 µs  |        -  | #202 canary: `vkCmdBuildAccelerationStructuresKHR` × 1024 recording the **per-frame TLAS-rebuild shape** — one build, one `Instances` geometry — into one command buffer, never submitted. This is the only new hot-path method in #202, and it is not a thin forward: it validates, carves three native scratch spans and runs `AccelerationStructureBuildTranslator` over them. One build / one geometry is inside both stack thresholds (`BuildStackThreshold = 8`, `GeometryStackThreshold = 16`), so this row measures the `stackalloc` path; `BuildBlasBatch_16x1_1024` below measures the `ArrayPool` path. Note the threshold test is `&&`, so exceeding **either** threshold sends all three native scratch buffers to the pool. **The Mean is dominated by the driver, not the wrapper** — ~2.8 µs per recorded build against 15 ns for `MeshShader.DrawMeshTasks_1024` is real BVH setup work the ICD does at record time, so treat this row's `Allocated` column as the signal and its Mean as host-specific. Setup builds a real BLAS so the instance entry carries a live device address — a build against a garbage `accelerationStructureReference` is a VU violation even when the command buffer is never submitted. Needs `VK_KHR_acceleration_structure` + `VK_KHR_ray_query` + `VK_KHR_deferred_host_operations` and the `accelerationStructure` / `rayQuery` / `bufferDeviceAddress` features — see the driver-dependency caveat. |
 | `AccelerationStructure.BuildBlasBatch_16x1_1024` |  44.30 µs  |        -  | #202 canary: sixteen BLAS builds, one triangle geometry each, × 1024 into one command buffer, never submitted. Two gaps in one row. **(a) The rental leg** — 16 builds is above `BuildStackThreshold = 8`, so all three native scratch buffers come from `ArrayPool` in nested `try/finally` instead of `stackalloc`; this is the only benchmark that reaches that path, and three rent/return pairs per call must still amortize to `-`. **(b) The `Triangles` union arm** — `BuildTlas_1024` only ever drives `AccelerationStructureGeometry.WriteNative`'s `Instances` arm (three field writes); `Triangles` is the widest at eight and before this row ran only in `[GlobalSetup]`, where BDN measures nothing. (The `Aabbs` arm remains unmeasured — narrowest of the three, no per-frame consumer; its correctness is covered instead by the Tier-3 `AccelerationStructureTests.Blas_OverAabbs_*` builds, issue 206.) **This is a per-frame shape, not load-time**: BLAS refits for skinned and deformable geometry are rebuilt every frame, and nine animated meshes already cross the threshold. The fixture suballocates sixteen distinct structures into one backing buffer at 256-byte-aligned offsets with sixteen non-overlapping scratch ranges — reusing one destination or one scratch address across a batch violates `VUID-vkCmdBuildAccelerationStructuresKHR-scratchData-03704`, so the shortcut would measure a shape no correct caller can record. Same host requirement as the row above. **ShortRun capture** (`--job short`); the Mean is per *recording call*, and each call records 16 builds, so ~2.8 µs per build — consistent with `BuildTlas_1024`, and again driver-dominated. |
+| `DlssEvaluate.Evaluate_16`                      |  17.11 µs  |        -  | #218 canary: sixteen `DlssFeature.Evaluate` calls recorded into one command buffer per invoke, never submitted. Feature is 2560×1440 → 3840×2160 MaxQuality, the extent `GetOptimalSettings` actually returns on the capture host. Guards the four properties spec D9 rests the zero-allocation claim on — stack-local resource structs, `static readonly Utf8Name` keys, a parameter map allocated once, `ref CommandRecorder`. **Minimum of 9 runs**; the five clean ones read 17.105 / 17.166 / 17.232 / 17.358 / 17.599 µs at StdDev 0.06–0.13 µs, none BDN-bimodal. **This row punishes a hot GPU**, which is worth knowing before reading a regression into it: four confirming runs taken back-to-back after ~10 minutes of continuous DLSS work drifted to 25.08 / 20.99 / 18.83 / 17.55 µs with StdDev collapsing 3.88 → 0.22 µs as the card settled, i.e. a clean monotone recovery to the recorded band rather than a mode. `PackParameters_16` below, which makes no NGX call, held 1.145–1.174 µs across the same runs — that is the control that says the drift is thermal and not the managed side. Let the GPU idle before capturing this row. Mostly NGX's own per-frame work: `PackParameters_16` below is the managed share, ~7% of it. **Four of the six resource arms are measured, not all six**: the inputs carry no `ExposureTexture` and no `BiasCurrentColorMask` (the shape `DlssFeatureFlags.AutoExposure` implies), so `NgxImage.ToNative` runs 4x per evaluate and only the null-write branch of the two optional slots is exercised — the same disclosure the `Aabbs` arm gets on the `AccelerationStructure` rows. Needs an NVIDIA GPU, a DLSS-capable driver **and** a consumer-supplied `nvngx_dlss.dll` — see the driver-dependency caveat; the `[GlobalSetup]` throws rather than skipping, which is why this is its own class. |
+| `DlssEvaluate.PackParameters_16`                |   1.29 µs  |        -  | #218 canary: the same sixteen iterations through `DlssFeature.EvaluateCore(…, invokeNgx: false)` — parameter-map population plus resource-struct fill, with `EvaluateFeature_C` skipped. This is the half the wrapper owns and the one #218 asks to measure; it is one method and one stack frame in both modes on purpose, because the map retains raw pointers to those stack locals (spec E6). **Minimum of 6 runs** (1.292 / 1.301 / 1.319 / 1.327 / 1.332 / 1.362 µs, StdDev ≤ 0.022 µs). **Was 1.15 µs, and the +12% is a deliberate correctness cost, not drift**: `EvaluateCore` now nulls the six resource keys in a `finally`, so the reused parameter map never holds a pointer into a dead stack frame on any exit — the `invokeNgx: false` path this row drives, a throwing `EvaluateFeature_C`, or the normal one. That is six more `SetVoidPointer` calls on top of ~30, and the row moved by about six thirtieths, which is what a native call costing what the other thirty cost looks like. An earlier capture of this row at 1.145–1.174 µs predates that fix; do not read the difference as a regression. ~81 ns per evaluate for ~36 native parameter writes (30 set, 6 cleared) and the resource structs. Same host gate as the row above. |
+| `DlssEvaluate.PackParameters_16_AllSlots`       |   1.34 µs  |        -  | #218: `PackParameters_16` with **both optional slots bound** — a 1x1 `ExposureTexture` and a render-resolution `BiasCurrentColorMask`. It exists because the row above binds neither, so `NgxImage.ToNative` runs 4x not 6x there and both `SetVoidPointer` ternaries are only ever measured on their null leg; this row is the other leg, and it is where an allocation added to the optional-slot path would show up. **Minimum of 6 runs** (1.337 / 1.338 / 1.338 / 1.346 / 1.354 / 1.458 µs; the last was BDN-noisy at StdDev 0.13 µs and is excluded from the reading, the rest sit at ≤ 0.021 µs). The ~45 ns delta against the row above is two extra `ToNative` fills and nothing else — the native write count is identical either way, because an absent optional slot still writes a null. Same host gate as the two rows above. |
 | `PipelineBarrier.SingleImageTransition`         | 143.9 ns   |        -  | One `vkCmdPipelineBarrier2` with a single image barrier. Recaptured for #201 — **minimum of 5 runs** (143.9 / 144.6 / 144.7 / 147.1 / 165.7 ns). Was 178.8 ns at #155; see the split-barrier caveat and the recorder-disposal note on the row below. |
 | `PipelineBarrier.LargeBatch_8x8x1`              |   2.72 µs  |        -  | One `vkCmdPipelineBarrier2` with 64 image barriers. Recaptured for #201 — **minimum of 5 runs** (2.718 / 2.728 / 2.743 / 2.748 / 2.768 µs, every run BDN-unimodal at MValue 2). **The bimodality this row used to document is gone, but not because of the fix in the same commit.** The class had the `ResetForFrame()`-before-recorder-`Dispose()` ordering bug (#188/#199 shape) in all four of its methods and it was fixed here — but three pre-fix control runs in the same session read 2.716 / 2.755 / 2.780 µs, i.e. already tight and already below the old 2.80 µs figure. Fix and control are within each other's noise, so the fix cost nothing and bought nothing measurable at this scale. **What the bad ordering costs is pool state, not per-invoke work**: it grows **one** extra `VkCommandBuffer`, not one per invoke — the pool settles into ping-ponging two buffers after the second invoke (`Pools/CommandBufferPool.cs:98-118`, `:155-159`, `:168-178`). That one-off allocation is amortized across millions of ops and is therefore invisible at *every* scale; it is not why the fix showed up on one row and not another. The part that is per-invoke and steady-state is the **ping-pong itself**: post-fix one buffer is re-recorded every invoke, pre-fix two alternate, so each invoke records into driver-side memory last touched two invokes ago. That is a recurring locality cost, and it scales with how much of the measurement is recording. Here it is invisible because 2.7 µs of driver per-barrier work for 64 barriers dominates any locality delta by two orders of magnitude, and because this method records 256 commands per invoke against `MeshShader.DrawMeshTasksIndirectCount_1024`'s 1024 — that row, where recording is nearly the whole measurement, is where two-buffers-in-rotation can plausibly show as the two-mode signature it lost. The old "strongly bimodal, median 3.61 µs, range 2.80–4.61 µs" reading is therefore **host/driver drift since #155, unexplained**, not something this branch repaired — keep comparing minima across ≥3 runs until a run reproduces the wide spread and identifies it. |
 | `PipelineBarrier.SetWaitEventPair_SingleImage`  | 247.1 ns   |        -  | #155 canary: one `vkCmdSetEvent2` + `vkCmdWaitEvents2` pair, one image barrier each. Recording only, never submitted. Recaptured for #201 — **minimum of 5 runs** (247.1–257.2 ns); was 260.7 ns. |
@@ -200,7 +240,7 @@ is ever submitted.
   changes < 20% as noise; investigate larger swings.
 - **Driver dependency**: the FrameRing / `BufferBenchmarks` / CommandRecorder /
   PipelineBarrier / PushDescriptors / BindDescriptorSets / StagingUploader /
-  SyncPool / TimestampQuery benchmarks
+  SyncPool / TimestampQuery / `DlssEvaluate` benchmarks
   fail at `[GlobalSetup]` on a host without a Vulkan ICD. That is the
   expected behavior — there is no soft skip in the benchmark project (BDN
   reports the failure and moves on).
@@ -236,6 +276,24 @@ is ever submitted.
   work in setup (it builds a BLAS and waits on a fence) so that the TLAS
   instance entry the measured body rebuilds against holds a live device
   address.
+  `DlssEvaluateBenchmarks` has the **strictest** gate in the project, and unlike
+  every class above it the missing piece may not be installable at all: its
+  `[GlobalSetup]` needs an NVIDIA GPU, a DLSS-capable driver **and** a
+  consumer-supplied `nvngx_dlss.dll` that this repository does not ship and
+  never will (#214). It resolves the feature DLL from
+  `native/ngx/staged/<rid>/rel/` — where `./tools/setup-ngx.ps1` puts it — and
+  throws with an actionable message naming which of the three is missing rather
+  than skipping. That is again exactly why it is its own class: the #29 canary
+  must not be taken down by an absent proprietary SDK. It also needs the
+  `ahjo_ngx` shim built, which is itself opt-in.
+- **No row for `Allocator.GetHeapBudgets`, deliberately.**
+  It `stackalloc`s `VK_MAX_MEMORY_HEAPS` `VmaBudget` entries and makes one
+  `vmaGetHeapBudgets` call, so it allocates nothing — but it is a
+  diagnostic/setup query, not a per-frame one: VMA takes an internal lock and
+  walks its block lists to answer it. A per-frame VRAM readout is a plausible
+  thing to want, and it is the wrong way to want it; sample it on a timer.
+  Stated here rather than only in the XML doc so the next reviewer does not have
+  to re-derive it, and so "no benchmark" reads as a decision rather than a gap.
 - **No row for the compaction commands, deliberately.**
   `CommandRecorder.WriteAccelerationStructuresProperties` and
   `CommandRecorder.CopyAccelerationStructure` are **asset-load-time**, not

@@ -9,6 +9,22 @@ namespace Ahjo.Vulkan;
 public enum AllocationFlags : uint
 {
     None                            = 0,
+
+    /// <summary>
+    /// <c>VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT</c> — give this resource
+    /// its own <c>VkDeviceMemory</c> rather than a suballocation.
+    /// </summary>
+    /// <seealso cref="VulkanExtensions.ExtMemoryBudget"/>
+    /// <remarks>
+    /// Full-screen render targets handed to DLSS (<c>Ahjo.Vulkan.Ngx</c>) are
+    /// the canonical case: they are large, long-lived and read by the driver's
+    /// own upscaling passes, and they sit next to DLSS's driver-side history
+    /// and scratch allocations that VMA never sees at all. Pair with
+    /// <see cref="AllocatorDescription.EnableMemoryBudget"/> +
+    /// <see cref="VulkanExtensions.ExtMemoryBudget"/> when you want
+    /// <see cref="Allocator.GetHeapBudgets"/> to account for both halves
+    /// (issue #214).
+    /// </remarks>
     DedicatedMemory                 = 0x00000001,
     NeverAllocate                   = 0x00000002,
     Mapped                          = 0x00000004,

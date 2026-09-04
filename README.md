@@ -2,7 +2,7 @@
 
 .NET bindings and a low-allocation C# wrapper for [Vulkan](https://www.vulkan.org/),
 part of the [Ahjo](https://github.com/pekkah) game engine. Published on
-NuGet as seven packages:
+NuGet as eight packages:
 
 - [**Ahjo.Vulkan**](https://www.nuget.org/packages/Ahjo.Vulkan) — the idiomatic
   C# wrapper. What most callers want. Vulkan + integrated
@@ -20,7 +20,7 @@ NuGet as seven packages:
   SHARED library (`vma.{dll,so}`) for Windows + Linux (x64, arm64) under
   `runtimes/<rid>/native/`. Pulled in transitively by `Ahjo.Vulkan`.
   Shares the same `v*` tag versioning as the rest of the stack — all
-  six packages release together. macOS RIDs aren't shipped today;
+  eight packages release together. macOS RIDs aren't shipped today;
   the MoltenVK runtime path needs validation before adding them.
 - [**Ahjo.Vulkan.Ktx.Native**](https://www.nuget.org/packages/Ahjo.Vulkan.Ktx.Native)
   — raw P/Invoke bindings against Khronos `libktx`'s `ktx.h` (KTX2
@@ -68,6 +68,17 @@ NuGet as seven packages:
   `wchar_t` (2 bytes on Windows, 4 on Linux) out of the managed surface.
   **Standalone**: `Ahjo.Vulkan` does not pull it in. Requires NVIDIA hardware
   and driver; there is no fallback path.
+- [**Ahjo.Vulkan.Ngx**](https://www.nuget.org/packages/Ahjo.Vulkan.Ngx)
+  — the idiomatic wrapper over NGX: `NgxContext`, `DlssFeature`, `NgxImage` and
+  the description types a renderer calls, in place of an opaque parameter map
+  populated by string name ~30 entries per frame. Covers DLSS Super Resolution
+  and DLAA — capability and optimal-settings queries, feature create/evaluate/
+  release, and the extension lists NGX requires at instance and device
+  creation. `Evaluate` allocates nothing per frame. Ships **no native files**:
+  the shim rides in `Ahjo.Vulkan.Ngx.Native` and **the DLSS feature DLL is
+  still the application's to supply** — a missing one throws
+  `NgxFeatureLibraryNotFoundException` naming every directory searched, never a
+  silent fallback. **Standalone**: `Ahjo.Vulkan` does not pull it in.
 
 Project folders, csproj filenames, `AssemblyName`, `RootNamespace`, and
 NuGet `PackageId` all use the dotted `Ahjo.Vulkan*` form — one canonical
@@ -120,6 +131,7 @@ Other specs and plans live under [`docs/design/specs/`](docs/design/specs/) and 
 - `src/Ahjo.Vulkan.Slang.Native` — ClangSharp-generated P/Invokes against the Slang compiler's `slang.h`. Stages + ships `slang.dll` + `slang-compiler.dll` / `libslang.so` for `win-x64` + `linux-x64` from the pinned, checksum-verified upstream release. Ships as `Ahjo.Vulkan.Slang.Native`.
 - `src/Ahjo.Vulkan.Slang` — idiomatic wrapper over the Slang compiler: `SlangCompiler`/`SlangSession`/`SlangModule`/`SlangProgram`/`SlangProgramBuilder`, diagnostics as exceptions, SPIR-V as a `ReadOnlySpan<uint>`, and `SlangReflection` mapping a linked program's descriptor sets, push constants and vertex inputs onto the existing `Pipelines/` description types. Ships as `Ahjo.Vulkan.Slang`.
 - `src/Ahjo.Vulkan.Ngx.Native` — ClangSharp-generated P/Invokes against NVIDIA's NGX (DLSS) Vulkan C API, parsed through our own `native/ngx/src/ahjo_ngx.h`. Builds + ships the `ahjo_ngx.dll` / `libahjo_ngx.so` shim for `win-x64` + `linux-x64`; the shim build is opt-in on a locally staged SDK and never downloads anything. Ships as `Ahjo.Vulkan.Ngx.Native`, **without** the DLSS feature DLL.
+- `src/Ahjo.Vulkan.Ngx` — idiomatic wrapper over NGX: `NgxContext`, `NgxSupport`, `NgxImage`, `DlssFeature` and the `Dlss*` description/result types, plus the shadow enums (`DlssQualityMode`, `DlssPreset`, `DlssFeatureFlags`) that keep `NVSDK_NGX_`-prefixed member names out of the public API. Ships as `Ahjo.Vulkan.Ngx`, with no native files of its own.
 - `src/Ahjo.Vulkan` — idiomatic wrapper covering both Vulkan and VMA (`Memory/Allocator.cs`, `Memory/AllocatedBuffer.cs`, …). Ships as `Ahjo.Vulkan`.
 - `src/Ahjo.Vulkan.Utilities` — dep-free helpers usable from samples and tests. Not published.
 - `native/vma/` — VMA impl translation unit (`src/vma.cpp`) + `CMakeLists.txt`. Source for the SHARED library packaged in `Ahjo.Vulkan.Vma.Native`.
@@ -131,6 +143,7 @@ Other specs and plans live under [`docs/design/specs/`](docs/design/specs/) and 
 - `tests/Ahjo.Vulkan.Ktx.Native.Tests` — xUnit smoke suite that loads the packaged libktx and transcodes a pinned KTX2 fixture. Runs per RID in the job that builds the binary.
 - `tests/Ahjo.Vulkan.Slang.Native.Tests` — xUnit smoke suite that loads the packaged Slang compiler, compiles a shader to SPIR-V, walks its reflection, and checks that every deprecated reflection export the stack depends on is still present in the binary. Runs per RID in the job that stages the binary.
 - `tests/Ahjo.Vulkan.Ngx.Native.Tests` — xUnit suite that loads the `ahjo_ngx` shim, resolves all 27 exports against the two hand-maintained export lists, and checks the NGX struct layouts (sizes, alignments **and** field offsets) against the compiled native values. Skips wholesale when the SDK is not staged — unless `AHJO_NGX_REQUIRE_SHIM=1`, which the CI lane sets. Acquires no Vulkan device.
+- `tests/Ahjo.Vulkan.Ngx.Tests` — xUnit suite over the NGX wrapper: shadow-enum drift for all five enums (values **and** member counts), `NgxDescription` validation, the `NgxExtensionSet` copy-and-NUL-terminate contract driven with a fabricated `VkExtensionProperties[]`, `DlssOptimalSettings` availability semantics, and the `AhjoValidation`-gated evaluate checks. Driver-gated tests cover the extension list reaching `vkCreateDevice` and the memory-budget pairing; the end-to-end DLSS create → evaluate → release needs NVIDIA hardware and a consumer-supplied `nvngx_dlss.dll`, so it never runs in CI (`docs/ci-coverage.md`).
 - `tests/Ahjo.Vulkan.Slang.Tests` — xUnit suite over the Slang wrapper: compile from source and from file, diagnostics-as-exceptions, warnings on success, every optimization level, compiler lifetime, multi-module composition and type conformance, and reflection over the linked result — the reflection cases assert against `OpDecorate DescriptorSet`/`Binding`/`Location` read out of the emitted SPIR-V rather than against reflection's own numbers. One driver-gated test builds a `PipelineLayout` from a reflected composed program.
 - `samples/` — runnable programs, all in the solution so a wrapper change that breaks one breaks the build. `HelloTriangle` / `HelloCube` / `HelloVma` / `HelloVmaWindowed` are windowed; `HeadlessTriangle` / `HeadlessExport` / `HelloRayQuery` render offscreen and write a PNG; `AotSmoke` is the Native AOT canary. `HelloRayQuery` composes the whole `VK_KHR_acceleration_structure` chain — BLAS, TLAS, the acceleration-structure descriptor write — and traverses it from a Slang `RayQuery<>` compute shader, so it needs an RT-capable device; without one it prints a skip line and exits 0.
 - `tests/Shared` — the declared Vulkan capability tier (`AHJO_VULKAN_TIER`) shared by the Vulkan-touching suites. Most of the wrapper suite needs a device, so what a green run actually covered depends on the tier the lane declared: see [`docs/ci-coverage.md`](docs/ci-coverage.md).
@@ -175,10 +188,11 @@ hatch. `native/slang/staged/<rid>/` is the cache, same as KTX's.
 
 ## Release tagging
 
-All seven packages — `Ahjo.Vulkan`, `Ahjo.Vulkan.Native`,
+All eight packages — `Ahjo.Vulkan`, `Ahjo.Vulkan.Native`,
 `Ahjo.Vulkan.Vma.Native`, `Ahjo.Vulkan.Ktx.Native`,
-`Ahjo.Vulkan.Slang.Native`, `Ahjo.Vulkan.Slang` and
-`Ahjo.Vulkan.Ngx.Native` — share a single `v*` tag and release together.
+`Ahjo.Vulkan.Slang.Native`, `Ahjo.Vulkan.Slang`,
+`Ahjo.Vulkan.Ngx.Native` and `Ahjo.Vulkan.Ngx` — share a single `v*` tag and
+release together.
 A `git tag v0.1.0 && git push origin v0.1.0` ships the whole stack.
 
 The underlying VMA C++ library version (independent of the package

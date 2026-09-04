@@ -50,6 +50,14 @@ public static class VulkanExtensions
     /// <see cref="Swapchain"/> creation and present.</summary>
     public static Utf8Name KhrSwapchain => Utf8Name.FromLiteral("VK_KHR_swapchain"u8);
 
+    /// <summary>VK_EXT_memory_budget — device-level. Pair with
+    /// <see cref="AllocatorDescription.EnableMemoryBudget"/> so
+    /// <see cref="Allocator.GetHeapBudgets"/> reports the driver's real heap
+    /// usage rather than VMA's own bookkeeping. Needed to see allocations VMA
+    /// never made — notably DLSS's internal history and scratch surfaces
+    /// (issue #214).</summary>
+    public static Utf8Name ExtMemoryBudget => Utf8Name.FromLiteral("VK_EXT_memory_budget"u8);
+
     /// <summary>VK_EXT_mesh_shader — device-level. Enables
     /// <see cref="GraphicsPipelineBuilder.WithMeshStages"/> /
     /// <see cref="GraphicsPipelineBuilder.WithTaskStage"/> and the

@@ -122,6 +122,31 @@ driver and the consumer-supplied feature DLL, so real DLSS coverage stays a
 local-NVIDIA-hardware item. No hosted runner can provide it, and the feature
 DLL never enters CI at all.
 
+### `Ahjo.Vulkan.Ngx.Tests` — what the wrapper suite proves where
+
+Unlike `Ahjo.Vulkan.Ngx.Native.Tests`, this suite runs in **`build-test`**, not
+in the `ngx-native` lane: it wraps Vulkan objects, so it carries
+`tests/Shared/*.cs` and the declared-tier contract like the other suites that
+touch Vulkan. Its skips split across two classes, both of which
+`[gate:*]` treats as permanent-and-correct rather than as coverage gaps.
+
+| Runs on | Gate | What it proves |
+|---|---|---|
+| Any host, no driver, no NGX SDK | none | Shadow-enum drift for all five enums (values **and** member counts, so an `NgxVersion` bump that adds a member is a decision rather than a silent gap); `NgxDescription` validation; `NgxExtensionSet` copy-and-NUL-terminate over a fabricated `VkExtensionProperties[]`; `DlssOptimalSettings` availability semantics; the `AhjoValidation`-gated evaluate checks, including that `ImageUsage.None` is skipped rather than failed |
+| Any Vulkan driver, SwiftShader included | `[gate:driver]` | An `NgxExtensionSet` reaches `vkCreateDevice` through `DeviceDescription.Extensions` — the pointer/termination contract against a real loader, with no NGX involved; the `EnableMemoryBudget` pairing check; `Allocator.GetHeapBudgets` returning one row per heap |
+| A staged NGX SDK (`./tools/setup-ngx.ps1`) | `[gate:platform]` | `NgxSupport.TryGetInstanceExtensions` over the **wrapper's** copy path — the native-level version of the same assertion already runs in `ngx-native` |
+| NVIDIA GPU + DLSS-capable driver + `nvngx_dlss.dll` | `[gate:feature]` | Everything real: context create, `GetOptimalSettings` for all six modes, the end-to-end create → transition → evaluate → release, `TryGetStats`, and the missing-feature-library diagnosis |
+
+**CI reaches the first two rows and no further.** There is no NVIDIA hardware on
+a hosted runner (#32) and the feature DLL never enters CI (#214), so every DLSS
+evaluate in this repository is evidence from a developer machine, quoted in the
+PR — the way #217 quoted its `nm -D` and `dumpbin` output. That is the honest
+description, not a gap to be closed by a mock.
+
+The suite deliberately does **not** run inside the `ngx-native` lane even though
+that lane has the shim: that lane's contract is "no loader, no ICD", and
+`.github/CLAUDE.md` forbids growing it into wrapper coverage.
+
 ## The ceiling, stated plainly
 
 No GitHub-hosted runner exposes a hardware Vulkan device. Even a fully fixed

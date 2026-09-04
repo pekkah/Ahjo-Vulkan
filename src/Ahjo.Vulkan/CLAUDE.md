@@ -37,6 +37,8 @@ Stated explicitly in `README.md`: "Low allocation, raw-pointer friendly, minimal
 - `Memory/**` — `StagingUploader`, `MappedRegion`, `ChainBuilder`
 - Any other API expected to run inside a per-frame loop
 
+The rule follows the *call frequency*, not the directory. `Ahjo.Vulkan.Ngx`'s `DlssFeature.Evaluate` is a satellite package's API and lives nowhere near `Recording/`, but it runs once per frame and carries the identical obligation — its own benchmark class (`DlssEvaluateBenchmarks`, both rows `Allocated: -`) and `src/Ahjo.Vulkan.Ngx/CLAUDE.md` record what holds it up.
+
 Setup-time allocations (constructors, builder finalization, one-shot config) are fine. The constraint is per-frame, not lifetime.
 
 Watch for the usual leaks on hot paths: LINQ, string interpolation, closures capturing locals, `params T[]` where a `ReadOnlySpan<T>` overload would do, boxing through interface casts.

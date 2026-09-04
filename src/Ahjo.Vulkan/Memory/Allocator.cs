@@ -37,11 +37,27 @@ public readonly unsafe struct Allocator : IDisposable
     // resident and gets unloaded. Zero on default(Allocator) and on
     // wrappers that didn't go through Create (none currently exist).
     internal readonly nint Loader;
+    // Number of memory heaps the physical device reports, captured in Create.
+    // GetHeapBudgets needs it because vmaGetHeapBudgets takes no count: it
+    // writes memoryHeapCount entries (VMA_LEN_IF_NOT_NULL(memoryHeapCount) in
+    // the header) and the caller is expected to already know that number.
+    // Zero on default(Allocator).
+    internal readonly uint HeapCount;
 
-    internal Allocator(VmaAllocator_T* handle, nint loader)
+    /// <summary>
+    /// Vulkan's <c>VK_MAX_MEMORY_HEAPS</c>. Not emitted as a constant by the
+    /// generator (it is a plain <c>#define</c> the rsp does not bind), so it is
+    /// spelled here; it is also the inline-array length of
+    /// <c>VkPhysicalDeviceMemoryProperties.memoryHeaps</c>, which is what pins
+    /// the value.
+    /// </summary>
+    private const int MaxMemoryHeaps = 16;
+
+    internal Allocator(VmaAllocator_T* handle, nint loader, uint heapCount)
     {
-        Handle = handle;
-        Loader = loader;
+        Handle    = handle;
+        Loader    = loader;
+        HeapCount = heapCount;
     }
 
     public bool IsNull => Handle == null;
@@ -54,9 +70,44 @@ public readonly unsafe struct Allocator : IDisposable
     /// device's reported <c>apiVersion</c> (capped at the wrapper's
     /// header ceiling of 1.4).
     /// </summary>
-    public static Allocator Create(Device device)
+    public static Allocator Create(Device device) => Create(device, default);
+
+    /// <summary>
+    /// As <see cref="Create(Device)"/>, plus the allocator-level options in
+    /// <paramref name="description"/>. <c>default(AllocatorDescription)</c>
+    /// produces a byte-identical allocator to the single-argument overload.
+    /// </summary>
+    public static Allocator Create(Device device, in AllocatorDescription description)
     {
         ArgumentNullException.ThrowIfNull(device);
+
+        // The last gate before the flag reaches VMA, and it asks about
+        // ENABLEMENT, not support — those are different questions and only one
+        // of them is the right one. Every desktop driver *supports*
+        // VK_EXT_memory_budget, so a support test would wave through exactly the
+        // caller this exists to stop: one who created the device without the
+        // extension and then asks for a budget here. VMA would set the bit and
+        // then chain VkPhysicalDeviceMemoryBudgetPropertiesEXT into a device
+        // that never enabled it (VUID-VkPhysicalDeviceMemoryProperties2-pNext-pNext).
+        //
+        // NOT gated on AhjoValidation: this one throws in every configuration.
+        // PhysicalDevice.CreateDevice's half is validation-gated because it is a
+        // helpful early warning about a description; this is the point past
+        // which a Release build would otherwise hand the driver an invalid
+        // chain and read numbers that look plausible and are wrong.
+        if (description.EnableMemoryBudget && !device.MemoryBudgetExtensionEnabled)
+        {
+            // No paramName: this is also reached from the Device.Allocator
+            // property getter, where the description came from
+            // DeviceDescription.Allocator and there is no parameter of that
+            // name for the caller to go look at. The message names the real fix
+            // on both paths, which is what a caller actually needs.
+            throw new ArgumentException(
+                "AllocatorDescription.EnableMemoryBudget is set but VK_EXT_memory_budget was not enabled on this device. " +
+                "Add VulkanExtensions.ExtMemoryBudget to DeviceDescription.Extensions and recreate the device — support " +
+                "is not enough, VMA chains VkPhysicalDeviceMemoryBudgetPropertiesEXT and the driver rejects it on a " +
+                "device that did not enable the extension.");
+        }
 
         // Load the loader DLL and keep the handle for the allocator's
         // lifetime — VMA captures vkGetInstanceProcAddr /
@@ -108,7 +159,18 @@ public readonly unsafe struct Allocator : IDisposable
             // feature chain (PhysicalDevice.CreateDevice). VMA needs this flag
             // to allocate buffers carrying VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
             // without it, vmaCreateBuffer returns VK_ERROR_INITIALIZATION_FAILED.
-            ci.flags                          = (uint)VmaAllocatorCreateFlagBits.VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+            //
+            // EXT_MEMORY_BUDGET is opt-in through AllocatorDescription
+            // (issue #218): it makes VMA read the driver's real heap usage via
+            // VK_EXT_memory_budget instead of estimating from its own
+            // bookkeeping, which is the only way GetHeapBudgets can see memory
+            // VMA never allocated (DLSS's driver-side history/scratch, #214).
+            // The device extension must be enabled too; CreateDevice checks the
+            // pairing under AhjoValidation.
+            ci.flags                          = (uint)VmaAllocatorCreateFlagBits.VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT
+                                              | (description.EnableMemoryBudget
+                                                    ? (uint)VmaAllocatorCreateFlagBits.VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT
+                                                    : 0u);
             ci.physicalDevice                 = device.PhysicalDevice.Handle;
             ci.device                         = device.Handle;
             ci.preferredLargeHeapBlockSize    = 0;
@@ -120,9 +182,14 @@ public readonly unsafe struct Allocator : IDisposable
             ci.vulkanApiVersion               = apiVersion;
             ci.pTypeExternalMemoryHandleTypes = null;
 
+            // Captured once so GetHeapBudgets can trim vmaGetHeapBudgets'
+            // fixed VK_MAX_MEMORY_HEAPS output down to the heaps that exist.
+            VkPhysicalDeviceMemoryProperties memProps;
+            Vk.vkGetPhysicalDeviceMemoryProperties(device.PhysicalDevice.Handle, &memProps);
+
             VmaAllocator_T* raw = null;
             VmaApi.vmaCreateAllocator(&ci, &raw).ThrowIfFailed();
-            var allocator = new Allocator(raw, loader);
+            var allocator = new Allocator(raw, loader, memProps.memoryHeapCount);
             loader = 0; // ownership transferred — Dispose frees it now.
             return allocator;
         }
@@ -301,6 +368,73 @@ public readonly unsafe struct Allocator : IDisposable
         return new Buffer(
             rawBuffer, null, this, buffer.Size, buffer.Usage,
             isHostVisible: false, isHostCoherent: false, persistentMapped: null);
+    }
+
+    /// <summary>
+    /// Fills <paramref name="destination"/> with one
+    /// <see cref="MemoryHeapBudget"/> per memory heap the physical device
+    /// reports and returns that count.
+    /// </summary>
+    /// <param name="destination">
+    /// Caller-provided span, at least <see cref="HeapCount"/> long. Sixteen
+    /// entries (<c>VK_MAX_MEMORY_HEAPS</c>) is always enough.
+    /// </param>
+    /// <returns>The number of entries written — the device's heap count.</returns>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="destination"/> is shorter than the heap count; the
+    /// message names both numbers.
+    /// </exception>
+    /// <remarks>
+    /// <para>Allocates nothing: one <c>stackalloc</c> of VMA's fixed-size
+    /// output array and one <c>vmaGetHeapBudgets</c> call. Still a
+    /// diagnostic/setup-path API rather than a per-frame one — VMA takes an
+    /// internal lock and walks its block lists.</para>
+    /// <para><see cref="MemoryHeapBudget.Usage"/> and
+    /// <see cref="MemoryHeapBudget.Budget"/> are only the driver's real numbers
+    /// when the allocator was created with
+    /// <see cref="AllocatorDescription.EnableMemoryBudget"/>; see that member.</para>
+    /// </remarks>
+    public int GetHeapBudgets(Span<MemoryHeapBudget> destination)
+    {
+        // default(Allocator) is a legal null handle and is publicly reachable —
+        // Image.FromRaw(h).Owner is one. Its HeapCount is 0, so the length
+        // guard below would pass for any span (an empty one included) and let
+        // vmaGetHeapBudgets(null, ...) through. Answer "no heaps" instead.
+        if (Handle == null) return 0;
+
+        uint heapCount = HeapCount;
+        if (destination.Length < heapCount)
+        {
+            throw new ArgumentException(
+                $"Destination span holds {destination.Length} entries but this device reports {heapCount} memory heap(s). " +
+                $"Size the span to Allocator.GetHeapBudgets' return value, or to {MaxMemoryHeaps} (VK_MAX_MEMORY_HEAPS) unconditionally.",
+                nameof(destination));
+        }
+
+        // vmaGetHeapBudgets writes at least memoryHeapCount entries and takes
+        // no capacity argument, so the scratch buffer is sized to the maximum a
+        // device can ever report: VK_MAX_MEMORY_HEAPS. A fixed 16 is therefore
+        // always sufficient and never has to be re-checked against the device.
+        Span<VmaBudget> budgets = stackalloc VmaBudget[MaxMemoryHeaps];
+        fixed (VmaBudget* pBudgets = budgets)
+            VmaApi.vmaGetHeapBudgets(Handle, pBudgets);
+
+        for (uint i = 0; i < heapCount; i++)
+        {
+            ref readonly VmaBudget b = ref budgets[(int)i];
+            destination[(int)i] = new MemoryHeapBudget
+            {
+                HeapIndex       = i,
+                BlockCount      = b.statistics.blockCount,
+                AllocationCount = b.statistics.allocationCount,
+                BlockBytes      = b.statistics.blockBytes,
+                AllocationBytes = b.statistics.allocationBytes,
+                Usage           = b.usage,
+                Budget          = b.budget,
+            };
+        }
+
+        return (int)heapCount;
     }
 
     /// <summary>

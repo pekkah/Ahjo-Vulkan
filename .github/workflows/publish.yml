@@ -52,7 +52,7 @@ on:
         type: boolean
         default: true
       include_ngx:
-        description: "Pack Ahjo.Vulkan.Ngx.Native (runs the 2-RID shim matrix + its smoke suite). Defaults to true since all packages ship together; flip to false for a fast core-only dry-run."
+        description: "Pack Ahjo.Vulkan.Ngx.Native + Ahjo.Vulkan.Ngx (runs the 2-RID shim matrix + its smoke suite). Defaults to true since all packages ship together; flip to false for a fast core-only dry-run."
         required: false
         type: boolean
         default: true
@@ -355,6 +355,20 @@ jobs:
             -c Release \
             -p:SkipNgxNativeBuild=true \
             -o "${{ github.workspace }}/artifacts"
+
+      # Ahjo.Vulkan.Ngx references BOTH Ahjo.Vulkan and Ahjo.Vulkan.Ngx.Native,
+      # so it is packed after the two of them and carries both flags:
+      # SkipVmaNativeBuild so the transitive VMA project does not invoke cmake,
+      # and SkipNgxNativeBuild so the transitive NGX native project does not try
+      # to rebuild a shim against an SDK this runner does not have. It ships no
+      # native files of its own — the shim rides in Ahjo.Vulkan.Ngx.Native and
+      # the DLSS feature DLL is the consumer's (#214).
+      - name: Pack (NGX wrapper)
+        if: needs.build-ngx.result == 'success'
+        env:
+          MinVerVersionOverride: ${{ inputs.version }}
+        run: |
+          dotnet pack src/Ahjo.Vulkan.Ngx/Ahjo.Vulkan.Ngx.csproj             -c Release             -p:SkipVmaNativeBuild=true             -p:SkipNgxNativeBuild=true             -o "${{ github.workspace }}/artifacts"
 
       - name: List artifacts
         run: ls -la ${{ github.workspace }}/artifacts
