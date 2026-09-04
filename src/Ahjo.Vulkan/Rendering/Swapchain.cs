@@ -83,11 +83,75 @@ public sealed unsafe class Swapchain : IDisposable
     /// <summary>
     /// Raw <c>VkImage_T*</c> for image <paramref name="index"/>, returned
     /// as <c>nint</c> so it can drop straight into
-    /// <see cref="ImageBarrier.Image"/>. The wrapper does not vend a
-    /// full <see cref="Image"/> for swapchain-owned images — they are
-    /// not VMA-allocated and have no <see cref="Allocator"/> backing.
+    /// <see cref="ImageBarrier.Image"/> in its object-initializer form.
+    /// Use <see cref="GetImage"/> instead when you need an
+    /// <see cref="Image"/> — for <c>ImageBarrier.Transition</c>, for the
+    /// <c>WholeImage</c> region helpers, or for anything that reads the
+    /// extent, format or usage.
     /// </summary>
     public nint GetImageHandle(uint index) => (nint)_images[index];
+
+    /// <summary>
+    /// Swapchain image <paramref name="index"/> as a <b>borrowed</b>
+    /// <see cref="Image"/> carrying the four facts the swapchain actually
+    /// knows: <see cref="Format"/>, <see cref="Extent"/> (as
+    /// <c>Width</c>/<c>Height</c>) and <see cref="ImageUsage"/>, plus
+    /// <c>Depth</c>/<c>MipLevels</c>/<c>ArrayLayers</c> of <c>1</c>
+    /// (a swapchain image is 2-D and single-mip, and
+    /// <c>imageArrayLayers</c> is <c>1</c> at creation).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The returned image is borrowed.</b> It is built with no VMA
+    /// allocation and no owning <see cref="Allocator"/>, so
+    /// <see cref="Image.OwnsHandle"/> and <see cref="Image.OwnsMemory"/> are
+    /// both <see langword="false"/> and <see cref="Image.Dispose"/> is a
+    /// <b>no-op</b>: it returns before <c>HandleRegistry.TrackDispose</c> and
+    /// before <c>vmaDestroyImage</c>, so a swapchain-owned <c>VkImage</c> can
+    /// never reach VMA. <c>using var image = swap.GetImage(i);</c> is
+    /// therefore harmless — and pointless. Don't write it.</para>
+    /// <para><b>It is never registered with <c>HandleRegistry</c>.</b>
+    /// <c>TrackCreate</c> returns on its first branch for a non-owning
+    /// handle, so calling this once per frame costs two predictable branches,
+    /// churns nothing, and cannot produce a false double-dispose report.</para>
+    /// <para><b>Lifetime.</b> Valid only while this swapchain is alive and
+    /// un-recreated. <see cref="Recreate"/> replaces the images and may change
+    /// the extent and the format, so never cache the returned value across a
+    /// recreate — the same contract <see cref="ImageViews"/> carries.</para>
+    /// <para><b>Which one to use.</b> <see cref="GetImageHandle"/> returns the
+    /// raw <c>nint</c> that <see cref="ImageBarrier.Image"/> takes in its
+    /// object-initializer form. <c>GetImage</c> is what you want for
+    /// <c>ImageBarrier.Transition</c>, for <c>ImageBlitRegion.WholeImage</c> /
+    /// <c>BufferImageCopy.WholeImage</c>, and for anything that reads the
+    /// extent, format or usage: <see cref="Image.FromRaw"/> deliberately
+    /// reports <c>0×0</c>, <c>VK_FORMAT_UNDEFINED</c> and
+    /// <c>ImageUsage.None</c> for a bare handle (issue #119 — unknown, not
+    /// wrong), and a <c>WholeImage</c> region built over one of those is a
+    /// degenerate box that copies nothing. This method exists to supply what
+    /// the swapchain genuinely knows.</para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="index"/> is not less than <see cref="ImageCount"/>.
+    /// </exception>
+    public Image GetImage(uint index)
+    {
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, (uint)_images.Length);
+        // Constructed on demand rather than cached: eleven field assignments
+        // that allocate nothing, against a second array Recreate would have to
+        // keep in sync. allocation/owner stay null so the borrow contract of
+        // the remarks above holds by construction, not by a flag.
+        return new Image(
+            _images[index],
+            allocation:       null,
+            owner:            default,
+            format:           _format.format,
+            width:            _extent.width,
+            height:           _extent.height,
+            depth:            1,
+            mipLevels:        1,
+            arrayLayers:      1,
+            usage:            _imageUsage,
+            persistentMapped: null);
+    }
 
     /// <summary>
     /// The per-image <c>RenderingDone</c> binary semaphore for
