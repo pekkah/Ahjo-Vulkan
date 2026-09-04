@@ -611,6 +611,77 @@ public sealed unsafe class SwapchainTests
     }
 
     /// <summary>
+    /// <see cref="Swapchain.GetImageHandle"/> and
+    /// <see cref="Swapchain.GetRenderingDoneFor"/> run their guards before the
+    /// index, matching <c>Present(Queue, uint)</c> (#224). Driven through
+    /// <c>ForceRecreateFailedForTesting</c> rather than
+    /// <c>OverrideStateForTesting</c>: the former reproduces the shape the real
+    /// failure path leaves behind — the image and per-image-semaphore arrays are
+    /// empty — so a method that indexed first would throw
+    /// <see cref="IndexOutOfRangeException"/> instead of the
+    /// <see cref="InvalidOperationException"/> the boundary documents. That is the
+    /// exact regression this pins.
+    /// </summary>
+    [Fact]
+    public void GetImageHandleAndRenderingDone_InNonPresentableState_ThrowInvalidOperation()
+    {
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out _);
+
+        var desc = new SwapchainDescription { Surface = surface, Width = window.Width, Height = window.Height };
+        using var swap = new Swapchain(device, in desc);
+
+        swap.ForceRecreateFailedForTesting();
+        Assert.Equal(SwapchainState.RecreateFailed, swap.State);
+        Assert.Equal(0u, swap.ImageCount);
+
+        // Both boundaries reject with InvalidOperationException naming the state,
+        // never IndexOutOfRangeException from the empty backing array.
+        var imageEx = Assert.Throws<InvalidOperationException>(() => swap.GetImageHandle(0));
+        Assert.Contains(nameof(SwapchainState.RecreateFailed), imageEx.Message, StringComparison.Ordinal);
+        var renderingEx = Assert.Throws<InvalidOperationException>(() => swap.GetRenderingDoneFor(0));
+        Assert.Contains(nameof(SwapchainState.RecreateFailed), renderingEx.Message, StringComparison.Ordinal);
+
+        // Recover so Dispose runs against coherent state.
+        Assert.Equal(SwapchainState.Ready, swap.Recreate(in desc));
+    }
+
+    /// <summary>
+    /// The accept side of the #224 guard: <see cref="SwapchainState.NeedsRecreate"/>
+    /// is advisory, so both <see cref="Swapchain.GetImageHandle"/> and
+    /// <see cref="Swapchain.GetRenderingDoneFor"/> must keep returning the live
+    /// handles a frame loop mid-resize still needs — the arrays are populated in
+    /// this state, so the presentability guard passes and does not throw.
+    /// </summary>
+    [Fact]
+    public void GetImageHandleAndRenderingDone_InNeedsRecreate_DoNotThrow()
+    {
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out _);
+
+        var desc = new SwapchainDescription { Surface = surface, Width = window.Width, Height = window.Height };
+        using var swap = new Swapchain(device, in desc);
+
+        swap.OverrideStateForTesting(SwapchainState.NeedsRecreate);
+        Assert.NotEqual(nint.Zero, swap.GetImageHandle(0));
+        _ = swap.GetRenderingDoneFor(0);
+
+        swap.OverrideStateForTesting(SwapchainState.Ready);
+    }
+
+    /// <summary>
     /// Recreate classifies a failure on the driver's VkResult, not on "something
     /// threw" (#222). <c>VK_ERROR_SURFACE_LOST_KHR</c> is a documented return of
     /// every surface query and of <c>vkCreateSwapchainKHR</c>, and

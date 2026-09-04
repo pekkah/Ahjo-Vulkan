@@ -90,7 +90,33 @@ public sealed unsafe class Swapchain : IDisposable
     /// <c>WholeImage</c> region helpers, or for anything that reads the
     /// extent, format or usage.
     /// </summary>
-    public nint GetImageHandle(uint index) => (nint)_images[index];
+    /// <remarks>
+    /// The guards run before the index, matching <see cref="Present(Queue, uint)"/>
+    /// (#224): in the states that reject a present the image array is empty
+    /// (<see cref="Recreate"/>'s failure path clears it; a construction-time
+    /// <see cref="SwapchainState.Minimized"/> never populates it), so indexing
+    /// first would throw <see cref="IndexOutOfRangeException"/> — and on a disposed
+    /// swapchain silently index a cleared array — instead of the exceptions this
+    /// boundary documents. The trailing bounds check mirrors the sibling
+    /// <see cref="GetImage"/>, so the two accessors now agree on the index
+    /// contract. The three checks are predictable, allocation-free branches on the
+    /// per-frame path; <see cref="SwapchainState.NeedsRecreate"/> stays presentable,
+    /// so a frame loop mid-resize is unaffected.
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">The swapchain has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The swapchain is not presentable — see <see cref="SwapchainState"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="index"/> is not less than <see cref="ImageCount"/>.
+    /// </exception>
+    public nint GetImageHandle(uint index)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfNotPresentable();
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, (uint)_images.Length);
+        return (nint)_images[index];
+    }
 
     /// <summary>
     /// Swapchain image <paramref name="index"/> as a <b>borrowed</b>
@@ -174,10 +200,25 @@ public sealed unsafe class Swapchain : IDisposable
     /// <para>The handle is stable across acquire/present cycles but is
     /// invalidated by <see cref="Recreate"/> — never cache it across
     /// the recreate boundary.</para>
+    /// <para>The presentability guard runs before the index (#224), mirroring
+    /// <see cref="Present(Queue, uint)"/>: in the states that reject a present the
+    /// per-image semaphore array is empty, so indexing first would throw
+    /// <see cref="IndexOutOfRangeException"/> instead of the
+    /// <see cref="InvalidOperationException"/> this boundary documents.
+    /// <see cref="SwapchainState.NeedsRecreate"/> stays presentable.</para>
     /// </remarks>
+    /// <exception cref="ObjectDisposedException">The swapchain has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The swapchain is not presentable — see <see cref="SwapchainState"/>.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="imageIndex"/> is not less than <see cref="ImageCount"/>.
+    /// </exception>
     public BinarySemaphore GetRenderingDoneFor(uint imageIndex)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfNotPresentable();
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(imageIndex, (uint)_renderingDone.Length);
         return _renderingDone[imageIndex];
     }
 
