@@ -23,6 +23,10 @@ internal static class ResultExtensions
     // stack trace; callers that just want the failure code read .Result.
     // Non-cached failure codes (everything except OOM_HOST/OOM_DEVICE/
     // DEVICE_LOST) allocate per call and carry the [CallerMemberName].
+    // SURFACE_LOST is cached too but deliberately NOT wired into Throw
+    // below (#222): it is used only by the explicit ThrowSurfaceLost()
+    // fast-fail, so every other surface-lost throw in the wrapper keeps
+    // its [CallerMemberName].
     private static readonly VulkanException OutOfHostMemory =
         new(VkResult.VK_ERROR_OUT_OF_HOST_MEMORY, "vulkan call");
 
@@ -31,6 +35,9 @@ internal static class ResultExtensions
 
     private static readonly VulkanException DeviceLost =
         new(VkResult.VK_ERROR_DEVICE_LOST, "vulkan call");
+
+    private static readonly VulkanException SurfaceLost =
+        new(VkResult.VK_ERROR_SURFACE_LOST_KHR, "vulkan call");
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsSuccess(this VkResult result) => result == VkResult.VK_SUCCESS;
@@ -118,4 +125,15 @@ internal static class ResultExtensions
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     internal static void ThrowDeviceLost() => throw DeviceLost;
+
+    /// <summary>
+    /// The cached surface-lost exception, exposed so
+    /// <see cref="Swapchain.Recreate"/> — its single call site — can fail
+    /// deterministically once the swapchain has reached
+    /// <see cref="SwapchainState.SurfaceLost"/> without allocating (#222).
+    /// Re-throwing gets a fresh stack trace per throw via the runtime's
+    /// dispatch info.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    internal static void ThrowSurfaceLost() => throw SurfaceLost;
 }

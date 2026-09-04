@@ -406,14 +406,16 @@ public sealed unsafe class SwapchainTests
     }
 
     /// <summary>
-    /// Acquire/present on a Minimized or Poisoned swapchain throw instead
-    /// of looping forever against a dead handle (#110/#112). The states
-    /// are driven through the internal test seam — provoking a real
-    /// window-manager minimize or a failing vkCreateSwapchainKHR from CI
-    /// is not portable.
+    /// Acquire/present in any non-presentable state throw instead of looping
+    /// forever against a dead or missing handle (#110/#112, split per cause in
+    /// #222). Each message names its own state, which is what pins the
+    /// per-state message shapes in <c>ThrowNotPresentable</c>. The states are
+    /// driven through the internal test seam — provoking a real
+    /// window-manager minimize, a failing vkCreateSwapchainKHR, a lost surface
+    /// or a lost device from CI is not portable.
     /// </summary>
     [Fact]
-    public void AcquireAndPresent_InMinimizedOrPoisoned_Throw()
+    public void AcquireAndPresent_InNonPresentableStates_Throw()
     {
         TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
         TestGate.RequireDriver();
@@ -430,7 +432,8 @@ public sealed unsafe class SwapchainTests
         var acquireSem = semaphores.AcquireBinary();
         var queue = device.GetQueue(family, 0);
 
-        foreach (var state in new[] { SwapchainState.Minimized, SwapchainState.Poisoned })
+        foreach (var state in new[] { SwapchainState.Minimized, SwapchainState.RecreateFailed,
+                                      SwapchainState.SurfaceLost, SwapchainState.DeviceLost })
         {
             swap.OverrideStateForTesting(state);
             var acquireEx = Assert.Throws<InvalidOperationException>(
@@ -446,11 +449,11 @@ public sealed unsafe class SwapchainTests
 
     /// <summary>
     /// Recreate after device loss fails fast with the cached DeviceLost
-    /// exception and poisons the swapchain — no drain or create is
-    /// attempted against the dead device (#120).
+    /// exception and moves the swapchain to DeviceLost — no drain or create
+    /// is attempted against the dead device (#120, member split in #222).
     /// </summary>
     [Fact]
-    public void Recreate_AfterDeviceLoss_ThrowsAndPoisons()
+    public void Recreate_AfterDeviceLoss_ThrowsAndMarksDeviceLost()
     {
         TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
         TestGate.RequireDriver();
@@ -470,7 +473,7 @@ public sealed unsafe class SwapchainTests
         TryRecreate(swap, surface, window.Width, window.Height, out VulkanException? ex);
         Assert.NotNull(ex);
         Assert.Equal(VkResult.VK_ERROR_DEVICE_LOST, ex.Result);
-        Assert.Equal(SwapchainState.Poisoned, swap.State);
+        Assert.Equal(SwapchainState.DeviceLost, swap.State);
 
         static void TryRecreate(Swapchain s, Surface surface, uint width, uint height, out VulkanException? thrown)
         {
@@ -482,6 +485,169 @@ public sealed unsafe class SwapchainTests
             }
             catch (VulkanException e) { thrown = e; }
         }
+    }
+
+    /// <summary>
+    /// The accept side of the inverted guard (#222): NeedsRecreate is advisory,
+    /// so acquire stays legal and must not throw
+    /// <see cref="InvalidOperationException"/>. Any AcquireResult — including
+    /// Timeout/NotReady on a zero-timeout poll — is a pass.
+    /// </summary>
+    [Fact]
+    public void AcquireAndPresent_InNeedsRecreate_DoNotThrow()
+    {
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out _);
+
+        var desc = new SwapchainDescription { Surface = surface, Width = window.Width, Height = window.Height };
+        using var swap = new Swapchain(device, in desc);
+        using var semaphores = new SemaphorePool(device);
+        var acquireSem = semaphores.AcquireBinary();
+
+        swap.OverrideStateForTesting(SwapchainState.NeedsRecreate);
+        // No Present here: presenting an image index that was not acquired is a
+        // validation error, and the guard under test is shared by both paths.
+        swap.AcquireNextImage(in acquireSem, TimeSpan.Zero, out _);
+
+        swap.OverrideStateForTesting(SwapchainState.Ready);
+        // A zero-timeout acquire can still succeed and leave the semaphore
+        // signalled; Vulkan has no host reset for a binary semaphore, so
+        // destroy rather than recycle it — the same choice FrameRing makes
+        // for a stale acquire signal.
+        semaphores.Discard(acquireSem);
+    }
+
+    /// <summary>
+    /// Recreate over a lost surface fails fast with the cached SurfaceLost
+    /// exception and leaves the state alone (#222): the wrapper accepts only
+    /// the Surface the swapchain was constructed with, so a same-surface retry
+    /// is unconditionally futile and says so rather than letting
+    /// vkGetPhysicalDeviceSurfaceCapabilitiesKHR decide per-driver.
+    /// </summary>
+    [Fact]
+    public void Recreate_AfterSurfaceLost_FailsFast()
+    {
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out _);
+
+        var desc = new SwapchainDescription { Surface = surface, Width = window.Width, Height = window.Height };
+        using var swap = new Swapchain(device, in desc);
+
+        swap.OverrideStateForTesting(SwapchainState.SurfaceLost);
+        // SwapchainDescription is a ref struct — no lambda capture; same
+        // wrapper-method shape as Recreate_AfterDeviceLoss above.
+        TryRecreate(swap, surface, window.Width, window.Height, out VulkanException? ex);
+        Assert.NotNull(ex);
+        Assert.Equal(VkResult.VK_ERROR_SURFACE_LOST_KHR, ex.Result);
+        Assert.Equal(SwapchainState.SurfaceLost, swap.State);
+
+        // Restore so Dispose runs against coherent state.
+        swap.OverrideStateForTesting(SwapchainState.Ready);
+
+        static void TryRecreate(Swapchain s, Surface surface, uint width, uint height, out VulkanException? thrown)
+        {
+            try
+            {
+                var retry = new SwapchainDescription { Surface = surface, Width = width, Height = height };
+                s.Recreate(in retry);
+                thrown = null;
+            }
+            catch (VulkanException e) { thrown = e; }
+        }
+    }
+
+    /// <summary>
+    /// The other half of the #222 split, and what makes it load-bearing:
+    /// RecreateFailed is the #112 retry state, so Recreate from it must run a
+    /// from-scratch create and succeed — exactly the case the pre-#222 single
+    /// failure member could not distinguish from the two terminal ones.
+    /// <para>Driven through <c>ForceRecreateFailedForTesting</c>, not
+    /// <c>OverrideStateForTesting</c>: the latter only flips the state word and
+    /// would leave a live handle behind, so the recreate under test would pass
+    /// a real <c>oldSwapchain</c> and prove nothing about the from-scratch
+    /// path. The seam destroys the handle and empties the per-image arrays the
+    /// way the real failure path does.</para>
+    /// </summary>
+    [Fact]
+    public void Recreate_AfterRecreateFailed_Succeeds()
+    {
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out uint family);
+
+        var desc = new SwapchainDescription { Surface = surface, Width = window.Width, Height = window.Height };
+        using var swap = new Swapchain(device, in desc);
+
+        swap.ForceRecreateFailedForTesting();
+        Assert.Equal(SwapchainState.RecreateFailed, swap.State);
+        Assert.Equal(0u, swap.ImageCount);
+
+        // The state guard must beat the per-image semaphore lookup: the array
+        // is empty in this shape, so a Present that indexed first would throw
+        // IndexOutOfRangeException instead of the documented
+        // InvalidOperationException.
+        var queue = device.GetQueue(family, 0);
+        var presentEx = Assert.Throws<InvalidOperationException>(() => swap.Present(queue, 0));
+        Assert.Contains(nameof(SwapchainState.RecreateFailed), presentEx.Message, StringComparison.Ordinal);
+
+        Assert.Equal(SwapchainState.Ready, swap.Recreate(in desc));
+    }
+
+    /// <summary>
+    /// Recreate classifies a failure on the driver's VkResult, not on "something
+    /// threw" (#222). <c>VK_ERROR_SURFACE_LOST_KHR</c> is a documented return of
+    /// every surface query and of <c>vkCreateSwapchainKHR</c>, and
+    /// driver-restart → OutOfDate → Recreate → SURFACE_LOST out of the capability
+    /// query is the likeliest route by which a real surface loss is first seen —
+    /// so it must reach the terminal SurfaceLost, not the retryable
+    /// RecreateFailed. Asserted on the classifier directly: no CI-portable way
+    /// exists to make a live driver lose a surface, and a test that only
+    /// exercised the fallback would prove the opposite of what matters.
+    /// </summary>
+    [Fact]
+    public void ClassifyFailure_MapsTerminalResults_AndFallsBackOtherwise()
+    {
+        // Constructed directly rather than raised through ThrowIfFailed: that
+        // path funnels VK_ERROR_DEVICE_LOST into Device.NotifyDeviceLossObserved,
+        // which marks every live device in the process lost and would poison the
+        // rest of the suite.
+        static VulkanException Failure(VkResult r) => new(r, "test");
+
+        Assert.Equal(
+            SwapchainState.SurfaceLost,
+            Swapchain.ClassifyFailure(Failure(VkResult.VK_ERROR_SURFACE_LOST_KHR), SwapchainState.RecreateFailed));
+        Assert.Equal(
+            SwapchainState.DeviceLost,
+            Swapchain.ClassifyFailure(Failure(VkResult.VK_ERROR_DEVICE_LOST), SwapchainState.RecreateFailed));
+        Assert.Equal(
+            SwapchainState.RecreateFailed,
+            Swapchain.ClassifyFailure(Failure(VkResult.VK_ERROR_OUT_OF_HOST_MEMORY), SwapchainState.RecreateFailed));
+        // The pre-drain capability query destroys nothing, so its fallback is
+        // "leave the state alone" rather than RecreateFailed.
+        Assert.Equal(
+            SwapchainState.Ready,
+            Swapchain.ClassifyFailure(Failure(VkResult.VK_ERROR_INITIALIZATION_FAILED), SwapchainState.Ready));
+        // A non-Vulkan throw carries no VkResult and takes the fallback too.
+        Assert.Equal(
+            SwapchainState.RecreateFailed,
+            Swapchain.ClassifyFailure(new InvalidOperationException(), SwapchainState.RecreateFailed));
     }
 
     // ---- Swapchain.GetImage (issue #219 D11) ----------------------------
