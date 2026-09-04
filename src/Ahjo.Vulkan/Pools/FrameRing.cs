@@ -9,7 +9,7 @@ namespace Ahjo.Vulkan;
 /// <see cref="StagingUploader"/>, two binary semaphores reserved for
 /// swapchain handoff (#24), the in-flight <see cref="Fence"/> that
 /// throttles the CPU when the GPU falls behind, and — when the ring is
-/// configured with descriptor-pool sizes — a per-slot
+/// constructed with a non-zero <c>descriptorMaxSets</c> — a per-slot
 /// <see cref="DescriptorSetPool"/> reset alongside the command pool.
 /// </summary>
 /// <remarks>
@@ -37,13 +37,32 @@ public sealed unsafe class FrameRing : IDisposable
     /// <summary>
     /// Creates the ring. <paramref name="framesInFlight"/> typically 2 or
     /// 3 — higher values increase latency without raising throughput.
-    /// Pass <paramref name="descriptorPoolSizes"/> + a non-zero
-    /// <paramref name="descriptorMaxSets"/> to give every slot its own
-    /// <see cref="DescriptorSetPool"/>; the pool is reset alongside the
-    /// command pool at the start of each rotation, so descriptor sets
-    /// allocated through <see cref="FrameContext.DescriptorSets"/> are
-    /// valid for exactly one frame.
+    /// <paramref name="descriptorMaxSets"/> is the descriptor-pool switch:
+    /// pass a non-zero value to give every slot its own
+    /// <see cref="DescriptorSetPool"/>, or leave it 0 (the default) for a
+    /// ring with no descriptor pools, in which case
+    /// <see cref="FrameContext.DescriptorSets"/> is <c>null</c>.
+    /// <paramref name="descriptorPoolSizes"/> is the per-slot pool template
+    /// and must be non-empty whenever the switch is on — see the
+    /// <see cref="ArgumentException"/> below for why an empty one is
+    /// refused. The pool is reset alongside the command pool at the start
+    /// of each rotation, so descriptor sets allocated through
+    /// <see cref="FrameContext.DescriptorSets"/> are valid for exactly one
+    /// frame.
     /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="framesInFlight"/> is 0, or
+    /// <paramref name="descriptorPoolSizes"/> is non-empty while
+    /// <paramref name="descriptorMaxSets"/> is 0.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="descriptorMaxSets"/> is non-zero while
+    /// <paramref name="descriptorPoolSizes"/> is empty. A budget-less pool
+    /// is legal at <see cref="DescriptorSetPool"/> (issue #191) but serves
+    /// only zero-binding descriptor set layouts, which is not a per-frame
+    /// shape; construct <see cref="DescriptorSetPool"/> directly if that is
+    /// genuinely wanted.
+    /// </exception>
     public FrameRing(
         Device device,
         uint   framesInFlight,
@@ -54,18 +73,26 @@ public sealed unsafe class FrameRing : IDisposable
     {
         ArgumentNullException.ThrowIfNull(device);
         if (framesInFlight == 0) throw new ArgumentOutOfRangeException(nameof(framesInFlight));
-        // "Pass both or neither" is FrameRing's OWN contract, deliberately
-        // independent of DescriptorSetPool's relaxed poolSizes guard (issue
-        // #191): an empty span means "this ring wants no descriptor pools", not
-        // "give every slot a budget-less pool". Redefining it would be a
-        // behaviour change on a per-frame path for a use case nobody has asked
-        // for — do not "harmonize" the two.
+        // descriptorMaxSets is this ring's descriptor-pool switch: 0 means "no
+        // per-slot pools". Zero is never a legal maxSets for a real pool
+        // (VUID-VkDescriptorPoolCreateInfo-descriptorPoolOverallocation-09227;
+        // the wrapper never enables the NV overallocation flag, and
+        // DescriptorSetPool rejects maxSets == 0 outright), so the value cannot
+        // collide with any other meaning. descriptorPoolSizes is only the
+        // template — its emptiness decides nothing here. The two guards keep the
+        // pair consistent.
         if (!descriptorPoolSizes.IsEmpty && descriptorMaxSets == 0)
             throw new ArgumentOutOfRangeException(nameof(descriptorMaxSets),
-                "descriptorMaxSets must be > 0 when descriptorPoolSizes is non-empty.");
+                "descriptorMaxSets must be > 0 when descriptorPoolSizes is non-empty — it is the " +
+                "switch that gives every slot its own DescriptorSetPool.");
         if (descriptorPoolSizes.IsEmpty && descriptorMaxSets != 0)
             throw new ArgumentException(
-                "descriptorMaxSets is set but descriptorPoolSizes is empty — pass both or neither.",
+                "descriptorPoolSizes must be non-empty when descriptorMaxSets is > 0. An empty template is " +
+                "legal at DescriptorSetPool — a pool with no per-type budget (issue #191) — but it can serve " +
+                "only descriptor set layouts with zero bindings, which is not a per-frame workload, and a " +
+                "misuse from a ring slot chains a leaked sub-pool per failed Acquire per frame on a driver " +
+                "that enforces per-type pool accounting (issue #187). Pass a template sized for the " +
+                "descriptors this ring's layouts declare, or construct DescriptorSetPool directly.",
                 nameof(descriptorPoolSizes));
 
         _device   = device;
@@ -255,13 +282,14 @@ public sealed unsafe class FrameRing : IDisposable
                 fencePool = new FencePool(device);
                 imgAcq    = semPool.AcquireBinary();
                 inFlight  = fencePool.Acquire(initiallySignaled: true);
-                // FrameRing's own opt-out sentinel: an empty span means this
-                // slot gets NO descriptor pool. DescriptorSetPool itself accepts
-                // an empty poolSizes template since issue #191 (a budget-less
-                // pool serving zero-binding layouts), but that is a different
-                // meaning at a different layer and this branch stays — see the
-                // matching comment on the constructor's argument guards.
-                descSets  = descriptorPoolSizes.IsEmpty
+                // descriptorMaxSets is the switch (see the ring constructor's
+                // guards): 0 means this slot gets no descriptor pool. The
+                // template's emptiness is not consulted — the constructor has
+                // already guaranteed it is non-empty whenever we reach the
+                // `new`, so DescriptorSetPool's empty-poolSizes state (issue
+                // #191, a pool with no per-type budget) is unreachable from
+                // FrameRing by construction rather than by convention.
+                descSets  = descriptorMaxSets == 0
                     ? null
                     : new DescriptorSetPool(device, descriptorMaxSets, descriptorPoolSizes);
 
