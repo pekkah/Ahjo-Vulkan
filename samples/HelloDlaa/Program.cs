@@ -924,13 +924,20 @@ internal static unsafe class Program
             Matrix4x4.CreateRotationY(seconds * 0.35f) *
             Matrix4x4.CreateRotationX(seconds * 0.22f);
 
+        // 40 degrees at distance 7 rather than a wider lens up close. The cube
+        // is 2 units on a side, so 3.46 corner to corner; at 60 degrees and
+        // distance 4.5 its near and far corners sit at w = 2.80 and w = 6.20,
+        // a 2.22x depth ratio ACROSS ONE OBJECT, and the foreshortening reads
+        // as if the cube were sheared. This pair puts them at 5.30 and 8.70
+        // (1.64x) while keeping the cube the same size on screen, so nothing
+        // downstream — framing, jitter phase count, render extents — moves.
         var view = Matrix4x4.CreateLookAt(
-            cameraPosition: new Vector3(0, 0, -4.5f),
+            cameraPosition: new Vector3(0, 0, -7.0f),
             cameraTarget:   Vector3.Zero,
             cameraUpVector: Vector3.UnitY);
 
         var proj = Matrix4x4.CreatePerspectiveFieldOfView(
-            fieldOfView:       MathF.PI / 3f,
+            fieldOfView:       40f * (MathF.PI / 180f),
             aspectRatio:       aspect,
             nearPlaneDistance: 0.1f,
             farPlaneDistance:  100f);

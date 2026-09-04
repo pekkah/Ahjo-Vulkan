@@ -163,12 +163,20 @@ comparing two captures four jitter phases apart):
 
 | Jitter sign | Mean abs. difference between the two frames | Gradient energy (sharpness) |
 |---|---|---|
-| As derived above | **0.028 / 255** — converged | **227** |
-| Negated | 0.300 / 255 — 11x more unstable | 193 |
+| As derived above | **0.029 / 255** — converged | **238** |
+| Negated | 0.088 / 255 — 3x more unstable | 223 |
 
 A wrong sign does not smear. It leaves fine detail permanently **shimmering**
-instead of resolving, and costs ~15% of the sharpness DLAA was supposed to buy.
+instead of resolving, and costs ~6% of the sharpness DLAA was supposed to buy.
 The derivation above is the measured-correct one.
+
+**How loud this test is depends on your content.** The same comparison on an
+earlier, much wider camera — where the cube's faces were far more oblique and so
+carried more sub-pixel detail — separated the two signs by 11x and 15% rather
+than 3x and 6%. The sign that wins does not change (the derivation is
+orientation-independent), but the margin does: run the check on the most
+detailed, most steeply angled content you have, or a wrong sign can hide inside
+the noise.
 
 ### 4.2 Motion vectors
 
@@ -219,12 +227,13 @@ resolution-scaling renderer is every resize.
 
 §3.5.1 warns that high-frequency textures may moiré under an aggressive bias.
 **Measured** (RTX 4070 Ti / 610.47, `HelloDlaa --mode dlaa` at 1600×900 over a
-4-texel checkerboard, on faces angled steeply away from the camera): at −1.00 the
-fine checker resolves into a **stable, crisp weave** — no moiré rosettes, no
-beat pattern, and no crawl (mean abs. difference between two frames four jitter
-phases apart on a frozen scene: 0.028/255). It is **67% sharper** than the same
-frame at bias 0 (gradient energy 227 vs 136), which is the detail the bias exists
-to recover. Ship the formula.
+4-texel checkerboard, on the faces angled furthest away from the camera): at
+−1.00 the fine checker resolves into a **stable, crisp weave** — no moiré
+rosettes, no beat pattern, and no crawl (mean abs. difference between two frames
+four jitter phases apart on a frozen scene: 0.029/255). It is **69% sharper**
+than the same frame at bias 0 (gradient energy 238 vs 141), where the same cells
+have largely merged into grey. That is exactly the detail the bias exists to
+recover. Ship the formula.
 
 ### 4.4 Depth and exposure
 
