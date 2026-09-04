@@ -146,6 +146,14 @@ public sealed unsafe class DescriptorSetPool : IDisposable
     /// a flag mismatch is undefined behaviour — hardware drivers tend to
     /// tolerate it, but SwiftShader SIGSEGVs inside vkAllocateDescriptorSets.
     /// </param>
+    /// <exception cref="ArgumentNullException"><paramref name="device"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="maxSets"/> is 0, or any <paramref name="poolSizes"/> entry
+    /// has <c>descriptorCount = 0</c>
+    /// (VUID-VkDescriptorPoolSize-descriptorCount-00302; issue #228). Pass an
+    /// <b>empty</b> <paramref name="poolSizes"/> span, not a zero-count entry, to
+    /// create a budget-less pool for zero-binding layouts.
+    /// </exception>
     public DescriptorSetPool(
         Device                              device,
         uint                                maxSets,
@@ -165,18 +173,32 @@ public sealed unsafe class DescriptorSetPool : IDisposable
         // holds 128 of them. O(n²) over a handful of entries, once, at setup.
         //
         // An EMPTY poolSizes span is legal (issue #191) and leaves this loop
-        // running zero times, so the total stays at its 0 seed — a value no
-        // non-empty template can produce, since
-        // VUID-VkDescriptorPoolSize-descriptorCount-00302 requires every entry's
-        // descriptorCount to be > 0. The Acquire pre-flight guard is *correct*
-        // at 0 rather than merely tolerant: it then rejects every variable
-        // descriptor count >= 1, which is the right answer for a pool that holds
-        // no descriptors of any type, and lets a count of 0 (i.e. the plain
-        // Acquire(layout) overload) through, which is the right answer for the
-        // zero-binding layout such a pool exists to serve.
+        // running zero times, so the total stays at its 0 seed. The guard below
+        // rejects any per-entry descriptorCount of 0
+        // (VUID-VkDescriptorPoolSize-descriptorCount-00302, issue #228), so a
+        // non-empty template can never produce that 0 seed — it is reachable
+        // only from an empty span. The Acquire pre-flight guard is therefore
+        // *correct* at 0 rather than merely tolerant: it then rejects every
+        // variable descriptor count >= 1, which is the right answer for a pool
+        // that holds no descriptors of any type, and lets a count of 0 (i.e. the
+        // plain Acquire(layout) overload) through, which is the right answer for
+        // the zero-binding layout such a pool exists to serve.
         uint maxPerTypeTotal = 0;
         for (int i = 0; i < poolSizes.Length; i++)
         {
+            // Every entry must declare at least one descriptor
+            // (VUID-VkDescriptorPoolSize-descriptorCount-00302). A zero entry is
+            // both a VUID violation at vkCreateDescriptorPool and a hole in the
+            // "0 seed means empty template" reasoning above, so reject it here at
+            // setup time rather than letting it reach the driver (issue #228). An
+            // empty template (poolSizes: []) — not a zero entry — is how a
+            // budget-less pool for zero-binding layouts is created (issue #191).
+            if (poolSizes[i].descriptorCount == 0)
+                throw new ArgumentOutOfRangeException(
+                    nameof(poolSizes),
+                    $"poolSizes[{i}] ({poolSizes[i].type}) has descriptorCount = 0. Every entry " +
+                    $"must declare at least one descriptor (VUID-VkDescriptorPoolSize-descriptorCount-00302). " +
+                    $"Pass an empty template (poolSizes: []) to create a budget-less pool for zero-binding layouts.");
             ulong total = 0;
             for (int j = 0; j < poolSizes.Length; j++)
             {
