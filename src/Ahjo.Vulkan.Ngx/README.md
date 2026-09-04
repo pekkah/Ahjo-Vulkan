@@ -55,6 +55,13 @@ naming the expected file and every directory searched. There is no silent
 fallback, and there is no software path: DLSS runs inside the NVIDIA display
 driver.
 
+The full consumer contract — where to get the DLL, the NVIDIA licence
+obligations that land on **your** application, and the renderer conventions
+(jitter sign, motion-vector direction and space, mip bias, `Reset`, image
+layouts) that this wrapper cannot check — is
+[`docs/ngx-notes.md`](https://github.com/pekkah/Ahjo-Vulkan/blob/main/docs/ngx-notes.md).
+`samples/HelloDlaa` is a worked call site for all of it.
+
 ## Three contracts the wrapper holds, and one it cannot
 
 - **The view/image/range triple cannot disagree.** `NgxImage.CreateView` builds
