@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Ahjo.Vulkan.Native;
 
 namespace Ahjo.Vulkan;
@@ -254,9 +255,27 @@ public sealed unsafe class Swapchain : IDisposable
     /// <see cref="SwapchainState.Ready"/> on success,
     /// <see cref="SwapchainState.Minimized"/> when the surface reports a
     /// zero extent (nothing is drained or destroyed — retry when the
-    /// window is restored). A create failure sets
-    /// <see cref="SwapchainState.Poisoned"/> and rethrows.
+    /// window is restored). A failure rethrows after setting the state its
+    /// <see cref="VkResult"/> implies: <see cref="SwapchainState.SurfaceLost"/>
+    /// for <c>VK_ERROR_SURFACE_LOST_KHR</c> and
+    /// <see cref="SwapchainState.DeviceLost"/> for <c>VK_ERROR_DEVICE_LOST</c>
+    /// — both documented return codes of the surface queries and the create
+    /// this makes, and both terminal — otherwise
+    /// <see cref="SwapchainState.RecreateFailed"/>, from which calling
+    /// <c>Recreate</c> again is the documented recovery. A failure that lands
+    /// before anything is destroyed — the capability query or the drain —
+    /// leaves the state untouched outside those two terminal codes, and the
+    /// swapchain, its views and its semaphores all stay current.
+    /// Entering <c>Recreate</c> on a swapchain already in
+    /// <see cref="SwapchainState.SurfaceLost"/>, or with
+    /// <see cref="Device.IsLost"/> set, throws <see cref="VulkanException"/>
+    /// without changing the state — both are terminal (#222).
     /// </returns>
+    /// <exception cref="VulkanException">
+    /// The device is lost (<c>VK_ERROR_DEVICE_LOST</c>), the swapchain is
+    /// already in <see cref="SwapchainState.SurfaceLost"/>
+    /// (<c>VK_ERROR_SURFACE_LOST_KHR</c>), or the create itself failed.
+    /// </exception>
     public SwapchainState Recreate(in SwapchainDescription desc, SwapchainSyncCallback? syncBeforeDestroy = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -269,9 +288,21 @@ public sealed unsafe class Swapchain : IDisposable
         // the failure path allocation-free.
         if (_device.IsLost)
         {
-            _state = SwapchainState.Poisoned;
+            _state = SwapchainState.DeviceLost;
             ResultExtensions.ThrowDeviceLost();
         }
+
+        // A lost surface is terminal for this Swapchain (#222). Recreate
+        // accepts only the Surface this object was constructed with (see the
+        // ArgumentException above), so the only surface it would retry over is
+        // the dead one. Fail fast with the driver's own verdict instead of
+        // letting vkGetPhysicalDeviceSurfaceCapabilitiesKHR decide per-driver
+        // whether this spins or throws. Recovery is a new Surface + a new
+        // Swapchain; Dispose stays legal. Checked AFTER device loss, which is
+        // the wider failure. _state is left as SurfaceLost — the call
+        // changes nothing.
+        if (_state == SwapchainState.SurfaceLost)
+            ResultExtensions.ThrowSurfaceLost();
 
         // Minimize check BEFORE the drain (#110): a minimized window must
         // not pay a vkDeviceWaitIdle per retry, and nothing may be
@@ -279,8 +310,24 @@ public sealed unsafe class Swapchain : IDisposable
         // for the next attempt. CreateOrRecreate re-checks post-drain in
         // case the window minimizes while the drain blocks.
         VkSurfaceCapabilitiesKHR caps = default;
-        Vk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-            _device.PhysicalDevice.Handle, _surface.Handle, &caps).ThrowIfFailed();
+        try
+        {
+            Vk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+                _device.PhysicalDevice.Handle, _surface.Handle, &caps).ThrowIfFailed();
+        }
+        catch (Exception e)
+        {
+            // This query is the most likely place a real surface loss is first
+            // observed (#222): driver restart → OUT_OF_DATE from present →
+            // caller calls Recreate → caps query returns
+            // VK_ERROR_SURFACE_LOST_KHR. Classify on the driver's verdict so it
+            // lands in the terminal state and the fast-fail above can fire on
+            // the next call. Nothing has been destroyed at this point, so a
+            // non-terminal failure leaves the state exactly as it was — the
+            // swapchain, its views and its semaphores are all still current.
+            _state = ClassifyFailure(e, fallback: _state);
+            throw;
+        }
         if (IsZeroExtent(ComputeExtent(in caps, desc.Width, desc.Height)))
         {
             _state = SwapchainState.Minimized;
@@ -288,10 +335,31 @@ public sealed unsafe class Swapchain : IDisposable
         }
 
         bool fullIdle = syncBeforeDestroy is null;
-        if (fullIdle)
-            Vk.vkDeviceWaitIdle(_device.Handle).ThrowIfFailed();
-        else
-            syncBeforeDestroy!();
+        try
+        {
+            if (fullIdle)
+                Vk.vkDeviceWaitIdle(_device.Handle).ThrowIfFailed();
+            else
+                syncBeforeDestroy!();
+        }
+        catch (Exception e)
+        {
+            // The drain is the one place a device loss can be observed that
+            // neither fast-fail above nor the create below would catch:
+            // vkDeviceWaitIdle documents VK_ERROR_DEVICE_LOST, and the
+            // caller's callback — FrameRing.WaitForInFlightFences and its
+            // equivalents — throws the same code out of the fence wait.
+            // Without this the state would stay Ready/NeedsRecreate after a
+            // real loss and the next AcquireNextImage would issue
+            // vkAcquireNextImageKHR against a dead device. Nothing has been
+            // destroyed here either, so the fallback is the caps query's:
+            // leave the state alone unless the driver named a terminal cause.
+            // Neither call can return VK_ERROR_SURFACE_LOST_KHR, but the
+            // classifier is shared rather than special-cased — a callback is
+            // caller code and may surface anything.
+            _state = ClassifyFailure(e, fallback: _state);
+            throw;
+        }
         // A full wait-idle proves present completion device-wide — the
         // point at which previously retired handles/semaphores (#111) are
         // safe to destroy.
@@ -304,7 +372,7 @@ public sealed unsafe class Swapchain : IDisposable
         {
             _state = CreateOrRecreate(in desc, oldSwapchain: old);
         }
-        catch
+        catch (Exception e)
         {
             // CreateOrRecreate assigns _handle before LoadImagesAndViews;
             // a throw from the image/view step would otherwise orphan the
@@ -321,7 +389,13 @@ public sealed unsafe class Swapchain : IDisposable
             _handle        = null;
             _renderingDone = [];
             RetireOrDestroy(old, oldSems, fullIdle);
-            _state = SwapchainState.Poisoned;
+            // RecreateFailed is the *fallback*, not the verdict: every surface
+            // query CreateOrRecreate makes — caps, formats, present modes,
+            // surface support — and vkCreateSwapchainKHR itself all document
+            // VK_ERROR_SURFACE_LOST_KHR as a return code, and filing those
+            // under the retryable RecreateFailed would make the terminal
+            // states unreachable from here (#222).
+            _state = ClassifyFailure(e, fallback: SwapchainState.RecreateFailed);
             throw;
         }
 
@@ -338,6 +412,34 @@ public sealed unsafe class Swapchain : IDisposable
         RetireOrDestroy(old, oldSems, fullIdle);
         return _state;
     }
+
+    /// <summary>
+    /// The lifecycle state a throw out of a surface query or a swapchain
+    /// create implies (#222). Classifies on the driver's
+    /// <see cref="VkResult"/>, never on "something threw":
+    /// <c>VK_ERROR_SURFACE_LOST_KHR</c> and <c>VK_ERROR_DEVICE_LOST</c> are
+    /// terminal wherever they are observed, and both are documented return
+    /// codes of every call <see cref="Recreate"/> makes —
+    /// <c>vkGetPhysicalDeviceSurface{Capabilities,Formats,PresentModes,Support}KHR</c>
+    /// and <c>vkCreateSwapchainKHR</c>. Anything else (and any non-Vulkan
+    /// exception) gets <paramref name="fallback"/>, which is what a
+    /// non-terminal failure means at that particular call site: pass
+    /// <see cref="SwapchainState.RecreateFailed"/> once the old swapchain has
+    /// been retired, and the current state to leave it alone before that.
+    /// </summary>
+    /// <remarks>
+    /// <c>internal</c> rather than <c>private</c> so the mapping is directly
+    /// testable: a real <c>VK_ERROR_SURFACE_LOST_KHR</c> out of a caps query
+    /// cannot be provoked from CI, and asserting the classifier is a more
+    /// honest substitute than a test that only proves the fallback.
+    /// </remarks>
+    internal static SwapchainState ClassifyFailure(Exception e, SwapchainState fallback)
+        => (e as VulkanException)?.Result switch
+        {
+            VkResult.VK_ERROR_SURFACE_LOST_KHR => SwapchainState.SurfaceLost,
+            VkResult.VK_ERROR_DEVICE_LOST      => SwapchainState.DeviceLost,
+            _                                  => fallback,
+        };
 
     /// <summary>
     /// Destroy the retired swapchain + its per-image semaphores when
@@ -414,9 +516,11 @@ public sealed unsafe class Swapchain : IDisposable
     /// <summary>
     /// Shared result mapping + state transitions for the acquire/present
     /// pair (#120): <c>OutOfDate</c> → <see cref="SwapchainState.NeedsRecreate"/>,
-    /// <c>SurfaceLost</c> → <see cref="SwapchainState.Poisoned"/> (a
-    /// same-surface <see cref="Recreate"/> cannot succeed),
-    /// <c>DEVICE_LOST</c> → mark the device + poison, then throw.
+    /// <c>SurfaceLost</c> → <see cref="SwapchainState.SurfaceLost"/> (a
+    /// same-surface <see cref="Recreate"/> cannot succeed, and after #222 it
+    /// says so by throwing),
+    /// <c>DEVICE_LOST</c> → mark the device +
+    /// <see cref="SwapchainState.DeviceLost"/>, then throw.
     /// <c>Suboptimal</c> deliberately leaves the state untouched — the
     /// image is presentable per spec; recreating stays the caller's choice.
     /// <c>TIMEOUT</c>/<c>NOT_READY</c> are in <c>vkAcquireNextImageKHR</c>'s
@@ -435,7 +539,7 @@ public sealed unsafe class Swapchain : IDisposable
                 _state = SwapchainState.NeedsRecreate;
                 return AcquireResult.OutOfDate;
             case VkResult.VK_ERROR_SURFACE_LOST_KHR:
-                _state = SwapchainState.Poisoned;
+                _state = SwapchainState.SurfaceLost;
                 return AcquireResult.SurfaceLost;
             case VkResult.VK_TIMEOUT when fromAcquire:
                 return AcquireResult.Timeout;
@@ -443,7 +547,7 @@ public sealed unsafe class Swapchain : IDisposable
                 return AcquireResult.NotReady;
             case VkResult.VK_ERROR_DEVICE_LOST:
                 _device.MarkLost();
-                _state = SwapchainState.Poisoned;
+                _state = SwapchainState.DeviceLost;
                 throw new VulkanException(r,
                     $"{fn}: VK_ERROR_DEVICE_LOST. The VkDevice is no longer usable; tear down and recreate the device + every dependent resource.");
             default:
@@ -451,20 +555,37 @@ public sealed unsafe class Swapchain : IDisposable
         }
     }
 
-    // Guards the "loop forever re-acquiring a dead swapchain" failure mode
-    // at the API boundary: in Minimized there is no usable swapchain for
-    // this frame; in Poisoned no handle is held at all. NeedsRecreate stays
+    // Guards the "loop forever re-acquiring a dead swapchain" failure mode at
+    // the API boundary. Written as "not (Ready or NeedsRecreate)" rather than a
+    // positive list of bad states (#222): a state added later is
+    // non-presentable until someone proves otherwise. NeedsRecreate stays
     // advisory — acquire/present remain legal and keep reporting OutOfDate.
+    // Each rejected state gets its own message: their recoveries differ, and
+    // none of them can assume a live handle (whether one is held depends on
+    // where the state was entered, not on which state it is).
     private void ThrowIfNotPresentable()
     {
-        if (_state is SwapchainState.Minimized or SwapchainState.Poisoned)
-        {
-            throw new InvalidOperationException(
-                _state == SwapchainState.Minimized
-                    ? "Swapchain is in the Minimized state (zero-extent surface). Skip rendering, poll the window size, and call Recreate when it is restored."
-                    : "Swapchain is in the Poisoned state (a Recreate failed, or the surface/device was lost). Call Recreate to attempt a from-scratch create, or Dispose.");
-        }
+        if (_state is not (SwapchainState.Ready or SwapchainState.NeedsRecreate))
+            ThrowNotPresentable(_state);
     }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowNotPresentable(SwapchainState state)
+        => throw new InvalidOperationException(state switch
+        {
+            SwapchainState.Minimized =>
+                "Swapchain is in the Minimized state (zero-extent surface). Skip rendering, poll the window size, and call Recreate when it is restored.",
+            SwapchainState.RecreateFailed =>
+                "Swapchain is in the RecreateFailed state: a Recreate threw after the old swapchain was retired, so no swapchain handle is held. Call Recreate again to attempt a from-scratch create, or Dispose.",
+            SwapchainState.SurfaceLost =>
+                "Swapchain is in the SurfaceLost state: VK_ERROR_SURFACE_LOST_KHR was reported for the VkSurfaceKHR this swapchain was built over. This is terminal — Recreate over the same surface cannot succeed. Dispose this swapchain, rebuild the Surface, and construct a new Swapchain.",
+            SwapchainState.DeviceLost =>
+                "Swapchain is in the DeviceLost state: the VkDevice was lost. This is terminal — dispose every dependent resource, dispose the Device, and rebuild from a fresh PhysicalDevice.",
+            // Unreachable from the guard above, which rejects only the four
+            // states named here. Reachable if a member is ever added to
+            // SwapchainState without updating this switch.
+            _ => $"Swapchain is not presentable (state: {state}).",
+        });
 
     /// <summary>
     /// Presents <paramref name="imageIndex"/> on <paramref name="queue"/>,
@@ -480,7 +601,19 @@ public sealed unsafe class Swapchain : IDisposable
     /// present can report is documented there.
     /// </remarks>
     public AcquireResult Present(Queue queue, uint imageIndex)
-        => Present(queue, imageIndex, in _renderingDone[imageIndex]);
+    {
+        // The guards run here, before the index — in the states that reject a
+        // present the per-image semaphore array is empty (Recreate's failure
+        // path clears it; a construction-time Minimized never allocates it), so
+        // indexing first would throw IndexOutOfRangeException instead of the
+        // InvalidOperationException this API documents. The forwarded call
+        // repeats all three checks: three predictable, allocation-free
+        // branches against a wrong exception type on the real failure shape.
+        ArgumentNullException.ThrowIfNull(queue);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfNotPresentable();
+        return Present(queue, imageIndex, in _renderingDone[imageIndex]);
+    }
 
     /// <summary>
     /// Presents <paramref name="imageIndex"/> on <paramref name="queue"/>
@@ -511,7 +644,7 @@ public sealed unsafe class Swapchain : IDisposable
     /// <para><c>VK_ERROR_DEVICE_LOST</c> is outside
     /// <see cref="AcquireResult"/> entirely, on this path and on the acquire
     /// path alike: the device is marked lost, the swapchain moves to
-    /// <see cref="SwapchainState.Poisoned"/>, and a
+    /// <see cref="SwapchainState.DeviceLost"/>, and a
     /// <see cref="VulkanException"/> is thrown.</para>
     /// </remarks>
     public AcquireResult Present(Queue queue, uint imageIndex, in BinarySemaphore waitSemaphore)
@@ -556,9 +689,33 @@ public sealed unsafe class Swapchain : IDisposable
         _semaphorePool.Dispose();
     }
 
-    // Test seam (InternalsVisibleTo): drive the Minimized/Poisoned guard
-    // paths without a real window-manager event or a failing driver call.
+    // Test seam (InternalsVisibleTo): drive the non-presentable guard paths
+    // without a real window-manager event, a failing driver call, or a lost
+    // surface/device.
     internal void OverrideStateForTesting(SwapchainState state) => _state = state;
+
+    // Test seam (InternalsVisibleTo): reproduce the *shape* Recreate's failure
+    // path leaves behind, not just its state word — handle destroyed and
+    // nulled, per-image semaphores discarded, image/view arrays emptied
+    // (#112/#222). OverrideStateForTesting alone flips `_state` and leaves a
+    // live handle behind, so a test written on it exercises an ordinary
+    // recreate with a real oldSwapchain rather than the from-scratch create
+    // that RecreateFailed actually documents. Waits for idle first: the
+    // handle being destroyed may still have presents in flight, which is
+    // exactly what the fullIdle branch of RetireOrDestroy proves.
+    internal void ForceRecreateFailedForTesting()
+    {
+        Vk.vkDeviceWaitIdle(_device.Handle).ThrowIfFailed();
+        DestroyViews();
+        DiscardRenderingDoneSemaphores();
+        FlushRetired();
+        if (_handle != null)
+        {
+            Vk.vkDestroySwapchainKHR(_device.Handle, _handle, null);
+            _handle = null;
+        }
+        _state = SwapchainState.RecreateFailed;
+    }
 
     private SwapchainState CreateOrRecreate(in SwapchainDescription desc, VkSwapchainKHR_T* oldSwapchain)
     {

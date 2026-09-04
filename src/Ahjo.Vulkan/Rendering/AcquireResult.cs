@@ -15,7 +15,9 @@ namespace Ahjo.Vulkan;
 /// <see cref="SurfaceLost"/> leaves the swapchain in a state the API-boundary
 /// guard rejects, so a caller that treats <i>that</i> one as noise will hit
 /// <see cref="System.InvalidOperationException"/> out of the next acquire or
-/// present (#220):</para>
+/// present (#220, #222). Since #222 the state it lands in names its own cause,
+/// so a frame loop can make the stop-or-recreate decision from
+/// <c>Swapchain.State</c> alone:</para>
 /// <list type="table">
 ///   <listheader>
 ///     <term>Result</term>
@@ -47,9 +49,12 @@ namespace Ahjo.Vulkan;
 ///   </item>
 ///   <item>
 ///     <term><see cref="SurfaceLost"/></term>
-///     <term><see cref="SwapchainState.Poisoned"/></term>
+///     <term><see cref="SwapchainState.SurfaceLost"/></term>
 ///     <term><b>Terminal.</b> Rebuild the <c>VkSurfaceKHR</c> as well, or stop.
-///     <b>Do not retry over the same surface</b> — see the member docs.</term>
+///     <b>Do not retry over the same surface</b> — see the member docs. The
+///     state alone is now enough to make that call at the top of a frame loop
+///     (#222), so this no longer has to be handled at every acquire and present
+///     site.</term>
 ///   </item>
 ///   <item>
 ///     <term><see cref="Timeout"/></term>
@@ -86,7 +91,7 @@ public enum AcquireResult
     /// recreate without having to inspect the underlying
     /// <c>VkResult</c>.
     /// <para>The swapchain has <b>already</b> moved to
-    /// <see cref="SwapchainState.Poisoned"/> by the time this is returned, and
+    /// <see cref="SwapchainState.SurfaceLost"/> by the time this is returned, and
     /// it is returned <i>without</i> throwing. A caller that merely
     /// <c>continue</c>s its frame loop will therefore get an
     /// <see cref="System.InvalidOperationException"/> out of the <i>next</i>
