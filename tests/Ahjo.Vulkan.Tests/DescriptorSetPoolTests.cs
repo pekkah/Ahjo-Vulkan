@@ -227,6 +227,39 @@ public sealed unsafe class DescriptorSetPoolTests
     }
 
     /// <summary>
+    /// Issue #228: a <c>VkDescriptorPoolSize</c> entry with
+    /// <c>descriptorCount = 0</c> violates
+    /// <c>VUID-VkDescriptorPoolSize-descriptorCount-00302</c> and breaks the
+    /// pool's "0 per-type total means empty template" reasoning. The ctor
+    /// rejects it fail-early, before <c>CreatePool()</c>, and the exception
+    /// names <c>poolSizes</c>, the offending index, and its type. An empty
+    /// template (issue #191) — not a zero entry — is the way to ask for a
+    /// budget-less pool, so the message points there.
+    /// </summary>
+    [Fact]
+    public void Pool_Ctor_ZeroDescriptorCount_Throws()
+    {
+        TestGate.RequireDriver();
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+
+        // A zero entry sitting after a valid one: the guard must fire on index 1
+        // and quote it, not merely reject "some entry".
+        VkDescriptorPoolSize[] sizes =
+        [
+            new VkDescriptorPoolSize { type = VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, descriptorCount = 4 },
+            new VkDescriptorPoolSize { type = VkDescriptorType.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, descriptorCount = 0 },
+        ];
+
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(
+            () => new DescriptorSetPool(device, maxSets: 4, sizes));
+        Assert.Equal("poolSizes", ex.ParamName);
+        Assert.Contains("poolSizes[1]", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("STORAGE_BUFFER", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Issue #191: an empty <c>poolSizes</c> template is legal — there is no
     /// <c>VUID-VkDescriptorPoolCreateInfo-poolSizeCount-arraylength</c>, and
     /// <c>VUID-…-pPoolSizes-parameter</c> excuses the array when
