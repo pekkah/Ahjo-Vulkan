@@ -38,7 +38,8 @@ public sealed class FrameContext : IDisposable
 
     /// <summary>
     /// Per-slot descriptor-set pool, or <c>null</c> when the ring was
-    /// constructed without descriptor-pool sizes. <see cref="FrameRing.BeginFrame"/>
+    /// constructed with <c>descriptorMaxSets: 0</c> (the default).
+    /// <see cref="FrameRing.BeginFrame"/>
     /// calls <see cref="DescriptorSetPool.Reset"/> on rotation, so any
     /// <see cref="DescriptorSet"/> acquired here is valid for exactly one
     /// frame — re-acquire after every <see cref="FrameRing.BeginFrame"/>.

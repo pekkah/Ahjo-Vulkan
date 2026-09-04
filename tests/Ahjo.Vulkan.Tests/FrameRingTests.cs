@@ -128,7 +128,7 @@ public sealed unsafe class FrameRingTests
     }
 
     [Fact]
-    public void DescriptorSets_Default_NullWhenNotConfigured()
+    public void DescriptorSets_Null_When_MaxSets_Is_Zero()
     {
         TestGate.RequireDriver();
 
@@ -139,10 +139,18 @@ public sealed unsafe class FrameRingTests
 
         using var frame = ring.BeginFrame();
         Assert.Null(frame.DescriptorSets);
+
+        // Same thing spelled out: it is descriptorMaxSets == 0 — the switch —
+        // that produces the null pool, not the empty template.
+        using var explicitRing = new FrameRing(device, framesInFlight: 2, queueFamily: family,
+            descriptorPoolSizes: default, descriptorMaxSets: 0);
+
+        using var explicitFrame = explicitRing.BeginFrame();
+        Assert.Null(explicitFrame.DescriptorSets);
     }
 
     [Fact]
-    public void DescriptorSets_Mismatched_Args_Throw()
+    public void DescriptorSets_Template_Without_MaxSets_Throws()
     {
         TestGate.RequireDriver();
 
@@ -153,13 +161,69 @@ public sealed unsafe class FrameRingTests
         [
             new VkDescriptorPoolSize { type = VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, descriptorCount = 1 },
         ];
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(() =>
             new FrameRing(device, framesInFlight: 2, queueFamily: family,
                 descriptorPoolSizes: sizes, descriptorMaxSets: 0));
+        Assert.Equal("descriptorMaxSets", ex.ParamName);
+    }
 
-        Assert.Throws<ArgumentException>(() =>
+    [Fact]
+    public void DescriptorSets_MaxSets_Without_Template_Throws()
+    {
+        TestGate.RequireDriver();
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+
+        // ParamName is the assertion that actually pins which guard fired:
+        // ArgumentOutOfRangeException derives from ArgumentException, so type
+        // alone is a weak signal if the two guards ever swapped. The explicit
+        // IsType below is belt-and-braces — xUnit's Throws<T> is already
+        // exact-type — and guards against a future switch to ThrowsAny<T>.
+        var ex = Assert.Throws<ArgumentException>(() =>
             new FrameRing(device, framesInFlight: 2, queueFamily: family,
                 descriptorPoolSizes: default, descriptorMaxSets: 4));
+        Assert.IsType<ArgumentException>(ex);
+        Assert.Equal("descriptorPoolSizes", ex.ParamName);
+    }
+
+    [Fact]
+    public void DescriptorSets_EmptyArray_Rejected_Like_Default()
+    {
+        TestGate.RequireDriver();
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+
+        // Array.Empty<T>() and `default` are on opposite sides of a null-ref
+        // test but the same side of IsEmpty; the guard must read IsEmpty.
+        var ex = Assert.Throws<ArgumentException>(() =>
+            new FrameRing(device, framesInFlight: 2, queueFamily: family,
+                descriptorPoolSizes: Array.Empty<VkDescriptorPoolSize>(), descriptorMaxSets: 4));
+        Assert.IsType<ArgumentException>(ex);
+        Assert.Equal("descriptorPoolSizes", ex.ParamName);
+    }
+
+    [Fact]
+    public void DescriptorSets_Pool_Created_When_MaxSets_NonZero()
+    {
+        TestGate.RequireDriver();
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out uint family);
+
+        VkDescriptorPoolSize[] sizes =
+        [
+            new VkDescriptorPoolSize { type = VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, descriptorCount = 4 },
+        ];
+        using var ring = new FrameRing(device, framesInFlight: 2, queueFamily: family,
+            descriptorPoolSizes: sizes, descriptorMaxSets: 4);
+
+        using var frame = ring.BeginFrame();
+        DescriptorSetPool? pool = frame.DescriptorSets;
+        Assert.NotNull(pool);
+        Assert.Equal(1, pool.PoolCount);
+        Assert.Equal(0, pool.AllocatedCount);
     }
 
     [Fact]
