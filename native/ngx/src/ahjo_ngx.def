@@ -1,0 +1,44 @@
+; Windows export list for ahjo_ngx.dll. This is the ONLY thing that makes a
+; symbol visible: neither ahjo_ngx.h nor NVIDIA's headers carry
+; __declspec(dllexport), and CMake's WINDOWS_EXPORT_ALL_SYMBOLS does not help
+; because it computes its list from the target's own object files, while 20 of
+; these 27 names come from the linked static client library.
+;
+; Naming an entry here also makes the linker treat it as a root, which is what
+; pulls the corresponding object out of nvsdk_ngx_s.lib.
+;
+; This list is checked against ahjo_ngx.map and against the generated
+; P/Invokes by NgxExportDriftTests. Add a name here and there, or the test
+; fails.
+;
+; Keep the formatting regular - one name per line, indented - because the test
+; parses this file.
+LIBRARY ahjo_ngx
+EXPORTS
+    NVSDK_NGX_Parameter_SetULL
+    NVSDK_NGX_Parameter_SetF
+    NVSDK_NGX_Parameter_SetD
+    NVSDK_NGX_Parameter_SetUI
+    NVSDK_NGX_Parameter_SetI
+    NVSDK_NGX_Parameter_SetVoidPointer
+    NVSDK_NGX_Parameter_GetULL
+    NVSDK_NGX_Parameter_GetF
+    NVSDK_NGX_Parameter_GetD
+    NVSDK_NGX_Parameter_GetUI
+    NVSDK_NGX_Parameter_GetI
+    NVSDK_NGX_Parameter_GetVoidPointer
+    NVSDK_NGX_VULKAN_Shutdown1
+    NVSDK_NGX_VULKAN_AllocateParameters
+    NVSDK_NGX_VULKAN_GetCapabilityParameters
+    NVSDK_NGX_VULKAN_DestroyParameters
+    NVSDK_NGX_VULKAN_GetScratchBufferSize
+    NVSDK_NGX_VULKAN_CreateFeature1
+    NVSDK_NGX_VULKAN_ReleaseFeature
+    NVSDK_NGX_VULKAN_EvaluateFeature_C
+    ahjo_ngx_version_api
+    ahjo_ngx_layout
+    ahjo_ngx_result_to_utf8
+    ahjo_ngx_vulkan_init_utf8
+    ahjo_ngx_vulkan_get_feature_requirements_utf8
+    ahjo_ngx_vulkan_get_feature_instance_extension_requirements_utf8
+    ahjo_ngx_vulkan_get_feature_device_extension_requirements_utf8

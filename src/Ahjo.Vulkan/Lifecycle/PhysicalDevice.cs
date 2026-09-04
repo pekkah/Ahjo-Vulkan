@@ -22,7 +22,23 @@ namespace Ahjo.Vulkan;
 public sealed unsafe class PhysicalDevice
 {
     internal readonly VkPhysicalDevice_T* Handle;
-    internal readonly Instance            Instance;
+
+    /// <summary>
+    /// The <see cref="Instance"/> this physical device was enumerated from.
+    /// </summary>
+    /// <remarks>
+    /// Public (issue #218) because a satellite package has to hand a
+    /// third-party API the <c>VkInstance</c> + <c>VkPhysicalDevice</c> +
+    /// <c>VkDevice</c> triple, and the edge from a device back to its instance
+    /// was the one hop with no public path: <see cref="Instance.RawHandle"/>
+    /// is public, but nothing reached the <see cref="Instance"/> itself.
+    /// <c>Ahjo.Vulkan.Ngx</c> is the first such consumer —
+    /// <c>NgxContext.Create(Device, …)</c> takes a device alone precisely
+    /// because this field exists, which makes "an instance the device did not
+    /// come from" unrepresentable rather than merely documented. The instance's
+    /// own handle stays <c>internal</c>, so nothing further leaks.
+    /// </remarks>
+    public readonly Instance Instance;
 
     internal PhysicalDevice(Instance instance, VkPhysicalDevice_T* handle)
     {
@@ -507,6 +523,18 @@ public sealed unsafe class PhysicalDevice
 
         ValidateQueues(desc.Queues);
 
+        // The one place where "VMA wants a budget" and "the device enables the
+        // extension that supplies it" are both in scope. VMA silently degrades
+        // to its own estimates when the extension is missing, so without this
+        // check the mistake surfaces only as numbers that look plausible and
+        // are wrong (issue #218).
+        if (AhjoValidation.IsEnabled && desc.Allocator.EnableMemoryBudget && !ContainsExtension(desc.Extensions, "VK_EXT_memory_budget"u8))
+        {
+            AhjoValidation.Fail("PhysicalDevice.CreateDevice",
+                "AllocatorDescription.EnableMemoryBudget is set but VK_EXT_memory_budget is not in DeviceDescription.Extensions. " +
+                "VMA needs the device extension enabled at vkCreateDevice time; add VulkanExtensions.ExtMemoryBudget to the list.");
+        }
+
         int totalQueues = 0;
         for (int i = 0; i < desc.Queues.Length; i++)
             totalQueues += (int)desc.Queues[i].Count;
@@ -639,7 +667,7 @@ public sealed unsafe class PhysicalDevice
         try
         {
             Queue[] queues = new Queue[totalQueues];
-            var device = new Device(raw, physicalDevice: this, queues, desc.Extensions);
+            var device = new Device(raw, physicalDevice: this, queues, desc.Extensions, desc.Allocator);
             int qSlot = 0;
             for (int i = 0; i < desc.Queues.Length; i++)
             {
@@ -658,6 +686,28 @@ public sealed unsafe class PhysicalDevice
             Vk.vkDestroyDevice(raw, null);
             throw;
         }
+    }
+
+    /// <summary>
+    /// <see langword="true"/> when <paramref name="extensions"/> contains
+    /// <paramref name="name"/>. Byte-wise comparison straight off each
+    /// <see cref="Utf8Name.Ptr"/> — no decoding, no allocation. Cold path
+    /// (device creation, validation on), over a handful of names.
+    /// </summary>
+    internal static bool ContainsExtension(ReadOnlySpan<Utf8Name> extensions, ReadOnlySpan<byte> name)
+    {
+        for (int i = 0; i < extensions.Length; i++)
+        {
+            sbyte* p = extensions[i].Ptr;
+            if (p == null) continue;
+
+            int j = 0;
+            while (j < name.Length && (byte)p[j] == name[j]) j++;
+            // Matched every byte AND the candidate ends there: "VK_EXT_memory"
+            // must not match a longer name that starts with it.
+            if (j == name.Length && p[j] == 0) return true;
+        }
+        return false;
     }
 
     /// <summary>

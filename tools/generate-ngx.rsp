@@ -1,0 +1,295 @@
+# ClangSharp configuration for src/Ahjo.Vulkan.Ngx.Native/Generated/.
+#
+# READ THIS BEFORE EDITING. This rsp deviates from the house style in three
+# places, and every one of them was forced by a measured failure rather than
+# chosen. The comment blocks below say which. In particular: do not "restore"
+# strip-enum-member-type-name for consistency with the other rsps, and do not
+# drop generate-macro-bindings as an optimisation.
+#
+# The parse root is OUR header, not NVIDIA's. native/ngx/src/ahjo_ngx.h
+# includes <vulkan/vulkan.h> and then nvsdk_ngx_vk.h (the NGX headers do not
+# include Vulkan themselves, verified at nvsdk_ngx_vk.h:69-77), and declares
+# the AhjoNgxInitInfo UTF-8 mirror plus the seven ahjo_ngx_* entry points. It
+# is both the shim's header and this file's parse root, so there is exactly
+# one definition of the mirror struct and no cross-language layout agreement
+# to maintain.
+--file
+native/ngx/src/ahjo_ngx.h
+# --traverse is the COMPLETE set, not an addition to --file: leave ahjo_ngx.h
+# off this list and our own declarations vanish from the output.
+#
+# Traversal alone excludes the entire D3D11/D3D12/CUDA *entry-point* surface,
+# because those live in nvsdk_ngx.h and the dlssd/dlssg headers, which are not
+# listed here. Measured; no --exclude is needed for them.
+--traverse
+native/ngx/src/ahjo_ngx.h
+native/ngx/include/nvsdk_ngx_vk.h
+native/ngx/include/nvsdk_ngx_defs.h
+native/ngx/include/nvsdk_ngx_defs_vk.h
+native/ngx/include/nvsdk_ngx_params.h
+--include-directory
+native/ngx/stubs
+--include-directory
+native/stubs
+--include-directory
+native/include
+--include-directory
+native/ngx/include
+--namespace
+Ahjo.Vulkan.Ngx.Native
+# NOT "Ngx": a type named Ngx inside namespace Ahjo.Vulkan.Ngx.Native would be
+# unreachable from namespace Ahjo.Vulkan.Ngx, because the identifier binds to
+# the enclosing namespace before any imported type. That is the #166 lesson,
+# recorded at tools/generate-slang.rsp:19-21.
+--methodClassName
+NgxApi
+# The shim, not the NGX client library: NVIDIA ships a static archive with no
+# DLL to P/Invoke, so all 27 entry points resolve against ahjo_ngx.dll /
+# libahjo_ngx.so. native/ngx/src/ahjo_ngx.def and .map are the export lists.
+--libraryPath
+ahjo_ngx
+--output
+src/Ahjo.Vulkan.Ngx.Native/Generated
+--output-mode
+CSharp
+# C, not C++. NVSDK_NGX_Parameter is a C++ abstract class with nine pure
+# virtuals (nvsdk_ngx_params.h:53-76); binding its vtable would be both wrong
+# (the driver produces the object, not us) and unstable. The 16 exported
+# NVSDK_NGX_Parameter_{Set,Get}* C accessors are the SDK's own supported C
+# path and are real defined symbols in both static libraries, verified with
+# llvm-nm --defined-only.
+--language
+c
+# Same reproducibility argument as tools/generate-ktx.rsp:30-38: pin the parse
+# target so generated output is a function of NgxVersion alone.
+#
+# It matters more here than anywhere else in this repo, because wchar_t is
+# 2 bytes on Windows and 4 on Linux. Under this fixed target a wchar_t* comes
+# out as int* — a UTF-32 buffer — which Windows would then read as UTF-16.
+# That is why the wide-string structs are excluded below and the shim exposes
+# UTF-8 mirrors instead. Nothing wide may ever appear in Generated/; if a
+# regen introduces one, exclude the struct. Do NOT --remap wchar_t: that makes
+# Windows right and Linux wrong, which is a per-RID lie in a file whose whole
+# purpose is being host-independent.
+--additional
+--target=x86_64-unknown-linux-gnu
+--config
+latest-codegen
+generate-helper-types
+generate-file-scoped-namespaces
+# DELTA 1 — generate-macro-bindings, which no other rsp in this repo turns on.
+#
+# nvsdk_ngx_defs.h defines 204 NVSDK_NGX_Parameter_* string macros ("Width",
+# "Color", "Jitter.Offset.X", "DLSS.Hint.Render.Preset.DLAA", …). With
+# generate-unmanaged-constants alone, ZERO of them are emitted — measured, by
+# grepping the generated tree for "Width" and matching only struct fields.
+# With this flag they come out as
+#
+#     public static ReadOnlySpan<byte> NVSDK_NGX_Parameter_Width => "Width"u8;
+#
+# i.e. exactly the UTF-8 literal form the repo's invariant 1 requires, in
+# read-only data, allocating nothing per frame. Without this flag the
+# parameter names would have to be hand-written, which is the drift this whole
+# project exists to avoid.
+#
+# The cost is DELTA 3 below: it also emits the legacy hash-encoded alias
+# family, which has to be excluded.
+generate-macro-bindings
+generate-unmanaged-constants
+generate-disable-runtime-marshalling
+generate-aggressive-inlining
+exclude-enum-operators
+# DELTA 2 — strip-enum-member-type-name is ABSENT, and must stay absent.
+#
+# All three other rsps use it. Here it does not compile. NVSDK_NGX_Result is a
+# bitwise-or chain off one member (nvsdk_ngx_defs.h:96-178):
+#
+#     NVSDK_NGX_Result_Fail = 0xBAD00000,
+#     NVSDK_NGX_Result_FAIL_FeatureNotSupported = NVSDK_NGX_Result_Fail | 1,
+#
+# The stripper rewrites member NAMES but not initializer expressions that
+# reference sibling members, so the second line generates as
+# `FAIL_FeatureNotSupported = NVSDK_NGX_Result_Fail | 1` — 18 x CS0103.
+# Measured. Dropping the flag fixes all 18 and the output builds with 0
+# warnings and 0 errors under TreatWarningsAsErrors + AnalysisLevel=latest.
+#
+# The consequence is that enum members keep their NVSDK_NGX_-prefixed names in
+# this one project. That is deliberate; do not "fix" it.
+multi-file
+--remap
+size_t=nuint
+# Ten Vk* remaps into Ahjo.Vulkan.Native, the tools/generate-vma.rsp pattern.
+# This is what makes Ahjo.Vulkan.Ngx.Native a genuine Vulkan consumer and why
+# it ProjectReferences Ahjo.Vulkan.Native, unlike the Slang and KTX packages.
+VkInstance_T=Ahjo.Vulkan.Native.VkInstance_T
+VkPhysicalDevice_T=Ahjo.Vulkan.Native.VkPhysicalDevice_T
+VkDevice_T=Ahjo.Vulkan.Native.VkDevice_T
+VkCommandBuffer_T=Ahjo.Vulkan.Native.VkCommandBuffer_T
+VkImage_T=Ahjo.Vulkan.Native.VkImage_T
+VkImageView_T=Ahjo.Vulkan.Native.VkImageView_T
+VkBuffer_T=Ahjo.Vulkan.Native.VkBuffer_T
+VkFormat=Ahjo.Vulkan.Native.VkFormat
+VkImageSubresourceRange=Ahjo.Vulkan.Native.VkImageSubresourceRange
+VkExtensionProperties=Ahjo.Vulkan.Native.VkExtensionProperties
+--exclude
+# GROUP 1 — the wide-string structs, and the two that exist only to be
+# embedded in them. Excluding the wchar_t-taking FUNCTIONS is not enough:
+# NVSDK_NGX_PathListInfo.Path would still be generated as int** and
+# NVSDK_NGX_FeatureDiscoveryInfo.ApplicationDataPath as int*, leaving a public
+# surface a caller could fill with Encoding.UTF32 and ship a Windows-only bug.
+# AhjoNgxInitInfo in native/ngx/src/ahjo_ngx.h is their UTF-8 replacement.
+NVSDK_NGX_PathListInfo
+NVSDK_NGX_LoggingInfo
+NVSDK_NGX_FeatureCommonInfo
+NVSDK_NGX_FeatureCommonInfo_Internal
+NVSDK_NGX_FeatureDiscoveryInfo
+NVSDK_NGX_ProjectIdDescription
+NVSDK_NGX_Application_Identifier
+# GROUP 2 — entry points the shim does not export, so a binding for them could
+# only ever produce an EntryPointNotFoundException. Same reasoning as
+# tools/generate-ktx.rsp:61-68.
+#
+# The four Init/discovery calls are replaced by ahjo_ngx_*_utf8 equivalents
+# (they take wchar_t). GetNGXResultAsString returns const wchar_t* and is
+# replaced by ahjo_ngx_result_to_utf8. RequiredExtensions is deprecated by its
+# own header comment (nvsdk_ngx_vk.h:83-86) in favour of the two discovery
+# calls, and CreateFeature is superseded by CreateFeature1, the multi-device
+# form.
+NVSDK_NGX_VULKAN_Init
+NVSDK_NGX_VULKAN_Init_with_ProjectID
+NVSDK_NGX_VULKAN_GetFeatureRequirements
+NVSDK_NGX_VULKAN_GetFeatureInstanceExtensionRequirements
+NVSDK_NGX_VULKAN_GetFeatureDeviceExtensionRequirements
+GetNGXResultAsString
+NVSDK_NGX_VULKAN_RequiredExtensions
+NVSDK_NGX_VULKAN_CreateFeature
+# GROUP 3 — the D3D parameter accessors. Their 12 siblings ship; these four
+# take ID3D11Resource / ID3D12Resource, which this package has no business
+# naming.
+NVSDK_NGX_Parameter_SetD3d11Resource
+NVSDK_NGX_Parameter_SetD3d12Resource
+NVSDK_NGX_Parameter_GetD3d11Resource
+NVSDK_NGX_Parameter_GetD3d12Resource
+# GROUP 4 — foreign-API opaque declarations the headers forward-declare
+# (nvsdk_ngx_defs.h:555-562, nvsdk_ngx_params.h). They are never defined, so
+# there is nothing to emit and the references dangle.
+IUnknown
+ID3D11Resource
+ID3D11Buffer
+ID3D11Texture2D
+ID3D12Resource
+D3D11_TEXTURE2D_DESC
+D3D11_BUFFER_DESC
+D3D12_RESOURCE_DESC
+CD3DX12_HEAP_PROPERTIES
+NVSDK_NGX_CUDADevice
+NVSDK_NGX_DLDenoise_Create_Params
+# DELTA 3 / GROUP 5 — the 74 NVSDK_NGX_EParameter_* macros that DELTA 1 would
+# otherwise emit.
+#
+# These are the deprecated hash-encoded aliases of the string names above:
+#
+#     #define NVSDK_NGX_EParameter_Width  "#\x10"    // nvsdk_ngx_defs.h:588
+#
+# ClangSharp escapes \t, \n, \r and \0 but emits 0x01-0x08, 0x0b, 0x0c and
+# 0x0e-0x1f LITERALLY — a byte histogram of the generated NgxApi.cs found 28
+# distinct raw control bytes in the file. Nothing in the DLSS path uses them,
+# and committing raw control characters into a *.cs file that .gitattributes:2
+# puts under text=auto eol=lf normalization is a hazard with no upside.
+#
+# Regenerate this list mechanically after a pin bump rather than hand-editing
+# it. The one-liner is in src/Ahjo.Vulkan.Ngx.Native/CLAUDE.md.
+#
+# GROUP 6 — the three function-like macros DELTA 1 also trips over.
+# NVSDK_NGX_ARRAY_LEN (nvsdk_ngx_defs.h:48), NVSDK_NGX_SUCCEED (:183) and
+# NVSDK_NGX_FAILED (:184) take arguments, and generate-macro-bindings cannot
+# express that, so each produces
+#
+#     Warning: Function like macro definition records are not supported
+#
+# ClangSharpPInvokeGenerator exits with its DIAGNOSTIC COUNT, so those three
+# warnings are an exit code of 3 and MSBuild's Exec fails the Regenerate
+# target even though the output is complete and correct. Excluding them is
+# both the fix and the right answer on merit: they are C convenience macros
+# (`sizeof(a)/sizeof(a[0])`, and two result-code predicates), none of which
+# has a meaningful C# form. Verified: with these three excluded the generator
+# exits 0.
+NVSDK_NGX_ARRAY_LEN
+NVSDK_NGX_SUCCEED
+NVSDK_NGX_FAILED
+NVSDK_NGX_EParameter_Reserved00
+NVSDK_NGX_EParameter_SuperSampling_Available
+NVSDK_NGX_EParameter_InPainting_Available
+NVSDK_NGX_EParameter_ImageSuperResolution_Available
+NVSDK_NGX_EParameter_SlowMotion_Available
+NVSDK_NGX_EParameter_VideoSuperResolution_Available
+NVSDK_NGX_EParameter_Reserved06
+NVSDK_NGX_EParameter_Reserved07
+NVSDK_NGX_EParameter_Reserved08
+NVSDK_NGX_EParameter_ImageSignalProcessing_Available
+NVSDK_NGX_EParameter_ImageSuperResolution_ScaleFactor_2_1
+NVSDK_NGX_EParameter_ImageSuperResolution_ScaleFactor_3_1
+NVSDK_NGX_EParameter_ImageSuperResolution_ScaleFactor_3_2
+NVSDK_NGX_EParameter_ImageSuperResolution_ScaleFactor_4_3
+NVSDK_NGX_EParameter_NumFrames
+NVSDK_NGX_EParameter_Scale
+NVSDK_NGX_EParameter_Width
+NVSDK_NGX_EParameter_Height
+NVSDK_NGX_EParameter_OutWidth
+NVSDK_NGX_EParameter_OutHeight
+NVSDK_NGX_EParameter_Sharpness
+NVSDK_NGX_EParameter_Scratch
+NVSDK_NGX_EParameter_Scratch_SizeInBytes
+NVSDK_NGX_EParameter_EvaluationNode
+NVSDK_NGX_EParameter_Input1
+NVSDK_NGX_EParameter_Input1_Format
+NVSDK_NGX_EParameter_Input1_SizeInBytes
+NVSDK_NGX_EParameter_Input2
+NVSDK_NGX_EParameter_Input2_Format
+NVSDK_NGX_EParameter_Input2_SizeInBytes
+NVSDK_NGX_EParameter_Color
+NVSDK_NGX_EParameter_Color_Format
+NVSDK_NGX_EParameter_Color_SizeInBytes
+NVSDK_NGX_EParameter_Albedo
+NVSDK_NGX_EParameter_Output
+NVSDK_NGX_EParameter_Output_Format
+NVSDK_NGX_EParameter_Output_SizeInBytes
+NVSDK_NGX_EParameter_Reset
+NVSDK_NGX_EParameter_BlendFactor
+NVSDK_NGX_EParameter_MotionVectors
+NVSDK_NGX_EParameter_Rect_X
+NVSDK_NGX_EParameter_Rect_Y
+NVSDK_NGX_EParameter_Rect_W
+NVSDK_NGX_EParameter_Rect_H
+NVSDK_NGX_EParameter_MV_Scale_X
+NVSDK_NGX_EParameter_MV_Scale_Y
+NVSDK_NGX_EParameter_Model
+NVSDK_NGX_EParameter_Format
+NVSDK_NGX_EParameter_SizeInBytes
+NVSDK_NGX_EParameter_ResourceAllocCallback
+NVSDK_NGX_EParameter_BufferAllocCallback
+NVSDK_NGX_EParameter_Tex2DAllocCallback
+NVSDK_NGX_EParameter_ResourceReleaseCallback
+NVSDK_NGX_EParameter_CreationNodeMask
+NVSDK_NGX_EParameter_VisibilityNodeMask
+NVSDK_NGX_EParameter_PreviousOutput
+NVSDK_NGX_EParameter_MV_Offset_X
+NVSDK_NGX_EParameter_MV_Offset_Y
+NVSDK_NGX_EParameter_Hint_UseFireflySwatter
+NVSDK_NGX_EParameter_Resource_Width
+NVSDK_NGX_EParameter_Resource_Height
+NVSDK_NGX_EParameter_Depth
+NVSDK_NGX_EParameter_DLSSOptimalSettingsCallback
+NVSDK_NGX_EParameter_PerfQualityValue
+NVSDK_NGX_EParameter_RTXValue
+NVSDK_NGX_EParameter_DLSSMode
+NVSDK_NGX_EParameter_DeepResolve_Available
+NVSDK_NGX_EParameter_Deprecated_43
+NVSDK_NGX_EParameter_OptLevel
+NVSDK_NGX_EParameter_IsDevSnippetBranch
+NVSDK_NGX_EParameter_DeepDVC_Available
+NVSDK_NGX_EParameter_Graphics_API
+NVSDK_NGX_EParameter_Reserved_48
+NVSDK_NGX_EParameter_Reserved_49
+--with-access-specifier
+*=public

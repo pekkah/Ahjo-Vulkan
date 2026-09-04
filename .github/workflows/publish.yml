@@ -51,6 +51,11 @@ on:
         required: false
         type: boolean
         default: true
+      include_ngx:
+        description: "Pack Ahjo.Vulkan.Ngx.Native + Ahjo.Vulkan.Ngx (runs the 2-RID shim matrix + its smoke suite). Defaults to true since all packages ship together; flip to false for a fast core-only dry-run."
+        required: false
+        type: boolean
+        default: true
       release:
         description: "Push to NuGet.org. Default: pack only (artifact upload, no push)."
         required: false
@@ -99,10 +104,20 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.include_slang == true
     uses: ./.github/workflows/build-slang-native.yml
 
+  # Same reusable workflow ci.yml runs. Unlike the other three, the binary
+  # attached to a release here is one we compiled — and it has already loaded,
+  # resolved its 27 exports and agreed on every NGX struct layout in the job
+  # that built it. No feature DLL is fetched at any point: the lane runs
+  # setup-ngx.ps1 with -SkipFeatureDll.
+  build-ngx:
+    name: Build NGX native (matrix)
+    if: github.event_name != 'workflow_dispatch' || inputs.include_ngx == true
+    uses: ./.github/workflows/build-ngx-native.yml
+
   publish:
     name: Pack & Publish
     runs-on: ubuntu-latest
-    needs: [build-vma, build-ktx, build-slang]
+    needs: [build-vma, build-ktx, build-slang, build-ngx]
     # All native jobs are conditional; allow publish to proceed when any
     # were skipped.
     if: >-
@@ -110,6 +125,7 @@ jobs:
       && (needs.build-vma.result == 'success' || needs.build-vma.result == 'skipped')
       && (needs.build-ktx.result == 'success' || needs.build-ktx.result == 'skipped')
       && (needs.build-slang.result == 'success' || needs.build-slang.result == 'skipped')
+      && (needs.build-ngx.result == 'success' || needs.build-ngx.result == 'skipped')
     permissions:
       contents: write
     steps:
@@ -194,6 +210,34 @@ jobs:
             src_dir="${{ github.workspace }}/slang-artifacts/slang-native-${rid}"
             if [ -d "$src_dir" ]; then
               cp -v "$src_dir"/* "native/slang/staged/${rid}/"
+            fi
+          done
+
+      # ---- NGX native artifact aggregation (when shipping NGX) ----
+      # Same shape as Slang above, staged at native/ngx/build/<rid>/, which is
+      # where Ahjo.Vulkan.Ngx.Native.csproj's PackNgxRuntimes target looks.
+      # The artifact is the cmake build directory, so the whole directory is
+      # copied and the pack target picks the one named library out of it.
+      #
+      # NGX-LICENSE.txt is NOT downloaded here: it is committed under
+      # native/ngx/, so the pack step finds it in the checkout. The feature DLL
+      # is not downloaded either, here or anywhere — no job in this workflow
+      # can produce one (#214).
+      - name: Download NGX native artifacts
+        if: needs.build-ngx.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ngx-native-*
+          path: ${{ github.workspace }}/ngx-artifacts
+
+      - name: Stage NGX binaries for pack
+        if: needs.build-ngx.result == 'success'
+        run: |
+          for rid in win-x64 linux-x64; do
+            mkdir -p "native/ngx/build/${rid}"
+            src_dir="${{ github.workspace }}/ngx-artifacts/ngx-native-${rid}"
+            if [ -d "$src_dir" ]; then
+              cp -rv "$src_dir"/* "native/ngx/build/${rid}/"
             fi
           done
 
@@ -294,6 +338,37 @@ jobs:
             -p:SkipVmaNativeBuild=true \
             -p:SkipSlangNativeFetch=true \
             -o "${{ github.workspace }}/artifacts"
+
+      # ---- NGX native package (skipped when include_ngx=false) ----
+      # SkipNgxNativeBuild=true for the same reason the others pass their
+      # flags: the per-RID shims were downloaded above, and this runner has no
+      # NGX SDK staged to rebuild the host one against anyway. Like Ktx.Native
+      # and Slang.Native this project is restored and built here rather than
+      # riding in on the core build — it ProjectReferences Ahjo.Vulkan.Native,
+      # but nothing references it.
+      - name: Pack (NGX native)
+        if: needs.build-ngx.result == 'success'
+        env:
+          MinVerVersionOverride: ${{ inputs.version }}
+        run: |
+          dotnet pack src/Ahjo.Vulkan.Ngx.Native/Ahjo.Vulkan.Ngx.Native.csproj \
+            -c Release \
+            -p:SkipNgxNativeBuild=true \
+            -o "${{ github.workspace }}/artifacts"
+
+      # Ahjo.Vulkan.Ngx references BOTH Ahjo.Vulkan and Ahjo.Vulkan.Ngx.Native,
+      # so it is packed after the two of them and carries both flags:
+      # SkipVmaNativeBuild so the transitive VMA project does not invoke cmake,
+      # and SkipNgxNativeBuild so the transitive NGX native project does not try
+      # to rebuild a shim against an SDK this runner does not have. It ships no
+      # native files of its own — the shim rides in Ahjo.Vulkan.Ngx.Native and
+      # the DLSS feature DLL is the consumer's (#214).
+      - name: Pack (NGX wrapper)
+        if: needs.build-ngx.result == 'success'
+        env:
+          MinVerVersionOverride: ${{ inputs.version }}
+        run: |
+          dotnet pack src/Ahjo.Vulkan.Ngx/Ahjo.Vulkan.Ngx.csproj             -c Release             -p:SkipVmaNativeBuild=true             -p:SkipNgxNativeBuild=true             -o "${{ github.workspace }}/artifacts"
 
       - name: List artifacts
         run: ls -la ${{ github.workspace }}/artifacts

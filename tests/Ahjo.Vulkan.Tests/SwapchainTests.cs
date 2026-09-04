@@ -484,6 +484,200 @@ public sealed unsafe class SwapchainTests
         }
     }
 
+    // ---- Swapchain.GetImage (issue #219 D11) ----------------------------
+    //
+    // What these five cases can prove here: that the borrowed Image reports
+    // the swapchain's own facts, that it is never tracked and never destroys,
+    // that the WholeImage region helpers now cover the swapchain (the E4
+    // defect), that the values track Recreate, and that the bounds check
+    // names its parameter.
+    //
+    // What they deliberately cannot prove: that a blit *into* a swapchain
+    // image executes correctly and validation-layer-clean end to end. That
+    // needs a present loop on real hardware and is what samples/HelloDlaa's
+    // hardware run supplies — CI has no NVIDIA GPU (#32).
+
+    [Fact]
+    public void GetImage_Reports_The_Swapchains_Own_Facts()
+    {
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out _);
+
+        var desc = new SwapchainDescription { Surface = surface, Width = window.Width, Height = window.Height };
+        using var swap = new Swapchain(device, in desc);
+
+        for (uint i = 0; i < swap.ImageCount; i++)
+        {
+            Image image = swap.GetImage(i);
+            Assert.Equal((ulong)swap.GetImageHandle(i), image.RawHandle);
+            Assert.False(image.IsNull);
+            Assert.Equal(swap.Format,        image.Format);
+            Assert.Equal(swap.Extent.width,  image.Width);
+            Assert.Equal(swap.Extent.height, image.Height);
+            Assert.Equal(swap.ImageUsage,    image.Usage);
+            Assert.Equal(1u, image.Depth);
+            Assert.Equal(1u, image.MipLevels);
+            Assert.Equal(1u, image.ArrayLayers);
+        }
+    }
+
+    /// <summary>
+    /// The direct regression test for the <c>HandleRegistry</c> question
+    /// (#219 E7): a borrowed handle is never tracked, so a second
+    /// <c>Dispose</c> is not a double-dispose and cannot throw — and the
+    /// swapchain's image survives both calls, because <c>Dispose</c> returns
+    /// before <c>vmaDestroyImage</c>.
+    /// </summary>
+    [Fact]
+    public void GetImage_Returns_A_Borrowed_Handle_That_Dispose_Does_Not_Destroy()
+    {
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out _);
+
+        var desc = new SwapchainDescription { Surface = surface, Width = window.Width, Height = window.Height };
+        using var swap = new Swapchain(device, in desc);
+
+        bool wasEnabled = AhjoValidation.Enabled;
+        try
+        {
+            AhjoValidation.Enabled = true;
+
+            Image image = swap.GetImage(0);
+            Assert.False(image.OwnsHandle);
+            Assert.False(image.OwnsMemory);
+
+            ulong before = image.RawHandle;
+            image.Dispose();
+            image.Dispose();
+
+            Assert.Equal(before, (ulong)swap.GetImageHandle(0));
+            Assert.Equal(before, swap.GetImage(0).RawHandle);
+        }
+        finally { AhjoValidation.Enabled = wasEnabled; }
+    }
+
+    /// <summary>
+    /// Regression for #219 E4: <c>ImageBlitRegion.WholeImage</c> reads
+    /// <c>Width</c>/<c>Height</c>/<c>Depth</c> off the destination, so a
+    /// <c>FromRaw</c> swapchain handle produced a degenerate destination box
+    /// and the blit silently did nothing. Asserts both halves — the fix and
+    /// the defect it fixes.
+    /// </summary>
+    [Fact]
+    public void GetImage_Makes_WholeImage_Regions_Cover_The_Swapchain()
+    {
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out _);
+
+        var desc = new SwapchainDescription
+        {
+            Surface    = surface,
+            Width      = window.Width,
+            Height     = window.Height,
+            ImageUsage = ImageUsage.ColorAttachment | ImageUsage.TransferDst,
+        };
+        using var swap = new Swapchain(device, in desc);
+
+        using var source = device.Allocator.CreateImage(
+            new ImageDescription
+            {
+                ImageType     = VkImageType.VK_IMAGE_TYPE_2D,
+                Format        = VkFormat.VK_FORMAT_R8G8B8A8_UNORM,
+                Width         = 64, Height = 64, Depth = 1,
+                MipLevels     = 1,  ArrayLayers = 1,
+                Samples       = VkSampleCountFlagBits.VK_SAMPLE_COUNT_1_BIT,
+                Tiling        = VkImageTiling.VK_IMAGE_TILING_OPTIMAL,
+                Usage         = ImageUsage.TransferSrc,
+                InitialLayout = VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED,
+            },
+            new AllocationDescription { Usage = MemoryUsage.AutoPreferDevice });
+
+        Image described = swap.GetImage(0);
+        ImageBlitRegion good = ImageBlitRegion.WholeImage(in source, in described);
+        Assert.Equal((int)swap.Extent.width,  good.DstOffset1.x);
+        Assert.Equal((int)swap.Extent.height, good.DstOffset1.y);
+        Assert.Equal(1, good.DstOffset1.z);
+
+        Image bare = Image.FromRaw(swap.GetImageHandle(0));
+        ImageBlitRegion degenerate = ImageBlitRegion.WholeImage(in source, in bare);
+        Assert.Equal(0, degenerate.DstOffset1.x);
+        Assert.Equal(0, degenerate.DstOffset1.y);
+    }
+
+    [Fact]
+    public void GetImage_Tracks_Recreate()
+    {
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out _);
+
+        var initialDesc = new SwapchainDescription { Surface = surface, Width = window.Width, Height = window.Height };
+        using var swap = new Swapchain(device, in initialDesc);
+
+        VkExtent2D before = swap.Extent;
+        Assert.Equal(before.width,  swap.GetImage(0).Width);
+        Assert.Equal(before.height, swap.GetImage(0).Height);
+
+        window.Resize(1024, 768);
+        var resizedDesc = new SwapchainDescription { Surface = surface, Width = window.Width, Height = window.Height };
+        swap.Recreate(in resizedDesc);
+
+        VkExtent2D after = swap.Extent;
+        Assert.True(after.width != before.width || after.height != before.height,
+            $"Resize had no effect on swapchain extent (was {before.width}x{before.height}, still is).");
+
+        Image image = swap.GetImage(0);
+        Assert.Equal(after.width,  image.Width);
+        Assert.Equal(after.height, image.Height);
+        Assert.Equal((ulong)swap.GetImageHandle(0), image.RawHandle);
+    }
+
+    [Fact]
+    public void GetImage_Rejects_An_Out_Of_Range_Index()
+    {
+        TestGate.RequirePlatform(IsWindows, "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
+
+        using var window = new Win32Window(640, 480, $"AhjoVk_{Guid.NewGuid():N}");
+        Utf8Name[] instanceExts = [VulkanExtensions.KhrSurface, VulkanExtensions.KhrWin32Surface];
+        using var instance = Instance.Create(new InstanceDescription { Extensions = instanceExts });
+        using var surface  = Surface.CreateWin32(instance, window.HInstance, window.Hwnd);
+        using var device   = CreatePresentDevice(instance, in surface, out _);
+
+        var desc = new SwapchainDescription { Surface = surface, Width = window.Width, Height = window.Height };
+        using var swap = new Swapchain(device, in desc);
+
+        uint outOfRange = swap.ImageCount;
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(() => swap.GetImage(outOfRange));
+        // The point of the explicit guard over letting the array throw:
+        // IndexOutOfRangeException from `_images` would name nothing the caller
+        // can see. Assert the parameter name, since that is the whole benefit.
+        Assert.Equal("index", ex.ParamName);
+    }
+
     /// <summary>
     /// Picks the first physical device whose graphics queue family also
     /// supports presenting to <paramref name="surface"/>, then creates a

@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ahjo.Vulkan.Ngx</RootNamespace>
+    <AssemblyName>Ahjo.Vulkan.Ngx</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!--
+    Published as "Ahjo.Vulkan.Ngx" on NuGet.
+
+    The idiomatic layer over Ahjo.Vulkan.Ngx.Native: NgxContext, DlssFeature,
+    NgxImage and the description types a renderer calls, in place of an opaque
+    parameter map populated by string name ~30 entries per frame.
+
+    This package ships NO native files. The shim rides in
+    Ahjo.Vulkan.Ngx.Native, and the DLSS feature DLL (nvngx_dlss.dll /
+    libnvidia-ngx-dlss.so) is the consumer's — a fixed licence decision
+    recorded in issue #214, not something this phase reopens.
+
+    Ahjo.Vulkan gains NO dependency in the other direction, so a consumer who
+    never enables DLSS never pulls a line of NVIDIA-specific code.
+  -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Ahjo.Vulkan.Ngx</PackageId>
+    <Title>Ahjo.Vulkan.Ngx</Title>
+    <Description>NVIDIA DLSS Super Resolution and DLAA for Ahjo.Vulkan, over the pinned NGX SDK ($(NgxVersion)). The DLSS feature DLL (nvngx_dlss.dll / libnvidia-ngx-dlss.so) is NOT included and must be supplied by the application from NVIDIA; see the package README for the licence obligations.</Description>
+    <PackageTags>vulkan;dlss;dlaa;ngx;nvidia;upscaling;antialiasing</PackageTags>
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ahjo.Vulkan\Ahjo.Vulkan.csproj" />
+    <ProjectReference Include="..\Ahjo.Vulkan.Ngx.Native\Ahjo.Vulkan.Ngx.Native.csproj" />
+    <!-- Explicit, unlike Ahjo.Vulkan.Slang: this wrapper genuinely names
+         VkImage_T*, VkImageView_T*, VkCommandBuffer_T* and friends. -->
+    <ProjectReference Include="..\Ahjo.Vulkan.Native\Ahjo.Vulkan.Native.csproj" />
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Ahjo.Vulkan.Ngx.Tests" />
+    <InternalsVisibleTo Include="Ahjo.Vulkan.Benchmarks" />
+  </ItemGroup>
+
+</Project>

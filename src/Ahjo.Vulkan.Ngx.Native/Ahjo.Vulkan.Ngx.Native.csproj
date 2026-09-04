@@ -1,0 +1,254 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ahjo.Vulkan.Ngx.Native</RootNamespace>
+    <AssemblyName>Ahjo.Vulkan.Ngx.Native</AssemblyName>
+    <GeneratedDir>$(MSBuildProjectDirectory)\Generated\</GeneratedDir>
+    <GeneratorResponseFile>$(ToolsDir)generate-ngx.rsp</GeneratorResponseFile>
+  </PropertyGroup>
+
+  <!--
+    Published as "Ahjo.Vulkan.Ngx.Native" on NuGet.
+
+    NVIDIA's NGX SDK ships a static client library, not a DLL, so unlike every
+    other native package here the shipped binary is one WE compile:
+    native/ngx/src/ahjo_ngx.cpp links nvsdk_ngx_s.lib / libnvsdk_ngx.a into
+    ahjo_ngx.dll / libahjo_ngx.so and exports exactly 27 symbols.
+
+    The feature DLL (nvngx_dlss.dll / libnvidia-ngx-dlss.so) is NOT part of
+    this package and never will be — the application supplies it. That is a
+    licence decision, recorded in issue #214.
+  -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Ahjo.Vulkan.Ngx.Native</PackageId>
+    <Title>Ahjo.Vulkan.Ngx.Native</Title>
+    <Description>Raw P/Invoke bindings over the NVIDIA NGX (DLSS) Vulkan C API at $(NgxVersion), shipping a compiled shim for win-x64 and linux-x64. The DLSS feature DLL (nvngx_dlss.dll / libnvidia-ngx-dlss.so) is NOT included and must be supplied by the application from NVIDIA; see the package README for the licence obligations that come with it.</Description>
+    <PackageTags>vulkan;dlss;ngx;nvidia;upscaling;dlaa;native;pinvoke;bindings</PackageTags>
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+  </PropertyGroup>
+
+  <!--
+    Host-RID detection. Only the two RIDs NVIDIA publishes NGX libraries for
+    exist at all, so unlike the Slang and KTX projects there is no "add the
+    lane first, then the RID" note to make here — there is no third RID to add.
+
+    An unrecognised host leaves _NgxRid empty, and that is NOT an error: it
+    just means no shim gets built here. A fresh clone on macOS still builds
+    the managed bindings.
+  -->
+  <PropertyGroup>
+    <_NgxRid Condition="$([MSBuild]::IsOSPlatform('Windows')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">win-x64</_NgxRid>
+    <_NgxRid Condition="$([MSBuild]::IsOSPlatform('Linux')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">linux-x64</_NgxRid>
+
+    <_NgxLibFile Condition="'$(_NgxRid)' == 'win-x64'">ahjo_ngx.dll</_NgxLibFile>
+    <_NgxLibFile Condition="'$(_NgxRid)' == 'linux-x64'">libahjo_ngx.so</_NgxLibFile>
+
+    <_NgxSrcDir>$(NativeDir)ngx\</_NgxSrcDir>
+    <!-- Committed: the generator input of record (native/CLAUDE.md). -->
+    <_NgxIncludeDir>$(_NgxSrcDir)include\</_NgxIncludeDir>
+    <!-- Git-ignored: the static client library tools/setup-ngx.ps1 stages. -->
+    <_NgxStagedDir>$(_NgxSrcDir)staged\$(_NgxRid)\</_NgxStagedDir>
+
+    <_NgxBuildRootDir>$(_NgxSrcDir)build\</_NgxBuildRootDir>
+    <_NgxBuildDir>$(_NgxBuildRootDir)$(_NgxRid)\</_NgxBuildDir>
+    <_NgxStagedBinary>$(_NgxBuildDir)$(_NgxLibFile)</_NgxStagedBinary>
+
+    <!-- Existence of this file is what gates the whole shim build. No target
+         here ever downloads it: acquiring a proprietary, licence-encumbered
+         SDK is an explicit act (./tools/setup-ngx.ps1), never a side effect of
+         an unrelated build. -->
+    <_NgxStaticLib Condition="'$(_NgxRid)' == 'win-x64'">$(_NgxStagedDir)nvsdk_ngx_s.lib</_NgxStaticLib>
+    <_NgxStaticLib Condition="'$(_NgxRid)' == 'linux-x64'">$(_NgxStagedDir)libnvsdk_ngx.a</_NgxStaticLib>
+
+    <!-- Path to Vulkan-Headers staging from the sibling Ahjo.Vulkan.Native
+         project, same as VMA uses: ahjo_ngx.h includes vulkan/vulkan.h. -->
+    <_VulkanHeadersIncludeDir>$(NativeDir)include\</_VulkanHeadersIncludeDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+
+    <!-- Unlike Slang and KTX, and like VMA: the generated surface genuinely is
+         a Vulkan consumer. Ten Vk* types are remapped into
+         Ahjo.Vulkan.Native by tools/generate-ngx.rsp. -->
+    <ProjectReference Include="..\Ahjo.Vulkan.Native\Ahjo.Vulkan.Native.csproj" />
+  </ItemGroup>
+
+  <!--
+    Stage the host's shim into every downstream project's output.
+
+    The condition is on the STAGED SDK, not on the built binary. Items are
+    evaluated before any target runs, so conditioning on
+    Exists('$(_NgxStagedBinary)') would skip the item on the very build that
+    BuildNgxForHost produces it — the shim would land in native/ngx/build/ but
+    not in anyone's bin/ until a second build. Conditioning on
+    $(_NgxStaticLib) is stable across the build: either the SDK was staged
+    before MSBuild started or it was not.
+
+    That is the difference from VMA, which conditions on nothing but the RID
+    because it fetches its own inputs. Here a solution build with no NGX SDK
+    must stay clean rather than fail resolving a file nothing will produce.
+  -->
+  <ItemGroup Condition="'$(_NgxRid)' != '' and '$(SkipNgxNativeBuild)' != 'true' and Exists('$(_NgxStaticLib)')">
+    <None Include="$(_NgxStagedBinary)"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false"
+          Pack="false"
+          Link="$(_NgxLibFile)" />
+  </ItemGroup>
+
+  <!--
+    Regenerate target: ensures Vulkan headers are staged, then runs
+    ClangSharpPInvokeGenerator. Not wired into Build — regeneration is
+    deliberate; generated C# is committed.
+
+    There is no fetch target, unlike VMA and Slang. The NGX headers are
+    committed under native/ngx/include/ (#215), so a regen needs no network —
+    but it does need setup-ngx.ps1 to have run at least once on a clone that
+    predates them, hence the Error below.
+
+    Usage: dotnet build src/Ahjo.Vulkan.Ngx.Native -t:Regenerate
+  -->
+  <Target Name="Regenerate" DependsOnTargets="EnsureVulkanHeaders;RunClangSharpNgxGenerator" />
+
+  <!-- Vulkan-Headers fetch is owned by Ahjo.Vulkan.Native. Trigger it via
+       ProjectReference target invocation so NGX's codegen and its C++ compile
+       both see vulkan/vulkan.h without duplicating the fetch logic. -->
+  <Target Name="EnsureVulkanHeaders">
+    <MSBuild
+      Projects="..\Ahjo.Vulkan.Native\Ahjo.Vulkan.Native.csproj"
+      Targets="CopyGeneratedHeaders"
+      Properties="GeneratedDir=$([MSBuild]::EnsureTrailingSlash('$(MSBuildProjectDirectory)/../Ahjo.Vulkan.Native/Generated'))" />
+  </Target>
+
+  <Target Name="RunClangSharpNgxGenerator" DependsOnTargets="EnsureVulkanHeaders">
+    <Error
+      Condition="!Exists('$(_NgxIncludeDir)nvsdk_ngx_vk.h')"
+      Text="The NGX headers are missing from $(_NgxIncludeDir). They are committed, so this means a partial checkout; restore them or run ./tools/setup-ngx.ps1 to re-stage them from the pinned NgxVersion tag." />
+
+    <MakeDir Directories="$(GeneratedDir)" />
+    <Exec
+      Command="dotnet tool run ClangSharpPInvokeGenerator @&quot;$(GeneratorResponseFile)&quot;"
+      WorkingDirectory="$(RepositoryRoot)" />
+    <Message Importance="high" Text="Generated NGX bindings written to $(GeneratedDir)" />
+  </Target>
+
+  <!--
+    Build the host-RID shim before the project's build step copies Content
+    items. CI cross-builds the other RID and drops its artifact into
+    $(_NgxBuildRootDir)<rid>\ before the pack job runs.
+
+    BeforeTargets="AssignTargetPaths" matches the VMA pattern: the target also
+    fires during ProjectReference's GetCopyToOutputDirectoryItems flow, so
+    consumers automatically get the shim in their bin/ folder.
+
+    Inputs/Outputs rather than a `!Exists($(_NgxStagedBinary))` condition, and
+    the difference is not cosmetic. Existence-gating means the shim is built
+    ONCE and then never again: edit ahjo_ngx.cpp and every subsequent build
+    and `dotnet test` silently keeps running the old binary and reporting
+    green. CI never sees it, because CI starts from a fresh checkout — the
+    entire cost lands on whoever edits the shim next, which is exactly the
+    person who most needs the build to be honest.
+
+    With Inputs/Outputs, MSBuild skips the target when the binary is newer than
+    every listed source and reruns it when any of them changes. The staged
+    static library is an input too: restaging a different NgxVersion must
+    relink the shim. The .def and .map are inputs because they ARE the export
+    surface — changing one changes the produced binary.
+  -->
+  <Target Name="BuildNgxForHost"
+          BeforeTargets="AssignTargetPaths"
+          Condition="'$(_NgxRid)' != '' and '$(SkipNgxNativeBuild)' != 'true' and Exists('$(_NgxStaticLib)')"
+          DependsOnTargets="EnsureVulkanHeaders"
+          Inputs="$(_NgxSrcDir)src\ahjo_ngx.cpp;$(_NgxSrcDir)src\ahjo_ngx.h;$(_NgxSrcDir)src\ahjo_ngx.def;$(_NgxSrcDir)src\ahjo_ngx.map;$(_NgxSrcDir)CMakeLists.txt;$(_NgxStaticLib)"
+          Outputs="$(_NgxStagedBinary)">
+    <MakeDir Directories="$(_NgxBuildDir)" />
+
+    <Exec
+      Command="cmake -S &quot;$(_NgxSrcDir.TrimEnd('\'))&quot; -B &quot;$(_NgxBuildDir.TrimEnd('\'))&quot; -DCMAKE_BUILD_TYPE=Release -DAHJO_NGX_INCLUDE_DIR=&quot;$(_NgxIncludeDir.TrimEnd('\'))&quot; -DAHJO_NGX_LIB_DIR=&quot;$(_NgxStagedDir.TrimEnd('\'))&quot; -DAHJO_VULKAN_HEADERS_DIR=&quot;$(_VulkanHeadersIncludeDir.TrimEnd('\'))&quot;"
+      WorkingDirectory="$(RepositoryRoot)" />
+
+    <Exec
+      Command="cmake --build &quot;$(_NgxBuildDir.TrimEnd('\'))&quot; --config Release"
+      WorkingDirectory="$(RepositoryRoot)" />
+
+    <!-- MSVC drops the dll under Release/. Normalize so $(_NgxStagedBinary)
+         is correct regardless of single-config vs multi-config generator. -->
+    <ItemGroup>
+      <_NgxProducedBinary Include="$(_NgxBuildDir)Release\$(_NgxLibFile);$(_NgxBuildDir)$(_NgxLibFile)" />
+    </ItemGroup>
+    <Copy
+      SourceFiles="@(_NgxProducedBinary)"
+      DestinationFolder="$(_NgxBuildDir)"
+      SkipUnchangedFiles="true"
+      Condition="Exists('%(_NgxProducedBinary.Identity)')" />
+
+    <Message Importance="high" Text="Built the ahjo_ngx shim against NGX $(NgxVersion) for $(_NgxRid): $(_NgxStagedBinary)" />
+  </Target>
+
+  <!--
+    The absent-SDK path. A fresh clone must keep building with no NVIDIA SDK
+    present and no network — most contributors will never touch DLSS.
+
+    <Message Importance="high">, deliberately NOT <Warning>:
+    TreatWarningsAsErrors=true is repo-wide, so a warning here would turn "you
+    have not opted into DLSS" into a broken build for everyone.
+
+    The other half of this contract lives in the test suite:
+    Ahjo.Vulkan.Ngx.Native.Tests skips when the shim is absent, unless
+    AHJO_NGX_REQUIRE_SHIM=1 — which the CI lane sets, so a lane cannot report
+    green while executing nothing.
+  -->
+  <Target Name="WarnNgxSdkMissing"
+          BeforeTargets="AssignTargetPaths"
+          Condition="'$(_NgxRid)' != '' and '$(SkipNgxNativeBuild)' != 'true' and !Exists('$(_NgxStaticLib)')">
+    <Message Importance="high"
+             Text="NGX SDK not staged at $(_NgxStagedDir); skipping the ahjo_ngx shim build. Run ./tools/setup-ngx.ps1 to enable DLSS locally. Ahjo.Vulkan.Ngx.Native.Tests will skip." />
+  </Target>
+
+  <!--
+    Multi-RID pack. Expects per-RID binaries to exist under
+    native/ngx/build/<rid>/<libname> by the time pack runs. CI does this by
+    downloading build-ngx-native.yml's upload-artifact outputs into those
+    directories before invoking dotnet pack.
+
+    Local pack only includes the host's RID — that's intentional. Producing a
+    fully cross-RID nupkg requires the CI matrix.
+
+    NGX-LICENSE.txt is packed at the nupkg root next to our own MIT LICENSE,
+    the way PackSlangRuntimes packs SLANG-LICENSE.txt: the nupkg carries a
+    binary compiled against someone else's proprietary library.
+
+    What is NOT packed, and must never be: the feature DLL, and the static
+    client library or archive. Only the shim we compiled ships.
+  -->
+  <Target Name="PackNgxRuntimes" BeforeTargets="_GetPackageFiles;GenerateNuspec" Condition="'$(IsPackable)' == 'true'">
+    <ItemGroup>
+      <_NgxPackRid Include="win-x64">   <LibFile>ahjo_ngx.dll</LibFile>    </_NgxPackRid>
+      <_NgxPackRid Include="linux-x64"> <LibFile>libahjo_ngx.so</LibFile>  </_NgxPackRid>
+    </ItemGroup>
+
+    <ItemGroup>
+      <None Include="$(_NgxBuildRootDir)%(_NgxPackRid.Identity)\%(_NgxPackRid.LibFile)"
+            Condition="Exists('$(_NgxBuildRootDir)%(_NgxPackRid.Identity)\%(_NgxPackRid.LibFile)')">
+        <Pack>true</Pack>
+        <PackagePath>runtimes\%(_NgxPackRid.Identity)\native\%(_NgxPackRid.LibFile)</PackagePath>
+        <Visible>false</Visible>
+      </None>
+
+      <None Include="$(_NgxSrcDir)NGX-LICENSE.txt"
+            Condition="Exists('$(_NgxSrcDir)NGX-LICENSE.txt')">
+        <Pack>true</Pack>
+        <PackagePath>\</PackagePath>
+        <Visible>false</Visible>
+      </None>
+    </ItemGroup>
+
+    <Message Importance="high" Text="NGX pack: included RIDs from $(_NgxBuildRootDir)" />
+  </Target>
+
+</Project>

@@ -56,7 +56,13 @@
          against native/ngx/pins.sha256. A bump therefore means re-running
          that script with -UpdatePins and committing the new pins file.
 
-         The feature DLL is never packed: consumers supply it (issue #214). -->
+         The feature DLL is never packed: consumers supply it (issue #214).
+
+         Like the four pins above, a bump here also requires a regen run
+         (`/regen-bindings`): the NGX headers under native/ngx/include/ are
+         committed and src/Ahjo.Vulkan.Ngx.Native/Generated/ is derived from
+         them, so moving the tag without regenerating leaves the bindings
+         describing the old API. -->
     <NgxVersion>v310.7.0</NgxVersion>
     <!-- The libktx feature set, defined ONCE. The local host build
          (BuildKtxForHost) and every CI matrix job invoke that same target,
@@ -89,9 +95,11 @@
     (Ahjo.Vulkan.Native), src/Ahjo.Vulkan.Vma.Native
     (Ahjo.Vulkan.Vma.Native), src/Ahjo.Vulkan.Ktx.Native
     (Ahjo.Vulkan.Ktx.Native), src/Ahjo.Vulkan.Slang.Native
-    (Ahjo.Vulkan.Slang.Native) and src/Ahjo.Vulkan.Slang
-    (Ahjo.Vulkan.Slang) — six in all. Samples, tests, and the Utilities
-    helper library stay unpublished.
+    (Ahjo.Vulkan.Slang.Native), src/Ahjo.Vulkan.Slang
+    (Ahjo.Vulkan.Slang), src/Ahjo.Vulkan.Ngx.Native
+    (Ahjo.Vulkan.Ngx.Native) and src/Ahjo.Vulkan.Ngx (Ahjo.Vulkan.Ngx) —
+    eight in all. Samples, tests, and the Utilities helper library stay
+    unpublished.
 
     Version: the publish workflow (.github/workflows/publish.yml) overrides
     MinVer's tag-derived version via `MinVerVersionOverride` when needed.

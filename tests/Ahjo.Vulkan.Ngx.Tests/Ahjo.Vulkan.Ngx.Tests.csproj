@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ahjo.Vulkan.Ngx.Tests</RootNamespace>
+    <AssemblyName>Ahjo.Vulkan.Ngx.Tests</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan.Ngx\Ahjo.Vulkan.Ngx.csproj" />
+  </ItemGroup>
+
+  <!--
+    Most of this suite needs no device: shadow-enum drift, description
+    validation, the extension-copy contract and the AhjoValidation-gated
+    evaluate checks all run on a bare runner. But some tests DO create a
+    VkDevice, which makes this a suite that touches Vulkan — so it carries the
+    declared-tier contract like the other four that do (issue #158,
+    docs/ci-coverage.md), and every skip goes through
+    Ahjo.Vulkan.Testing.TestGate rather than a bare Assert.Skip.
+
+    Two gate classes, both permanent-and-correct rather than coverage gaps:
+      [gate:platform] — the ahjo_ngx shim is not staged (DLSS is opt-in;
+                        ./tools/setup-ngx.ps1).
+      [gate:feature]  — no NVIDIA GPU with a DLSS-capable driver and a
+                        consumer-supplied nvngx_dlss.dll.
+    Neither needs a ci.yml edit: both classes already exist.
+  -->
+  <ItemGroup>
+    <Compile Include="..\Shared\*.cs" LinkBase="Shared" />
+  </ItemGroup>
+
+</Project>

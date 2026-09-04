@@ -14,6 +14,9 @@
       "Bash(dotnet tool restore)",
       "Bash(dotnet restore:*)",
       "Bash(dotnet run --project tests/Ahjo.Vulkan.Benchmarks:*)",
+      "Bash(dotnet publish:*)",
+      "Bash(awk:*)",
+      "Bash(tasklist:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
@@ -31,7 +34,8 @@
       "PowerShell(dotnet test:*)",
       "PowerShell(git status:*)",
       "PowerShell(git diff:*)",
-      "PowerShell(git log:*)"
+      "PowerShell(git log:*)",
+      "PowerShell(Get-ChildItem:*)"
     ]
   }
 }

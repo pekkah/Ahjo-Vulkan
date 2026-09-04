@@ -6,12 +6,16 @@
   <Project Path="src/Ahjo.Vulkan.Ktx.Native/Ahjo.Vulkan.Ktx.Native.csproj" />
   <Project Path="src/Ahjo.Vulkan.Slang.Native/Ahjo.Vulkan.Slang.Native.csproj" />
   <Project Path="src/Ahjo.Vulkan.Slang/Ahjo.Vulkan.Slang.csproj" />
+  <Project Path="src/Ahjo.Vulkan.Ngx.Native/Ahjo.Vulkan.Ngx.Native.csproj" />
+  <Project Path="src/Ahjo.Vulkan.Ngx/Ahjo.Vulkan.Ngx.csproj" />
   <Project Path="tests/Ahjo.Vulkan.Benchmarks/Ahjo.Vulkan.Benchmarks.csproj" />
   <Project Path="tests/Ahjo.Vulkan.Native.Tests/Ahjo.Vulkan.Native.Tests.csproj" />
   <Project Path="tests/Ahjo.Vulkan.Vma.Native.Tests/Ahjo.Vulkan.Vma.Native.Tests.csproj" />
   <Project Path="tests/Ahjo.Vulkan.Ktx.Native.Tests/Ahjo.Vulkan.Ktx.Native.Tests.csproj" />
   <Project Path="tests/Ahjo.Vulkan.Slang.Native.Tests/Ahjo.Vulkan.Slang.Native.Tests.csproj" />
   <Project Path="tests/Ahjo.Vulkan.Slang.Tests/Ahjo.Vulkan.Slang.Tests.csproj" />
+  <Project Path="tests/Ahjo.Vulkan.Ngx.Native.Tests/Ahjo.Vulkan.Ngx.Native.Tests.csproj" />
+  <Project Path="tests/Ahjo.Vulkan.Ngx.Tests/Ahjo.Vulkan.Ngx.Tests.csproj" />
   <Project Path="tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj" />
   <Project Path="samples/AotSmoke/AotSmoke.csproj" />
   <Project Path="samples/HeadlessExport/HeadlessExport.csproj" />
@@ -21,4 +25,5 @@
   <Project Path="samples/HelloVma/HelloVma.csproj" />
   <Project Path="samples/HelloVmaWindowed/HelloVmaWindowed.csproj" />
   <Project Path="samples/HelloRayQuery/HelloRayQuery.csproj" />
+  <Project Path="samples/HelloDlaa/HelloDlaa.csproj" />
 </Solution>

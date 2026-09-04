@@ -1,0 +1,50 @@
+/*
+ * Linux version script for libahjo_ngx.so. The Linux counterpart of
+ * ahjo_ngx.def, and it must list exactly the same 27 names.
+ *
+ * `local: *;` is load-bearing. The static client library is linked with
+ * --whole-archive so that its Vulkan entry points survive into the shared
+ * object, which also drags in the D3D-free-but-still-large CUDA surface and
+ * libstdc++ symbols; hiding everything not named here keeps the shipped ABI
+ * equal to the Windows one instead of "whatever the archive happened to
+ * define".
+ *
+ * This list is checked against ahjo_ngx.def and against the generated
+ * P/Invokes by NgxExportDriftTests. Add a name here and there, or the test
+ * fails.
+ *
+ * Keep the formatting regular - one semicolon-terminated name per line -
+ * because the test parses this file.
+ */
+AHJO_NGX_1.0 {
+    global:
+        NVSDK_NGX_Parameter_SetULL;
+        NVSDK_NGX_Parameter_SetF;
+        NVSDK_NGX_Parameter_SetD;
+        NVSDK_NGX_Parameter_SetUI;
+        NVSDK_NGX_Parameter_SetI;
+        NVSDK_NGX_Parameter_SetVoidPointer;
+        NVSDK_NGX_Parameter_GetULL;
+        NVSDK_NGX_Parameter_GetF;
+        NVSDK_NGX_Parameter_GetD;
+        NVSDK_NGX_Parameter_GetUI;
+        NVSDK_NGX_Parameter_GetI;
+        NVSDK_NGX_Parameter_GetVoidPointer;
+        NVSDK_NGX_VULKAN_Shutdown1;
+        NVSDK_NGX_VULKAN_AllocateParameters;
+        NVSDK_NGX_VULKAN_GetCapabilityParameters;
+        NVSDK_NGX_VULKAN_DestroyParameters;
+        NVSDK_NGX_VULKAN_GetScratchBufferSize;
+        NVSDK_NGX_VULKAN_CreateFeature1;
+        NVSDK_NGX_VULKAN_ReleaseFeature;
+        NVSDK_NGX_VULKAN_EvaluateFeature_C;
+        ahjo_ngx_version_api;
+        ahjo_ngx_layout;
+        ahjo_ngx_result_to_utf8;
+        ahjo_ngx_vulkan_init_utf8;
+        ahjo_ngx_vulkan_get_feature_requirements_utf8;
+        ahjo_ngx_vulkan_get_feature_instance_extension_requirements_utf8;
+        ahjo_ngx_vulkan_get_feature_device_extension_requirements_utf8;
+    local:
+        *;
+};

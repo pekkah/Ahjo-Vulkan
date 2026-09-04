@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ahjo.Vulkan.Ngx.Native.Tests</RootNamespace>
+    <AssemblyName>Ahjo.Vulkan.Ngx.Native.Tests</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <!--
+    The ONLY reference. This suite must acquire no Vulkan device and must pass
+    with no loader and no ICD installed — same contract as the ktx and slang
+    native suites (tests/CLAUDE.md). The ahjo_ngx shim links no vulkan-1: it
+    only *includes* the Vulkan headers, which is why Ahjo.Vulkan.Ngx.Native
+    ProjectReferences Ahjo.Vulkan.Native (for the ten remapped Vk* types) and
+    nothing here needs Ahjo.Vulkan. If a test in this suite ever needs a
+    device, something got linked in that the package's contract says is not
+    there.
+
+    No tests/Shared/*.cs and no TestGate either: this suite is outside the
+    wrapper's Vulkan tier system, like the ktx and slang native suites. Its
+    gate is AHJO_NGX_REQUIRE_SHIM, not AHJO_VULKAN_TIER.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan.Ngx.Native\Ahjo.Vulkan.Ngx.Native.csproj" />
+  </ItemGroup>
+
+  <!--
+    NgxExportDriftTests parses these two files at run time and asserts set
+    equality against its own literal list, so both have to reach the output
+    directory. They are the export lists the shim is actually built from —
+    native/ngx/src/ahjo_ngx.def (Windows /DEF:) and ahjo_ngx.map (the Linux
+    version script) — not copies.
+  -->
+  <ItemGroup>
+    <None Include="..\..\native\ngx\src\ahjo_ngx.def"
+          Link="ahjo_ngx.def"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\native\ngx\src\ahjo_ngx.map"
+          Link="ahjo_ngx.map"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

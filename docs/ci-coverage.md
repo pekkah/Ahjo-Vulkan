@@ -76,9 +76,76 @@ the check name — deliberate friction.
 | `build-test` (windows-latest) | `none` | The lane provisions the Khronos loader and a SwiftShader ICD and wires `VK_DRIVER_FILES` at it, but the ICD does not answer `vkCreateInstance` — issue #152. `none` is the honest description of the runner as it is. #152's fix raises this to `software`, and the contract test is what will prove it. |
 | `vma-linux` (both RIDs) | `software` | Mesa lavapipe is a CPU ICD, and the lane only does allocation work. This is the #144 guard: a `libvma.so` that SIGSEGVed on the first `vmaCreateAllocator` shipped to NuGet because nothing ever executed it. |
 | `ktx-native` | — | Outside the system by contract: libktx is built with both uploaders off, so needing a loader would itself be the bug. |
+| `slang-native` | — | Outside the system by contract: Slang compiles shader text to SPIR-V bytes and the package does not even reference `Ahjo.Vulkan.Native`. Its gate is the pinned SHA-256 plus a smoke suite that loads the binary and compiles a shader — a checksum proves the bytes, only running them proves they work. |
+| `ngx-native` | — | Outside the tier system by contract: the `ahjo_ngx` shim links no `vulkan-1` (it only *includes* the headers), so needing a loader would itself be the bug. It proves the shim loads, resolves all 27 exports and agrees with the bindings on every NGX struct layout; it **cannot** evaluate DLSS, which needs an NVIDIA driver that no hosted runner has. It declares one thing instead of a tier — `AHJO_NGX_REQUIRE_SHIM=1`; see below. |
 
 **Lowering a declared tier to make a lane green is prohibited.** The tier
 describes the host; if the host regressed, fix the host.
+
+### The `ngx-native` lane's one declaration
+
+`Ahjo.Vulkan.Ngx.Native.Tests` has no Vulkan tier to declare — the shim links
+no loader — so it declares one narrower fact in the same spirit, and by the
+same rule: **the lane states what its host provides; the suite never sniffs
+for it.**
+
+| Variable | Declares | Set by | If absent |
+|---|---|---|---|
+| `AHJO_NGX_REQUIRE_SHIM=1` | the `ahjo_ngx` shim must be loadable | `ngx-native` only | an unloadable shim **skips** the suite instead of failing it |
+
+Without it, a failed SDK fetch or a broken cmake step would leave every test
+skipped and the lane green — the silent-coverage failure #158 closed. Don't
+drop it to make a red run green.
+
+### What a driverless runner can actually answer
+
+`GetFeatureInstanceExtensionRequirements` is **driver-independent**, and that
+is measured rather than assumed. It takes no Vulkan object and is answered out
+of NVIDIA's static client library; it never loads the driver-side NGX core.
+Both host kinds agree exactly:
+
+| Host | Result |
+|---|---|
+| `windows-latest` CI runner, no NVIDIA driver | `Success`, `extensionCount` 1, `VK_KHR_get_physical_device_properties2` specVersion 2 |
+| RTX 4070 Ti, driver 610.47 | `Success`, `extensionCount` 1, `VK_KHR_get_physical_device_properties2` specVersion 2 |
+
+Issue #216's spec originally guessed the opposite — that no driver implied no
+`Success` — and briefly carried an `AHJO_NGX_EXPECT_NO_DRIVER` declaration to
+assert it. CI disproved the premise, and both the variable and the assertion
+were removed. The suite now asserts only what holds on every host: the call
+returns rather than faulting or hanging, and a `Success` carries a plausible
+count and a non-null array. **Don't reintroduce a driver-conditional
+expectation for this call.**
+
+`CreateFeature` / `EvaluateFeature` are a different matter: they do need the
+driver and the consumer-supplied feature DLL, so real DLSS coverage stays a
+local-NVIDIA-hardware item. No hosted runner can provide it, and the feature
+DLL never enters CI at all.
+
+### `Ahjo.Vulkan.Ngx.Tests` — what the wrapper suite proves where
+
+Unlike `Ahjo.Vulkan.Ngx.Native.Tests`, this suite runs in **`build-test`**, not
+in the `ngx-native` lane: it wraps Vulkan objects, so it carries
+`tests/Shared/*.cs` and the declared-tier contract like the other suites that
+touch Vulkan. Its skips split across two classes, both of which
+`[gate:*]` treats as permanent-and-correct rather than as coverage gaps.
+
+| Runs on | Gate | What it proves |
+|---|---|---|
+| Any host, no driver, no NGX SDK | none | Shadow-enum drift for all five enums (values **and** member counts, so an `NgxVersion` bump that adds a member is a decision rather than a silent gap); `NgxDescription` validation; `NgxExtensionSet` copy-and-NUL-terminate over a fabricated `VkExtensionProperties[]`; `DlssOptimalSettings` availability semantics; the `AhjoValidation`-gated evaluate checks, including that `ImageUsage.None` is skipped rather than failed |
+| Any Vulkan driver, SwiftShader included | `[gate:driver]` | An `NgxExtensionSet` reaches `vkCreateDevice` through `DeviceDescription.Extensions` — the pointer/termination contract against a real loader, with no NGX involved; the `EnableMemoryBudget` pairing check; `Allocator.GetHeapBudgets` returning one row per heap |
+| A staged NGX SDK (`./tools/setup-ngx.ps1`) | `[gate:platform]` | `NgxSupport.TryGetInstanceExtensions` over the **wrapper's** copy path — the native-level version of the same assertion already runs in `ngx-native` |
+| NVIDIA GPU + DLSS-capable driver + `nvngx_dlss.dll` | `[gate:feature]` | Everything real: context create, `GetOptimalSettings` for all six modes, the end-to-end create → transition → evaluate → release, `TryGetStats`, and the missing-feature-library diagnosis |
+
+**CI reaches the first two rows and no further.** There is no NVIDIA hardware on
+a hosted runner (#32) and the feature DLL never enters CI (#214), so every DLSS
+evaluate in this repository is evidence from a developer machine, quoted in the
+PR — the way #217 quoted its `nm -D` and `dumpbin` output. That is the honest
+description, not a gap to be closed by a mock.
+
+The suite deliberately does **not** run inside the `ngx-native` lane even though
+that lane has the shim: that lane's contract is "no loader, no ICD", and
+`.github/CLAUDE.md` forbids growing it into wrapper coverage.
 
 ## The ceiling, stated plainly
 

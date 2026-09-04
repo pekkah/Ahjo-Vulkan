@@ -27,6 +27,15 @@ public sealed unsafe class Device : IDisposable
     public   readonly PhysicalDevice      PhysicalDevice;
     private  readonly Queue[]             _queues;
     private  Allocator                    _allocator;
+    private  readonly AllocatorDescription _allocatorDescription;
+    // Whether VK_EXT_memory_budget was ENABLED at vkCreateDevice time, captured
+    // from the extension span while it is still in scope. Vulkan exposes no
+    // query for "what did I enable", and support is not the same question — a
+    // driver can support an extension the device did not enable, which is
+    // exactly the case that makes VMA's budget path chain
+    // VkPhysicalDeviceMemoryBudgetPropertiesEXT into a device that will reject
+    // it. One bool, set once, so Allocator.Create can ask the real question.
+    internal readonly bool                MemoryBudgetExtensionEnabled;
     private  bool                         _allocatorCreated;
     private  bool                         _disposed;
     // Allocator lazy-init runs at most once per Device, so the cost of
@@ -53,9 +62,13 @@ public sealed unsafe class Device : IDisposable
         VkDevice_T*            handle,
         PhysicalDevice         physicalDevice,
         Queue[]                queues,
-        ReadOnlySpan<Utf8Name> enabledExtensions)
+        ReadOnlySpan<Utf8Name> enabledExtensions,
+        AllocatorDescription   allocatorDescription)
     {
         Handle         = handle;
+        _allocatorDescription = allocatorDescription;
+        MemoryBudgetExtensionEnabled =
+            PhysicalDevice.ContainsExtension(enabledExtensions, "VK_EXT_memory_budget"u8);
         // The span is consumed here and never stored — a ReadOnlySpan field
         // in a class would not compile, which is the enforcement.
         Functions      = new DeviceFunctionTable(handle, enabledExtensions);
@@ -148,7 +161,7 @@ public sealed unsafe class Device : IDisposable
             {
                 if (!_allocatorCreated)
                 {
-                    _allocator        = Ahjo.Vulkan.Allocator.Create(this);
+                    _allocator        = Ahjo.Vulkan.Allocator.Create(this, in _allocatorDescription);
                     _allocatorCreated = true;
                 }
                 return _allocator;
