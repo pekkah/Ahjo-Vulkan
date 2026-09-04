@@ -1,0 +1,72 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Ahjo.Vulkan.Samples.HelloDlaa</RootNamespace>
+    <AssemblyName>HelloDlaa</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan\Ahjo.Vulkan.csproj" />
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan.Slang\Ahjo.Vulkan.Slang.csproj" />
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan.Ngx\Ahjo.Vulkan.Ngx.csproj" />
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan.Utilities\Ahjo.Vulkan.Utilities.csproj" />
+    <PackageReference Include="ppy.SDL3-CS" />
+  </ItemGroup>
+
+  <!-- Share the SDL3 window shim with the test project (#87 / #88). -->
+  <ItemGroup>
+    <Compile Include="..\..\tests\Ahjo.Vulkan.Tests\SdlWindow.cs" Link="SdlWindow.cs" />
+  </ItemGroup>
+
+  <!--
+    No glslc target, like HelloRayQuery: the shader is compiled at run time by
+    Ahjo.Vulkan.Slang, so it only has to be copied.
+  -->
+  <ItemGroup>
+    <None Include="Shaders\cube.slang"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    ==================================================================
+    The DLSS feature library (nvngx_dlss.dll / libnvidia-ngx-dlss.so).
+    ==================================================================
+    Nothing in this file ever downloads it. It is proprietary and it is the
+    consumer's to supply (#214) — the same posture
+    Ahjo.Vulkan.Ngx.Native.csproj states for the NGX SDK itself. See
+    docs/ngx-notes.md for where to get it and what its licence puts on the
+    application.
+
+    Three candidates, in order. The first two are MSBuild items and BOTH are
+    Condition'ed on Exists(...), because CI builds this sample with no feature
+    DLL anywhere and TreatWarningsAsErrors=true means a missing file must not
+    even warn:
+
+      1. An explicit override: pass the NvidiaDlssDll property on the command
+         line, e.g. -p:NvidiaDlssDll=C:\path\nvngx_dlss.dll
+      2. The file dropped beside this csproj (git-ignored, see .gitignore).
+      3. NOT an MSBuild item: the run-time NgxDescription.DlssSearchPaths
+         fallback to native/ngx/staged/<rid>/rel, built by
+         Program.BuildSearchPaths(). That one is a developer-machine
+         convenience for THIS repository and is not the deployment model.
+  -->
+  <PropertyGroup>
+    <_DlaaWindows Condition="$([MSBuild]::IsOSPlatform('Windows'))">true</_DlaaWindows>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(NvidiaDlssDll)' != '' and Exists('$(NvidiaDlssDll)')">
+    <None Include="$(NvidiaDlssDll)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(NvidiaDlssDll)' == '' and '$(_DlaaWindows)' == 'true' and Exists('$(MSBuildProjectDirectory)\nvngx_dlss.dll')">
+    <None Include="nvngx_dlss.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(NvidiaDlssDll)' == '' and '$(_DlaaWindows)' != 'true'">
+    <None Include="libnvidia-ngx-dlss.so*" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+</Project>

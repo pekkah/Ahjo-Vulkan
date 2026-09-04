@@ -302,6 +302,11 @@ native/ngx/build/
 # fails with the file simply absent.
 !native/ngx/src/ahjo_ngx.map
 
+# Consumer-supplied DLSS feature library dropped beside samples/HelloDlaa for a
+# local run. Never committed; see docs/ngx-notes.md.
+samples/HelloDlaa/nvngx_dlss.dll
+samples/HelloDlaa/libnvidia-ngx-dlss.so*
+
 # Verify snapshot workflow produces .received.* files on mismatch; they're
 # intentionally transient. .verified.* files are committed and ARE tracked.
 *.received.*
