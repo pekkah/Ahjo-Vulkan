@@ -55,6 +55,13 @@ internal static unsafe class Program
 
     private const uint FramesInFlight = 2;
 
+    /// <summary>
+    /// How long to sleep between retries while the window is minimized and the
+    /// swapchain has no presentable extent. A real application blocks on its
+    /// event queue instead; a sample that spun here would peg a core.
+    /// </summary>
+    private const int MinimizedPollMilliseconds = 16;
+
     // Validation messages fire from arbitrary driver threads — keep the
     // counters static so the callback closure is captureless.
     private static int s_validationErrors;
@@ -254,6 +261,20 @@ internal static unsafe class Program
 
         var clock = Stopwatch.StartNew();
         ulong frame = 0;
+        // Non-presentability has to be STICKY, because nothing else in the
+        // loop can rediscover it. After a minimize:
+        //   * ConsumeResize() is false -- SdlWindow.PumpEvents only raises
+        //     the flag for a non-zero size that differs from the last one,
+        //     so neither the minimize nor a restore at the same size sets
+        //     it; and
+        //   * swap.Extent == window.Width/Height -- SdlWindow keeps its
+        //     last non-zero size, and Swapchain.Recreate returns Minimized
+        //     BEFORE assigning its extent field, so both sides keep their
+        //     last good values and compare equal.
+        // Every term of the test below therefore goes false while the
+        // window is minimized, and without this flag the loop would fall
+        // straight through to AcquireNextImage and throw.
+        bool presentable = true;
         try
         {
             while (!window.ShouldClose)
@@ -261,17 +282,24 @@ internal static unsafe class Program
                 window.PumpEvents();
                 if (window.ShouldClose) break;
 
-                if (window.ConsumeResize() || swap.Extent.width != window.Width || swap.Extent.height != window.Height)
+                // Consumed into a local BEFORE the || chain: inside it, a
+                // short-circuit on an earlier term would swallow the event and
+                // leave _resized set for a frame that no longer needs it.
+                bool resized = window.ConsumeResize();
+
+                // !presentable is the FIRST term, so a minimized loop keeps
+                // re-entering the recreate path instead of falling through.
+                if (!presentable || resized ||
+                    swap.Extent.width != window.Width || swap.Extent.height != window.Height)
                 {
-                    device.WaitIdle();
-                    swap.Recreate(new SwapchainDescription
+                    presentable = TryRecreate(device, swap, ring, in surface, window);
+                    if (!presentable)
                     {
-                        Surface = surface,
-                        Width   = window.Width,
-                        Height  = window.Height,
-                    });
-                    ring.RecycleStaleAcquireSemaphores();
-                    continue;
+                        // Still minimized. Sleep rather than spin; a real
+                        // application blocks on the event queue instead.
+                        System.Threading.Thread.Sleep(MinimizedPollMilliseconds);
+                        continue;
+                    }
                 }
 
                 using var fc = ring.BeginFrame();
@@ -281,16 +309,22 @@ internal static unsafe class Program
                     fc.MarkImageAcquireSignaled();
                 if (acq is AcquireResult.OutOfDate or AcquireResult.Suboptimal)
                 {
-                    device.WaitIdle();
-                    swap.Recreate(new SwapchainDescription
-                    {
-                        Surface = surface,
-                        Width   = window.Width,
-                        Height  = window.Height,
-                    });
-                    ring.RecycleStaleAcquireSemaphores();
+                    presentable = TryRecreate(device, swap, ring, in surface, window);
+                    if (!presentable) System.Threading.Thread.Sleep(MinimizedPollMilliseconds);
                     continue;
                 }
+                // Tested BEFORE the catch-all below: SurfaceLost is terminal,
+                // and letting it reach a print-and-continue is the bug this
+                // guards.
+                if (acq == AcquireResult.SurfaceLost)
+                {
+                    ReportSurfaceLost();
+                    break;
+                }
+                // Everything left is Timeout or NotReady. Neither touches the
+                // swapchain's state, and neither acquired an image or signalled
+                // the acquire semaphore, so retrying next iteration is correct
+                // and there is nothing to recycle.
                 if (acq != AcquireResult.Success)
                 {
                     Console.Error.WriteLine($"AcquireNextImage: {acq}");
@@ -389,16 +423,22 @@ internal static unsafe class Program
                 finally { rec.Dispose(); }
 
                 var pres = swap.Present(queue, imageIndex);
+                if (pres == AcquireResult.SurfaceLost)
+                {
+                    ReportSurfaceLost();
+                    break;
+                }
+                // Present can only report Success, Suboptimal, OutOfDate or
+                // SurfaceLost: Timeout and NotReady are gated `when fromAcquire`
+                // in MapPresentationResult, so a present returning either is a
+                // broken ICD and throws rather than mapping to a benign retry.
+                // There is deliberately no catch-all on this side.
                 if (pres is AcquireResult.OutOfDate or AcquireResult.Suboptimal)
                 {
-                    device.WaitIdle();
-                    swap.Recreate(new SwapchainDescription
-                    {
-                        Surface = surface,
-                        Width   = window.Width,
-                        Height  = window.Height,
-                    });
-                    ring.RecycleStaleAcquireSemaphores();
+                    // No sleep on the false leg: the loop top sees !presentable
+                    // on the next iteration and sleeps there. One un-slept
+                    // iteration is bounded.
+                    presentable = TryRecreate(device, swap, ring, in surface, window);
                 }
 
                 frame++;
@@ -440,6 +480,63 @@ internal static unsafe class Program
         if (!isError && !isWarn) return;
         string tag = isError ? "ERROR" : "WARN ";
         Console.Error.WriteLine($"[VK {tag}] {msg.MessageIdName ?? "?"}: {msg.Message}");
+    }
+
+    /// <summary>
+    /// <c>VK_ERROR_SURFACE_LOST_KHR</c> reached the frame loop. This is
+    /// <b>terminal, not retryable</b>, and the sample stops.
+    /// </summary>
+    /// <remarks>
+    /// <para><c>SurfaceLost</c> maps to <c>SwapchainState.Poisoned</c> without
+    /// throwing, so unlike a hard error it flows back as an ordinary
+    /// <see cref="AcquireResult"/> and has to be handled here or it falls
+    /// through — and the next <c>AcquireNextImage</c> then throws out of
+    /// <c>ThrowIfNotPresentable</c>, which rejects <c>Poisoned</c> exactly as it
+    /// rejects <c>Minimized</c>.</para>
+    /// <para><b>Do not turn this into a retry.</b> <c>Recreate</c> over the same
+    /// <c>VkSurfaceKHR</c> cannot succeed: recovery means destroying and
+    /// rebuilding the surface as well — a strict superset of the
+    /// <c>OutOfDate</c> path, and the window system's business rather than this
+    /// sample's. Routing it through <c>TryRecreate</c> would only fail
+    /// differently.</para>
+    /// <para>The call sites <c>break</c> rather than <c>return</c>, so the
+    /// post-loop drain and the validation summary still run. Exit code is
+    /// unchanged — 0 unless the validation layer complained, which still
+    /// returns 4: a lost surface is an environment failure, not a defect in the
+    /// sample.</para>
+    /// </remarks>
+    private static void ReportSurfaceLost()
+    {
+        Console.Error.WriteLine(
+            "The window surface was lost (VK_ERROR_SURFACE_LOST_KHR — typically a display-driver " +
+            "restart, a session switch or a monitor change). A swapchain over a lost surface cannot " +
+            "be recreated, so this sample exits rather than retrying.");
+    }
+
+    /// <summary>
+    /// Drains the device, rebuilds the swapchain at the window's current size
+    /// and rotates any stale acquire semaphore. Returns <see langword="false"/>
+    /// when the result is not presentable -- a minimized window, which is a
+    /// legal state and not an error (#110).
+    /// </summary>
+    /// <remarks>
+    /// Callers must test this return value rather than <c>swap.Extent</c>:
+    /// <c>CreateOrRecreate</c> returns <c>Minimized</c> <i>before</i> assigning
+    /// its extent field, so the property keeps its last good non-zero value and
+    /// an extent test can never see the minimize.
+    /// </remarks>
+    private static bool TryRecreate(
+        Device device, Swapchain swap, FrameRing ring, in Surface surface, SdlWindow window)
+    {
+        device.WaitIdle();
+        SwapchainState state = swap.Recreate(new SwapchainDescription
+        {
+            Surface = surface,
+            Width   = window.Width,
+            Height  = window.Height,
+        });
+        ring.RecycleStaleAcquireSemaphores();
+        return state == SwapchainState.Ready;
     }
 
     /// <summary>

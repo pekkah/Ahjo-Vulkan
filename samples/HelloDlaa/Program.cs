@@ -438,9 +438,9 @@ internal static unsafe class Program
                     break;
                 }
                 // Everything left is Timeout or NotReady. Neither touches the
-                // swapchain's state -- it stays Ready -- and neither acquired an
-                // image or signalled the acquire semaphore, so retrying next
-                // iteration is correct and there is nothing to recycle.
+                // swapchain's state, and neither acquired an image or signalled
+                // the acquire semaphore, so retrying next iteration is correct
+                // and there is nothing to recycle.
                 if (acq != AcquireResult.Success) continue;
 
                 FrameTargets slot = targets[fc.SlotIndex]!;
