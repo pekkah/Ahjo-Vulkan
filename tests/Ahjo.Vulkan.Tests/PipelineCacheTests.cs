@@ -1,4 +1,5 @@
 using System.IO;
+using System.Threading;
 using Ahjo.Vulkan.Native;
 using Ahjo.Vulkan.Testing;
 using Xunit;
@@ -149,6 +150,69 @@ public sealed class PipelineCacheTests
         sources[0] = srcA;
         sources[1] = srcB;
         dst.Merge(sources);
+    }
+
+    [Fact]
+    public void WriteAtomic_ConcurrentSaversOfOnePath_AllCompleteAndFileReadable()
+    {
+        // #230: the atomic write used a fixed `path + ".tmp"` sibling, so two
+        // savers of one cache path opened the same FileShare.None temp and the
+        // second threw IOException. Per-writer temp names let concurrent
+        // writers serialize on the rename (last-writer-wins) instead. This is
+        // the wrapper's half and needs no Vulkan device — it drives the atomic
+        // write directly.
+        string path = Path.Combine(Path.GetTempPath(), $"ahjo-cache-{Guid.NewGuid():N}.bin");
+        string dir  = Path.GetDirectoryName(path)!;
+        string name = Path.GetFileName(path);
+        try
+        {
+            const int writers = 8;
+            using var start = new Barrier(writers);
+            var errors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+
+            var threads = new Thread[writers];
+            for (int i = 0; i < writers; i++)
+            {
+                int payload = i; // distinct content per writer.
+                threads[i] = new Thread(() =>
+                {
+                    try
+                    {
+                        byte[] bytes = new byte[64];
+                        Array.Fill(bytes, (byte)payload);
+                        start.SignalAndWait();
+                        for (int rep = 0; rep < 50; rep++)
+                            PipelineCache.WriteAtomic(path, bytes);
+                    }
+                    catch (Exception e)
+                    {
+                        errors.Enqueue(e);
+                    }
+                });
+            }
+
+            foreach (var t in threads) t.Start();
+            foreach (var t in threads) t.Join();
+
+            Assert.Empty(errors);
+
+            // The file exists, is readable, and holds one writer's payload
+            // whole (last-writer-wins, never a torn blend of two payloads).
+            Assert.True(File.Exists(path));
+            byte[] final = File.ReadAllBytes(path);
+            Assert.Equal(64, final.Length);
+            byte first = final[0];
+            Assert.All(final, b => Assert.Equal(first, b));
+
+            // No temp siblings left behind by any writer.
+            Assert.Empty(Directory.GetFiles(dir, name + ".*.tmp"));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+            foreach (var stray in Directory.GetFiles(dir, name + ".*.tmp"))
+                File.Delete(stray);
+        }
     }
 
     private static Device CreateGraphicsDevice(Instance instance)
