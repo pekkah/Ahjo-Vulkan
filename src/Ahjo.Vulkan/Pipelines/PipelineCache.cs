@@ -2,6 +2,7 @@ using System.Buffers;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading;
 using Ahjo.Vulkan.Native;
 
 namespace Ahjo.Vulkan;
@@ -144,17 +145,64 @@ public readonly unsafe struct PipelineCache : IVulkanHandle<PipelineCache>, IDis
         Vk.vkDestroyPipelineCache(DeviceHandle, Handle, null);
     }
 
-    private static void WriteAtomic(string path, ReadOnlySpan<byte> bytes)
+    // Test seam (InternalsVisibleTo): the atomic write is the wrapper's half
+    // of #230; a driverless concurrency test drives it directly since Save
+    // needs a live VkPipelineCache handle.
+    internal static void WriteAtomic(string path, ReadOnlySpan<byte> bytes)
     {
-        // Write to a sibling temp file, then rename onto the target.
-        // File.Move(overwrite: true) is the closest .NET ships to a
-        // POSIX rename on Windows — atomic per the underlying
-        // MoveFileEx(MOVEFILE_REPLACE_EXISTING) call.
-        string tmp = path + ".tmp";
-        using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+        // Write to a per-writer temp sibling, then rename onto the target.
+        // The temp name is unique per process + thread, so two concurrent
+        // savers of one cache path no longer collide on a fixed sibling —
+        // FileShare.None turned the second into an IOException (#230).
+        string tmp = $"{path}.{Environment.ProcessId}-{Environment.CurrentManagedThreadId}.tmp";
+        try
         {
-            if (!bytes.IsEmpty) fs.Write(bytes);
+            using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                if (!bytes.IsEmpty) fs.Write(bytes);
+            }
+            PublishByRename(tmp, path);
         }
-        File.Move(tmp, path, overwrite: true);
+        catch
+        {
+            // A failed write or rename must not leave a stray temp sibling
+            // behind. File.Delete no-ops on a missing file; a best-effort
+            // cleanup failure is swallowed so the original error surfaces.
+            try { File.Delete(tmp); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            throw;
+        }
+    }
+
+    private static void PublishByRename(string tmp, string path)
+    {
+        // File.Move(overwrite: true) is the atomic publish step — a
+        // MoveFileEx(MOVEFILE_REPLACE_EXISTING) on Windows, rename(2) on
+        // POSIX. Each concurrent saver now owns a distinct temp file (#230),
+        // but on Windows the replace opens the destination briefly, so two
+        // renames onto the same target can still collide
+        // (ERROR_SHARING_VIOLATION / ERROR_ACCESS_DENIED, surfaced as
+        // IOException / UnauthorizedAccessException). That window is
+        // sub-millisecond; a few bounded retries turn the race back into
+        // last-writer-wins rather than a throw. POSIX rename has no such
+        // window and returns on the first attempt.
+        const int maxAttempts = 10;
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Move(tmp, path, overwrite: true);
+                return;
+            }
+            catch (IOException) when (attempt < maxAttempts)
+            {
+                Thread.Sleep(attempt); // brief, growing backoff (1..9 ms).
+            }
+            catch (UnauthorizedAccessException) when (attempt < maxAttempts)
+            {
+                Thread.Sleep(attempt);
+            }
+        }
     }
 }
