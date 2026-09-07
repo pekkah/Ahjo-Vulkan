@@ -2,6 +2,7 @@ using System.Buffers;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading;
 using Ahjo.Vulkan.Native;
 
 namespace Ahjo.Vulkan;
@@ -150,14 +151,9 @@ public readonly unsafe struct PipelineCache : IVulkanHandle<PipelineCache>, IDis
     internal static void WriteAtomic(string path, ReadOnlySpan<byte> bytes)
     {
         // Write to a per-writer temp sibling, then rename onto the target.
-        // File.Move(overwrite: true) is the closest .NET ships to a POSIX
-        // rename on Windows — atomic per the underlying
-        // MoveFileEx(MOVEFILE_REPLACE_EXISTING) call — and stays the single
-        // atomic publish step. The temp name is unique per process + thread,
-        // so two concurrent savers of one cache path no longer collide on a
-        // fixed sibling — FileShare.None turned the second into an
-        // IOException (#230). They now race only on the rename, which is
-        // last-writer-wins.
+        // The temp name is unique per process + thread, so two concurrent
+        // savers of one cache path no longer collide on a fixed sibling —
+        // FileShare.None turned the second into an IOException (#230).
         string tmp = $"{path}.{Environment.ProcessId}-{Environment.CurrentManagedThreadId}.tmp";
         try
         {
@@ -165,7 +161,7 @@ public readonly unsafe struct PipelineCache : IVulkanHandle<PipelineCache>, IDis
             {
                 if (!bytes.IsEmpty) fs.Write(bytes);
             }
-            File.Move(tmp, path, overwrite: true);
+            PublishByRename(tmp, path);
         }
         catch
         {
@@ -176,6 +172,37 @@ public readonly unsafe struct PipelineCache : IVulkanHandle<PipelineCache>, IDis
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
             throw;
+        }
+    }
+
+    private static void PublishByRename(string tmp, string path)
+    {
+        // File.Move(overwrite: true) is the atomic publish step — a
+        // MoveFileEx(MOVEFILE_REPLACE_EXISTING) on Windows, rename(2) on
+        // POSIX. Each concurrent saver now owns a distinct temp file (#230),
+        // but on Windows the replace opens the destination briefly, so two
+        // renames onto the same target can still collide
+        // (ERROR_SHARING_VIOLATION / ERROR_ACCESS_DENIED, surfaced as
+        // IOException / UnauthorizedAccessException). That window is
+        // sub-millisecond; a few bounded retries turn the race back into
+        // last-writer-wins rather than a throw. POSIX rename has no such
+        // window and returns on the first attempt.
+        const int maxAttempts = 10;
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Move(tmp, path, overwrite: true);
+                return;
+            }
+            catch (IOException) when (attempt < maxAttempts)
+            {
+                Thread.Sleep(attempt); // brief, growing backoff (1..9 ms).
+            }
+            catch (UnauthorizedAccessException) when (attempt < maxAttempts)
+            {
+                Thread.Sleep(attempt);
+            }
         }
     }
 }
