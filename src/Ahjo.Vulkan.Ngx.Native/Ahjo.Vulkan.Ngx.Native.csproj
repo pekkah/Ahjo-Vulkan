@@ -69,7 +69,6 @@
 
   <ItemGroup>
     <PackageReference Include="MinVer" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
     <None Include="README.md" Pack="true" PackagePath="\" />
 
     <!-- Unlike Slang and KTX, and like VMA: the generated surface genuinely is
