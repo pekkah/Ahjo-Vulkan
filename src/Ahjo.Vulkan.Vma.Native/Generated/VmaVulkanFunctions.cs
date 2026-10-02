@@ -82,4 +82,7 @@ public unsafe partial struct VmaVulkanFunctions
 
     [NativeTypeName("void * _Nullable")]
     public void* vkGetMemoryWin32HandleKHR;
+
+    [NativeTypeName("PFN_vkGetPhysicalDeviceProperties2KHR _Nullable")]
+    public delegate* unmanaged[Stdcall]<Ahjo.Vulkan.Native.VkPhysicalDevice_T*, Ahjo.Vulkan.Native.VkPhysicalDeviceProperties2*, void> vkGetPhysicalDeviceProperties2KHR;
 }

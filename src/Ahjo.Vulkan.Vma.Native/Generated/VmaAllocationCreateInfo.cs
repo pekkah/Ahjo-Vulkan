@@ -23,4 +23,7 @@ public unsafe partial struct VmaAllocationCreateInfo
     public void* pUserData;
 
     public float priority;
+
+    [NativeTypeName("VkDeviceSize")]
+    public ulong minAlignment;
 }
