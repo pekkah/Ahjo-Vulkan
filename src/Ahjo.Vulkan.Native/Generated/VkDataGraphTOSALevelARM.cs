@@ -1,0 +1,8 @@
+namespace Ahjo.Vulkan.Native;
+
+public enum VkDataGraphTOSALevelARM
+{
+    VK_DATA_GRAPH_TOSA_LEVEL_NONE_ARM = 0,
+    VK_DATA_GRAPH_TOSA_LEVEL_8K_ARM = 1,
+    VK_DATA_GRAPH_TOSALEVEL_MAX_ENUM_ARM = 0x7FFFFFFF,
+}

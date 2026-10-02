@@ -1123,6 +1123,9 @@ public static unsafe partial class Vk
     public const ulong VK_FORMAT_FEATURE_2_VIDEO_ENCODE_DPB_BIT_KHR = 0x10000000UL;
 
     [NativeTypeName("const VkFormatFeatureFlagBits2")]
+    public const ulong VK_FORMAT_FEATURE_2_BLOCK_MATCHING_SXD_BIT_QCOM = 0x100000000000UL;
+
+    [NativeTypeName("const VkFormatFeatureFlagBits2")]
     public const ulong VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT_KHR = 0x00000001UL;
 
     [NativeTypeName("const VkFormatFeatureFlagBits2")]
@@ -1249,6 +1252,9 @@ public static unsafe partial class Vk
     public const ulong VK_FORMAT_FEATURE_2_VIDEO_ENCODE_EMPHASIS_MAP_BIT_KHR = 0x4000000000000UL;
 
     [NativeTypeName("const VkFormatFeatureFlagBits2")]
+    public const ulong VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_FILTER_LINEAR_2D_BIT_IMG = 0x200000000000UL;
+
+    [NativeTypeName("const VkFormatFeatureFlagBits2")]
     public const ulong VK_FORMAT_FEATURE_2_DEPTH_COPY_ON_COMPUTE_QUEUE_BIT_KHR = 0x10000000000000UL;
 
     [NativeTypeName("const VkFormatFeatureFlagBits2")]
@@ -1259,6 +1265,15 @@ public static unsafe partial class Vk
 
     [NativeTypeName("const VkFormatFeatureFlagBits2")]
     public const ulong VK_FORMAT_FEATURE_2_STENCIL_COPY_ON_TRANSFER_QUEUE_BIT_KHR = 0x80000000000000UL;
+
+    [NativeTypeName("const VkFormatFeatureFlagBits2")]
+    public const ulong VK_FORMAT_FEATURE_2_DATA_GRAPH_OPTICAL_FLOW_IMAGE_BIT_ARM = 0x100000000000000UL;
+
+    [NativeTypeName("const VkFormatFeatureFlagBits2")]
+    public const ulong VK_FORMAT_FEATURE_2_DATA_GRAPH_OPTICAL_FLOW_VECTOR_BIT_ARM = 0x200000000000000UL;
+
+    [NativeTypeName("const VkFormatFeatureFlagBits2")]
+    public const ulong VK_FORMAT_FEATURE_2_DATA_GRAPH_OPTICAL_FLOW_COST_BIT_ARM = 0x400000000000000UL;
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern VkResult vkGetPhysicalDeviceToolProperties([NativeTypeName("VkPhysicalDevice")] VkPhysicalDevice_T* physicalDevice, [NativeTypeName("uint32_t *")] uint* pToolCount, VkPhysicalDeviceToolProperties* pToolProperties);
@@ -1405,6 +1420,12 @@ public static unsafe partial class Vk
     public const ulong VK_BUFFER_USAGE_2_DESCRIPTOR_HEAP_BIT_EXT = 0x10000000UL;
 
     [NativeTypeName("const VkBufferUsageFlagBits2")]
+    public const ulong VK_BUFFER_USAGE_2_MICROMAP_BUILD_INPUT_READ_ONLY_BIT_EXT = 0x00800000UL;
+
+    [NativeTypeName("const VkBufferUsageFlagBits2")]
+    public const ulong VK_BUFFER_USAGE_2_MICROMAP_STORAGE_BIT_EXT = 0x01000000UL;
+
+    [NativeTypeName("const VkBufferUsageFlagBits2")]
     public const ulong VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT_KHR = 0x00000001UL;
 
     [NativeTypeName("const VkBufferUsageFlagBits2")]
@@ -1477,12 +1498,6 @@ public static unsafe partial class Vk
     public const ulong VK_BUFFER_USAGE_2_PUSH_DESCRIPTORS_DESCRIPTOR_BUFFER_BIT_EXT = 0x04000000UL;
 
     [NativeTypeName("const VkBufferUsageFlagBits2")]
-    public const ulong VK_BUFFER_USAGE_2_MICROMAP_BUILD_INPUT_READ_ONLY_BIT_EXT = 0x00800000UL;
-
-    [NativeTypeName("const VkBufferUsageFlagBits2")]
-    public const ulong VK_BUFFER_USAGE_2_MICROMAP_STORAGE_BIT_EXT = 0x01000000UL;
-
-    [NativeTypeName("const VkBufferUsageFlagBits2")]
     public const ulong VK_BUFFER_USAGE_2_DATA_GRAPH_FOREIGN_DESCRIPTOR_BIT_ARM = 0x20000000UL;
 
     [NativeTypeName("const VkBufferUsageFlagBits2")]
@@ -1526,6 +1541,9 @@ public static unsafe partial class Vk
 
     [NativeTypeName("const VkPipelineCreateFlagBits2")]
     public const ulong VK_PIPELINE_CREATE_2_RAY_TRACING_SKIP_BUILT_IN_PRIMITIVES_BIT_KHR = 0x00001000UL;
+
+    [NativeTypeName("const VkPipelineCreateFlagBits2")]
+    public const ulong VK_PIPELINE_CREATE_2_RAY_TRACING_OPACITY_MICROMAP_BIT_EXT = 0x01000000UL;
 
     [NativeTypeName("const VkPipelineCreateFlagBits2")]
     public const ulong VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV = 0x200000000UL;
@@ -1606,9 +1624,6 @@ public static unsafe partial class Vk
     public const ulong VK_PIPELINE_CREATE_2_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT = 0x00400000UL;
 
     [NativeTypeName("const VkPipelineCreateFlagBits2")]
-    public const ulong VK_PIPELINE_CREATE_2_RAY_TRACING_OPACITY_MICROMAP_BIT_EXT = 0x01000000UL;
-
-    [NativeTypeName("const VkPipelineCreateFlagBits2")]
     public const ulong VK_PIPELINE_CREATE_2_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT = 0x02000000UL;
 
     [NativeTypeName("const VkPipelineCreateFlagBits2")]
@@ -1621,13 +1636,13 @@ public static unsafe partial class Vk
     public const ulong VK_PIPELINE_CREATE_2_PROTECTED_ACCESS_ONLY_BIT_EXT = 0x40000000UL;
 
     [NativeTypeName("const VkPipelineCreateFlagBits2")]
-    public const ulong VK_PIPELINE_CREATE_2_RAY_TRACING_DISPLACEMENT_MICROMAP_BIT_NV = 0x10000000UL;
-
-    [NativeTypeName("const VkPipelineCreateFlagBits2")]
     public const ulong VK_PIPELINE_CREATE_2_DESCRIPTOR_BUFFER_BIT_EXT = 0x20000000UL;
 
     [NativeTypeName("const VkPipelineCreateFlagBits2")]
     public const ulong VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM = 0x2000000000UL;
+
+    [NativeTypeName("const VkPipelineCreateFlagBits2")]
+    public const ulong VK_PIPELINE_CREATE_2_INSTRUMENT_SHADERS_BIT_ARM = 0x8000000000UL;
 
     [NativeTypeName("const VkPipelineCreateFlagBits2")]
     public const ulong VK_PIPELINE_CREATE_2_CAPTURE_DATA_BIT_KHR = 0x80000000UL;
@@ -1637,6 +1652,12 @@ public static unsafe partial class Vk
 
     [NativeTypeName("const VkPipelineCreateFlagBits2")]
     public const ulong VK_PIPELINE_CREATE_2_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE = 0x10000000000UL;
+
+    [NativeTypeName("const VkPipelineCreateFlagBits2")]
+    public const ulong VK_PIPELINE_CREATE_2_RAY_TRACING_OPACITY_MICROMAP_BIT_KHR = 0x01000000UL;
+
+    [NativeTypeName("const VkPipelineCreateFlagBits2")]
+    public const ulong VK_PIPELINE_CREATE_2_OPACITY_MICROMAP_DISALLOW_MIXED_SPECIAL_INDEX_BIT_KHR = 0x20000000000UL;
 
     [NativeTypeName("const VkPipelineCreateFlagBits2")]
     public const ulong VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT = 0x80000000000UL;
@@ -2057,6 +2078,72 @@ public static unsafe partial class Vk
     public static extern VkResult vkQueueSubmit2KHR([NativeTypeName("VkQueue")] VkQueue_T* queue, [NativeTypeName("uint32_t")] uint submitCount, [NativeTypeName("const VkSubmitInfo2 *")] VkSubmitInfo2* pSubmits, [NativeTypeName("VkFence")] VkFence_T* fence);
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdBindIndexBuffer3KHR([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkBindIndexBuffer3InfoKHR *")] VkBindIndexBuffer3InfoKHR* pInfo);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdBindVertexBuffers3KHR([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("uint32_t")] uint firstBinding, [NativeTypeName("uint32_t")] uint bindingCount, [NativeTypeName("const VkBindVertexBuffer3InfoKHR *")] VkBindVertexBuffer3InfoKHR* pBindingInfos);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdDrawIndirect2KHR([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkDrawIndirect2InfoKHR *")] VkDrawIndirect2InfoKHR* pInfo);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdDrawIndexedIndirect2KHR([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkDrawIndirect2InfoKHR *")] VkDrawIndirect2InfoKHR* pInfo);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdDispatchIndirect2KHR([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkDispatchIndirect2InfoKHR *")] VkDispatchIndirect2InfoKHR* pInfo);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdCopyMemoryKHR([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkCopyDeviceMemoryInfoKHR *")] VkCopyDeviceMemoryInfoKHR* pCopyMemoryInfo);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdCopyMemoryToImageKHR([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkCopyDeviceMemoryImageInfoKHR *")] VkCopyDeviceMemoryImageInfoKHR* pCopyMemoryInfo);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdCopyImageToMemoryKHR([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkCopyDeviceMemoryImageInfoKHR *")] VkCopyDeviceMemoryImageInfoKHR* pCopyMemoryInfo);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdUpdateMemoryKHR([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkDeviceAddressRangeKHR *")] VkDeviceAddressRangeKHR* pDstRange, [NativeTypeName("VkAddressCommandFlagsKHR")] uint dstFlags, [NativeTypeName("VkDeviceSize")] ulong dataSize, [NativeTypeName("const void *")] void* pData);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdFillMemoryKHR([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkDeviceAddressRangeKHR *")] VkDeviceAddressRangeKHR* pDstRange, [NativeTypeName("VkAddressCommandFlagsKHR")] uint dstFlags, [NativeTypeName("uint32_t")] uint data);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdCopyQueryPoolResultsToMemoryKHR([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("VkQueryPool")] VkQueryPool_T* queryPool, [NativeTypeName("uint32_t")] uint firstQuery, [NativeTypeName("uint32_t")] uint queryCount, [NativeTypeName("const VkStridedDeviceAddressRangeKHR *")] VkStridedDeviceAddressRangeKHR* pDstRange, [NativeTypeName("VkAddressCommandFlagsKHR")] uint dstFlags, [NativeTypeName("VkQueryResultFlags")] uint queryResultFlags);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdDrawIndirectCount2KHR([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkDrawIndirectCount2InfoKHR *")] VkDrawIndirectCount2InfoKHR* pInfo);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdDrawIndexedIndirectCount2KHR([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkDrawIndirectCount2InfoKHR *")] VkDrawIndirectCount2InfoKHR* pInfo);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdBeginConditionalRendering2EXT([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkConditionalRenderingBeginInfo2EXT *")] VkConditionalRenderingBeginInfo2EXT* pConditionalRenderingBegin);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdBindTransformFeedbackBuffers2EXT([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("uint32_t")] uint firstBinding, [NativeTypeName("uint32_t")] uint bindingCount, [NativeTypeName("const VkBindTransformFeedbackBuffer2InfoEXT *")] VkBindTransformFeedbackBuffer2InfoEXT* pBindingInfos);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdBeginTransformFeedback2EXT([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("uint32_t")] uint firstCounterRange, [NativeTypeName("uint32_t")] uint counterRangeCount, [NativeTypeName("const VkBindTransformFeedbackBuffer2InfoEXT *")] VkBindTransformFeedbackBuffer2InfoEXT* pCounterInfos);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdEndTransformFeedback2EXT([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("uint32_t")] uint firstCounterRange, [NativeTypeName("uint32_t")] uint counterRangeCount, [NativeTypeName("const VkBindTransformFeedbackBuffer2InfoEXT *")] VkBindTransformFeedbackBuffer2InfoEXT* pCounterInfos);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdDrawIndirectByteCount2EXT([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("uint32_t")] uint instanceCount, [NativeTypeName("uint32_t")] uint firstInstance, [NativeTypeName("const VkBindTransformFeedbackBuffer2InfoEXT *")] VkBindTransformFeedbackBuffer2InfoEXT* pCounterInfo, [NativeTypeName("uint32_t")] uint counterOffset, [NativeTypeName("uint32_t")] uint vertexStride);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdDrawMeshTasksIndirect2EXT([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkDrawIndirect2InfoKHR *")] VkDrawIndirect2InfoKHR* pInfo);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdDrawMeshTasksIndirectCount2EXT([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkDrawIndirectCount2InfoKHR *")] VkDrawIndirectCount2InfoKHR* pInfo);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdWriteMarkerToMemoryAMD([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkMemoryMarkerInfoAMD *")] VkMemoryMarkerInfoAMD* pInfo);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkCreateAccelerationStructure2KHR([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("const VkAccelerationStructureCreateInfo2KHR *")] VkAccelerationStructureCreateInfo2KHR* pCreateInfo, [NativeTypeName("const VkAllocationCallbacks *")] VkAllocationCallbacks* pAllocator, [NativeTypeName("VkAccelerationStructureKHR *")] VkAccelerationStructureKHR_T** pAccelerationStructure);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern void vkCmdCopyBuffer2KHR([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkCopyBufferInfo2 *")] VkCopyBufferInfo2* pCopyBufferInfo);
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
@@ -2155,11 +2242,155 @@ public static unsafe partial class Vk
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern void vkCmdCopyMemoryToImageIndirectKHR([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkCopyMemoryToImageIndirectInfoKHR *")] VkCopyMemoryToImageIndirectInfoKHR* pCopyMemoryToImageIndirectInfo);
 
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkGetDeviceFaultReportsKHR([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("uint64_t")] ulong timeout, [NativeTypeName("uint32_t *")] uint* pFaultCounts, VkDeviceFaultInfoKHR* pFaultInfo);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkGetDeviceFaultDebugInfoKHR([NativeTypeName("VkDevice")] VkDevice_T* device, VkDeviceFaultDebugInfoKHR* pDebugInfo);
+
     [NativeTypeName("const VkAccessFlagBits3KHR")]
     public const ulong VK_ACCESS_3_NONE_KHR = 0UL;
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern void vkCmdEndRendering2KHR([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkRenderingEndInfoKHR *")] VkRenderingEndInfoKHR* pRenderingEndInfo);
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_TRANSFER_SRC_BIT_KHR = 0x00000001UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_TRANSFER_DST_BIT_KHR = 0x00000002UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_SAMPLED_BIT_KHR = 0x00000004UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_STORAGE_BIT_KHR = 0x00000008UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_COLOR_ATTACHMENT_BIT_KHR = 0x00000010UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_DEPTH_STENCIL_ATTACHMENT_BIT_KHR = 0x00000020UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_TRANSIENT_ATTACHMENT_BIT_KHR = 0x00000040UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_INPUT_ATTACHMENT_BIT_KHR = 0x00000080UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR = 0x00000100UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_FRAGMENT_DENSITY_MAP_BIT_EXT = 0x00000200UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_VIDEO_DECODE_DST_BIT_KHR = 0x00000400UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_VIDEO_DECODE_SRC_BIT_KHR = 0x00000800UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_VIDEO_DECODE_DPB_BIT_KHR = 0x00001000UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_VIDEO_ENCODE_DST_BIT_KHR = 0x00002000UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_VIDEO_ENCODE_SRC_BIT_KHR = 0x00004000UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_VIDEO_ENCODE_DPB_BIT_KHR = 0x00008000UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_INVOCATION_MASK_BIT_HUAWEI = 0x00040000UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT = 0x00080000UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_SAMPLE_WEIGHT_BIT_QCOM = 0x00100000UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_SAMPLE_BLOCK_MATCH_BIT_QCOM = 0x00200000UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_HOST_TRANSFER_BIT_KHR = 0x00400000UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_TENSOR_ALIASING_BIT_ARM = 0x00800000UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_VIDEO_ENCODE_QUANTIZATION_DELTA_MAP_BIT_KHR = 0x02000000UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_VIDEO_ENCODE_EMPHASIS_MAP_BIT_KHR = 0x04000000UL;
+
+    [NativeTypeName("const VkImageUsageFlagBits2KHR")]
+    public const ulong VK_IMAGE_USAGE_2_TILE_MEMORY_BIT_QCOM = 0x08000000UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_SPARSE_BINDING_BIT_KHR = 0x00000001UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_SPARSE_RESIDENCY_BIT_KHR = 0x00000002UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_SPARSE_ALIASED_BIT_KHR = 0x00000004UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_MUTABLE_FORMAT_BIT_KHR = 0x00000008UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_CUBE_COMPATIBLE_BIT_KHR = 0x00000010UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_ALIAS_SINGLE_LAYER_DESCRIPTOR_BIT_KHR = 0x00400000UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_2D_ARRAY_COMPATIBLE_BIT_KHR = 0x00000020UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_SPLIT_INSTANCE_BIND_REGIONS_BIT_KHR = 0x00000040UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT_KHR = 0x00000080UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_EXTENDED_USAGE_BIT_KHR = 0x00000100UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_DISJOINT_BIT_KHR = 0x00000200UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_ALIAS_BIT_KHR = 0x00000400UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_PROTECTED_BIT_KHR = 0x00000800UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_SAMPLE_LOCATIONS_COMPATIBLE_DEPTH_BIT_EXT = 0x00001000UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_CORNER_SAMPLED_BIT_NV = 0x00002000UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_SUBSAMPLED_BIT_EXT = 0x00004000UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_FRAGMENT_DENSITY_MAP_OFFSET_BIT_EXT = 0x00008000UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_DESCRIPTOR_BUFFER_CAPTURE_REPLAY_BIT_EXT = 0x00010000UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_2D_VIEW_COMPATIBLE_BIT_EXT = 0x00020000UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_BIT_EXT = 0x00040000UL;
+
+    [NativeTypeName("const VkImageCreateFlagBits2KHR")]
+    public const ulong VK_IMAGE_CREATE_2_VIDEO_PROFILE_INDEPENDENT_BIT_KHR = 0x00100000UL;
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern VkResult vkCreateDebugReportCallbackEXT([NativeTypeName("VkInstance")] VkInstance_T* instance, [NativeTypeName("const VkDebugReportCallbackCreateInfoEXT *")] VkDebugReportCallbackCreateInfoEXT* pCreateInfo, [NativeTypeName("const VkAllocationCallbacks *")] VkAllocationCallbacks* pAllocator, [NativeTypeName("VkDebugReportCallbackEXT *")] VkDebugReportCallbackEXT_T** pCallback);
@@ -2323,6 +2554,42 @@ public static unsafe partial class Vk
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern void vkSubmitDebugUtilsMessageEXT([NativeTypeName("VkInstance")] VkInstance_T* instance, VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, [NativeTypeName("VkDebugUtilsMessageTypeFlagsEXT")] uint messageTypes, [NativeTypeName("const VkDebugUtilsMessengerCallbackDataEXT *")] VkDebugUtilsMessengerCallbackDataEXT* pCallbackData);
 
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkCreateGpaSessionAMD([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("const VkGpaSessionCreateInfoAMD *")] VkGpaSessionCreateInfoAMD* pCreateInfo, [NativeTypeName("const VkAllocationCallbacks *")] VkAllocationCallbacks* pAllocator, [NativeTypeName("VkGpaSessionAMD *")] VkGpaSessionAMD_T** pGpaSession);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkDestroyGpaSessionAMD([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("VkGpaSessionAMD")] VkGpaSessionAMD_T* gpaSession, [NativeTypeName("const VkAllocationCallbacks *")] VkAllocationCallbacks* pAllocator);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkSetGpaDeviceClockModeAMD([NativeTypeName("VkDevice")] VkDevice_T* device, VkGpaDeviceClockModeInfoAMD* pInfo);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkGetGpaDeviceClockInfoAMD([NativeTypeName("VkDevice")] VkDevice_T* device, VkGpaDeviceGetClockInfoAMD* pInfo);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkCmdBeginGpaSessionAMD([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("VkGpaSessionAMD")] VkGpaSessionAMD_T* gpaSession);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkCmdEndGpaSessionAMD([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("VkGpaSessionAMD")] VkGpaSessionAMD_T* gpaSession);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkCmdBeginGpaSampleAMD([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("VkGpaSessionAMD")] VkGpaSessionAMD_T* gpaSession, [NativeTypeName("const VkGpaSampleBeginInfoAMD *")] VkGpaSampleBeginInfoAMD* pGpaSampleBeginInfo, [NativeTypeName("uint32_t *")] uint* pSampleID);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdEndGpaSampleAMD([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("VkGpaSessionAMD")] VkGpaSessionAMD_T* gpaSession, [NativeTypeName("uint32_t")] uint sampleID);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkGetGpaSessionStatusAMD([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("VkGpaSessionAMD")] VkGpaSessionAMD_T* gpaSession);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkGetGpaSessionResultsAMD([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("VkGpaSessionAMD")] VkGpaSessionAMD_T* gpaSession, [NativeTypeName("uint32_t")] uint sampleID, [NativeTypeName("size_t *")] nuint* pSizeInBytes, void* pData);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkResetGpaSessionAMD([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("VkGpaSessionAMD")] VkGpaSessionAMD_T* gpaSession);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdCopyGpaSessionResultsAMD([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("VkGpaSessionAMD")] VkGpaSessionAMD_T* gpaSession);
+
     [NativeTypeName("const VkTensorViewCreateFlagBitsARM")]
     public const ulong VK_TENSOR_VIEW_CREATE_DESCRIPTOR_BUFFER_CAPTURE_REPLAY_BIT_ARM = 0x00000001UL;
 
@@ -2394,7 +2661,7 @@ public static unsafe partial class Vk
     public static extern void vkDestroyAccelerationStructureNV([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("VkAccelerationStructureNV")] VkAccelerationStructureNV_T* accelerationStructure, [NativeTypeName("const VkAllocationCallbacks *")] VkAllocationCallbacks* pAllocator);
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
-    public static extern void vkGetAccelerationStructureMemoryRequirementsNV([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("const VkAccelerationStructureMemoryRequirementsInfoNV *")] VkAccelerationStructureMemoryRequirementsInfoNV* pInfo, [NativeTypeName("VkMemoryRequirements2KHR *")] VkMemoryRequirements2* pMemoryRequirements);
+    public static extern void vkGetAccelerationStructureMemoryRequirementsNV([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("const VkAccelerationStructureMemoryRequirementsInfoNV *")] VkAccelerationStructureMemoryRequirementsInfoNV* pInfo, VkMemoryRequirements2* pMemoryRequirements);
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern VkResult vkBindAccelerationStructureMemoryNV([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("uint32_t")] uint bindInfoCount, [NativeTypeName("const VkBindAccelerationStructureMemoryInfoNV *")] VkBindAccelerationStructureMemoryInfoNV* pBindInfos);
@@ -2623,6 +2890,9 @@ public static unsafe partial class Vk
     public static extern void vkGetPrivateDataEXT([NativeTypeName("VkDevice")] VkDevice_T* device, VkObjectType objectType, [NativeTypeName("uint64_t")] ulong objectHandle, [NativeTypeName("VkPrivateDataSlot")] VkPrivateDataSlot_T* privateDataSlot, [NativeTypeName("uint64_t *")] ulong* pData);
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkQueueSetPerfHintQCOM([NativeTypeName("VkQueue")] VkQueue_T* queue, [NativeTypeName("const VkPerfHintInfoQCOM *")] VkPerfHintInfoQCOM* pPerfHintInfo);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern void vkCmdDispatchTileQCOM([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkDispatchTileInfoQCOM *")] VkDispatchTileInfoQCOM* pDispatchTileInfo);
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
@@ -2630,6 +2900,27 @@ public static unsafe partial class Vk
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern void vkCmdEndPerTileExecutionQCOM([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkPerTileEndInfoQCOM *")] VkPerTileEndInfoQCOM* pPerTileEndInfo);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkSetLatencySleepModeLegacyNV([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("VkBool32")] uint lowLatencyMode, [NativeTypeName("VkBool32")] uint lowLatencyBoost, [NativeTypeName("uint32_t")] uint minimumIntervalUs);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkLatencySleepLegacyNV([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("VkSemaphore")] VkSemaphore_T* signalSemaphore, [NativeTypeName("uint64_t")] ulong value);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkSetLatencyMarkerLegacyNV([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("uint64_t")] ulong frameID, [NativeTypeName("uint32_t")] uint marker);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkGetLatencyTimingsLegacyNV([NativeTypeName("VkDevice")] VkDevice_T* device, void* pTimings);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkQueueNotifyOutOfBandLegacyNV([NativeTypeName("VkQueue")] VkQueue_T* queue, [NativeTypeName("uint32_t")] uint queueType);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkGetSleepStatusLegacyNV([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("VkBool32 *")] uint* pLowLatencyMode);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkShutdownLatencyDeviceLegacyNV([NativeTypeName("VkDevice")] VkDevice_T* device);
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern void vkGetDescriptorSetLayoutSizeEXT([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("VkDescriptorSetLayout")] VkDescriptorSetLayout_T* layout, [NativeTypeName("VkDeviceSize *")] ulong* pLayoutSizeInBytes);
@@ -2686,7 +2977,7 @@ public static unsafe partial class Vk
     public static extern VkResult vkGetMemoryRemoteAddressNV([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("const VkMemoryGetRemoteAddressInfoNV *")] VkMemoryGetRemoteAddressInfoNV* pMemoryGetRemoteAddressInfo, [NativeTypeName("VkRemoteAddressNV *")] void** pAddress);
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
-    public static extern VkResult vkGetPipelinePropertiesEXT([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("const VkPipelineInfoEXT *")] VkPipelineInfoKHR* pPipelineInfo, VkBaseOutStructure* pPipelineProperties);
+    public static extern VkResult vkGetPipelinePropertiesEXT([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("const VkPipelineInfoKHR *")] VkPipelineInfoKHR* pPipelineInfo, VkBaseOutStructure* pPipelineProperties);
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern void vkCmdSetPatchControlPointsEXT([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("uint32_t")] uint patchControlPoints);
@@ -2765,6 +3056,12 @@ public static unsafe partial class Vk
 
     [NativeTypeName("const VkPhysicalDeviceSchedulingControlsFlagBitsARM")]
     public const ulong VK_PHYSICAL_DEVICE_SCHEDULING_CONTROLS_SHADER_CORE_COUNT_ARM = 0x00000001UL;
+
+    [NativeTypeName("const VkPhysicalDeviceSchedulingControlsFlagBitsARM")]
+    public const ulong VK_PHYSICAL_DEVICE_SCHEDULING_CONTROLS_DISPATCH_PARAMETERS_ARM = 0x00000002UL;
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdSetDispatchParametersARM([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkDispatchParametersARM *")] VkDispatchParametersARM* pDispatchParameters);
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern void vkGetDescriptorSetLayoutHostMappingInfoVALVE([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("const VkDescriptorSetBindingReferenceVALVE *")] VkDescriptorSetBindingReferenceVALVE* pBindingReference, VkDescriptorSetLayoutHostMappingInfoVALVE* pHostMapping);
@@ -3025,6 +3322,9 @@ public static unsafe partial class Vk
     [NativeTypeName("const VkDataGraphPipelineSessionCreateFlagBitsARM")]
     public const ulong VK_DATA_GRAPH_PIPELINE_SESSION_CREATE_PROTECTED_BIT_ARM = 0x00000001UL;
 
+    [NativeTypeName("const VkDataGraphPipelineSessionCreateFlagBitsARM")]
+    public const ulong VK_DATA_GRAPH_PIPELINE_SESSION_CREATE_OPTICAL_FLOW_CACHE_BIT_ARM = 0x00000002UL;
+
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern VkResult vkCreateDataGraphPipelinesARM([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("VkDeferredOperationKHR")] VkDeferredOperationKHR_T* deferredOperation, [NativeTypeName("VkPipelineCache")] VkPipelineCache_T* pipelineCache, [NativeTypeName("uint32_t")] uint createInfoCount, [NativeTypeName("const VkDataGraphPipelineCreateInfoARM *")] VkDataGraphPipelineCreateInfoARM* pCreateInfos, [NativeTypeName("const VkAllocationCallbacks *")] VkAllocationCallbacks* pAllocator, [NativeTypeName("VkPipeline *")] VkPipeline_T** pPipelines);
 
@@ -3057,6 +3357,9 @@ public static unsafe partial class Vk
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern void vkGetPhysicalDeviceQueueFamilyDataGraphProcessingEnginePropertiesARM([NativeTypeName("VkPhysicalDevice")] VkPhysicalDevice_T* physicalDevice, [NativeTypeName("const VkPhysicalDeviceQueueFamilyDataGraphProcessingEngineInfoARM *")] VkPhysicalDeviceQueueFamilyDataGraphProcessingEngineInfoARM* pQueueFamilyDataGraphProcessingEngineInfo, VkQueueFamilyDataGraphProcessingEnginePropertiesARM* pQueueFamilyDataGraphProcessingEngineProperties);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkGetPhysicalDeviceQueueFamilyDataGraphEngineOperationPropertiesARM([NativeTypeName("VkPhysicalDevice")] VkPhysicalDevice_T* physicalDevice, [NativeTypeName("uint32_t")] uint queueFamilyIndex, [NativeTypeName("const VkQueueFamilyDataGraphPropertiesARM *")] VkQueueFamilyDataGraphPropertiesARM* pQueueFamilyDataGraphProperties, VkBaseOutStructure* pProperties);
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern void vkCmdSetAttachmentFeedbackLoopEnableEXT([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("VkImageAspectFlags")] uint aspectMask);
@@ -3125,13 +3428,43 @@ public static unsafe partial class Vk
     public static extern VkResult vkEnumeratePhysicalDeviceQueueFamilyPerformanceCountersByRegionARM([NativeTypeName("VkPhysicalDevice")] VkPhysicalDevice_T* physicalDevice, [NativeTypeName("uint32_t")] uint queueFamilyIndex, [NativeTypeName("uint32_t *")] uint* pCounterCount, VkPerformanceCounterARM* pCounters, VkPerformanceCounterDescriptionARM* pCounterDescriptions);
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkEnumeratePhysicalDeviceShaderInstrumentationMetricsARM([NativeTypeName("VkPhysicalDevice")] VkPhysicalDevice_T* physicalDevice, [NativeTypeName("uint32_t *")] uint* pDescriptionCount, VkShaderInstrumentationMetricDescriptionARM* pDescriptions);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkCreateShaderInstrumentationARM([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("const VkShaderInstrumentationCreateInfoARM *")] VkShaderInstrumentationCreateInfoARM* pCreateInfo, [NativeTypeName("const VkAllocationCallbacks *")] VkAllocationCallbacks* pAllocator, [NativeTypeName("VkShaderInstrumentationARM *")] VkShaderInstrumentationARM_T** pInstrumentation);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkDestroyShaderInstrumentationARM([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("VkShaderInstrumentationARM")] VkShaderInstrumentationARM_T* instrumentation, [NativeTypeName("const VkAllocationCallbacks *")] VkAllocationCallbacks* pAllocator);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdBeginShaderInstrumentationARM([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("VkShaderInstrumentationARM")] VkShaderInstrumentationARM_T* instrumentation);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdEndShaderInstrumentationARM([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkGetShaderInstrumentationValuesARM([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("VkShaderInstrumentationARM")] VkShaderInstrumentationARM_T* instrumentation, [NativeTypeName("uint32_t *")] uint* pMetricBlockCount, void* pMetricValues, [NativeTypeName("VkShaderInstrumentationValuesFlagsARM")] uint flags);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkClearShaderInstrumentationMetricsARM([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("VkShaderInstrumentationARM")] VkShaderInstrumentationARM_T* instrumentation);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern void vkCmdEndRendering2EXT([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkRenderingEndInfoKHR *")] VkRenderingEndInfoKHR* pRenderingEndInfo);
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern void vkCmdBeginCustomResolveEXT([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkBeginCustomResolveInfoEXT *")] VkBeginCustomResolveInfoEXT* pBeginCustomResolveInfo);
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkGetPhysicalDeviceQueueFamilyDataGraphOpticalFlowImageFormatsARM([NativeTypeName("VkPhysicalDevice")] VkPhysicalDevice_T* physicalDevice, [NativeTypeName("uint32_t")] uint queueFamilyIndex, [NativeTypeName("const VkQueueFamilyDataGraphPropertiesARM *")] VkQueueFamilyDataGraphPropertiesARM* pQueueFamilyDataGraphProperties, [NativeTypeName("const VkDataGraphOpticalFlowImageFormatInfoARM *")] VkDataGraphOpticalFlowImageFormatInfoARM* pOpticalFlowImageFormatInfo, [NativeTypeName("uint32_t *")] uint* pFormatCount, VkDataGraphOpticalFlowImageFormatPropertiesARM* pImageFormatProperties);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern void vkCmdSetComputeOccupancyPriorityNV([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("const VkComputeOccupancyPriorityParametersNV *")] VkComputeOccupancyPriorityParametersNV* pParameters);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern VkResult vkGetPhysicalDeviceCooperativeMatrixProperties2EXT([NativeTypeName("VkPhysicalDevice")] VkPhysicalDevice_T* physicalDevice, [NativeTypeName("const VkPhysicalDeviceCooperativeMatrixInfo2EXT *")] VkPhysicalDeviceCooperativeMatrixInfo2EXT* pCooperativeMatrixInfo, [NativeTypeName("uint32_t *")] uint* pPropertyCount, VkCooperativeMatrixProperties2EXT* pProperties);
+
+    [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    public static extern void vkCmdSetPrimitiveRestartIndexEXT([NativeTypeName("VkCommandBuffer")] VkCommandBuffer_T* commandBuffer, [NativeTypeName("uint32_t")] uint primitiveRestartIndex);
 
     [DllImport("vulkan-1", CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     public static extern VkResult vkCreateAccelerationStructureKHR([NativeTypeName("VkDevice")] VkDevice_T* device, [NativeTypeName("const VkAccelerationStructureCreateInfoKHR *")] VkAccelerationStructureCreateInfoKHR* pCreateInfo, [NativeTypeName("const VkAllocationCallbacks *")] VkAllocationCallbacks* pAllocator, [NativeTypeName("VkAccelerationStructureKHR *")] VkAccelerationStructureKHR_T** pAccelerationStructure);

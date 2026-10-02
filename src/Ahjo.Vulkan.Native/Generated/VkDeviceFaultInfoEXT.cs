@@ -11,9 +11,9 @@ public unsafe partial struct VkDeviceFaultInfoEXT
     [NativeTypeName("char[256]")]
     public _description_e__FixedBuffer description;
 
-    public VkDeviceFaultAddressInfoEXT* pAddressInfos;
+    public VkDeviceFaultAddressInfoKHR* pAddressInfos;
 
-    public VkDeviceFaultVendorInfoEXT* pVendorInfos;
+    public VkDeviceFaultVendorInfoKHR* pVendorInfos;
 
     public void* pVendorBinaryData;
 

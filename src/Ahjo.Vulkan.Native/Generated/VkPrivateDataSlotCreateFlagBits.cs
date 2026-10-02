@@ -1,0 +1,7 @@
+namespace Ahjo.Vulkan.Native;
+
+public enum VkPrivateDataSlotCreateFlagBits
+{
+    VK_PRIVATE_DATA_SLOT_CREATE_BASE_OBJECT_HANDLE_BIT_NV = 0x00000001,
+    VK_PRIVATE_DATA_SLOT_CREATE_FLAG_BITS_MAX_ENUM = 0x7FFFFFFF,
+}

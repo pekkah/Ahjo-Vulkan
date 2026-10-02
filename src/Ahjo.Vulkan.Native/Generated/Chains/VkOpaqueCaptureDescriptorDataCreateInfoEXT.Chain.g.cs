@@ -3,7 +3,7 @@
 // Edits to this file are overwritten by RegenerateChains.
 namespace Ahjo.Vulkan.Native;
 
-public unsafe partial struct VkOpaqueCaptureDescriptorDataCreateInfoEXT : IChainable<VkBufferCreateInfo>, IChainable<VkImageCreateInfo>, IChainable<VkImageViewCreateInfo>, IChainable<VkSamplerCreateInfo>, IChainable<VkAccelerationStructureCreateInfoKHR>, IChainable<VkAccelerationStructureCreateInfoNV>, IChainable<VkTensorCreateInfoARM>, IChainable<VkTensorViewCreateInfoARM>
+public unsafe partial struct VkOpaqueCaptureDescriptorDataCreateInfoEXT : IChainable<VkBufferCreateInfo>, IChainable<VkImageCreateInfo>, IChainable<VkImageViewCreateInfo>, IChainable<VkSamplerCreateInfo>, IChainable<VkAccelerationStructureCreateInfoKHR>, IChainable<VkAccelerationStructureCreateInfoNV>, IChainable<VkTensorCreateInfoARM>, IChainable<VkTensorViewCreateInfoARM>, IChainable<VkAccelerationStructureCreateInfo2KHR>
 {
     public VkOpaqueCaptureDescriptorDataCreateInfoEXT()
     {

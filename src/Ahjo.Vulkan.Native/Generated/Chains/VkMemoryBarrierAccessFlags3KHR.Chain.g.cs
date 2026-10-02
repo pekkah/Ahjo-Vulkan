@@ -3,7 +3,7 @@
 // Edits to this file are overwritten by RegenerateChains.
 namespace Ahjo.Vulkan.Native;
 
-public unsafe partial struct VkMemoryBarrierAccessFlags3KHR : IChainable<VkSubpassDependency2>, IChainable<VkBufferMemoryBarrier2>, IChainable<VkImageMemoryBarrier2>
+public unsafe partial struct VkMemoryBarrierAccessFlags3KHR : IChainable<VkSubpassDependency2>, IChainable<VkBufferMemoryBarrier2>, IChainable<VkImageMemoryBarrier2>, IChainable<VkMemoryRangeBarriersInfoKHR>
 {
     public VkMemoryBarrierAccessFlags3KHR()
     {

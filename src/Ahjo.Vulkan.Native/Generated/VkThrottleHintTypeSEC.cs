@@ -1,0 +1,9 @@
+namespace Ahjo.Vulkan.Native;
+
+public enum VkThrottleHintTypeSEC
+{
+    VK_THROTTLE_HINT_TYPE_DEFAULT_SEC = 0,
+    VK_THROTTLE_HINT_TYPE_LOW_SEC = 1,
+    VK_THROTTLE_HINT_TYPE_HIGH_SEC = 2,
+    VK_THROTTLE_HINT_TYPE_MAX_ENUM_SEC = 0x7FFFFFFF,
+}
