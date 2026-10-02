@@ -21,6 +21,8 @@ Only regenerate the project(s) whose pin or rsp actually changed.
 
 **Slang gotcha:** `StageSlangHeaders` only copies headers out of the archive when `native/slang/include/slang.h` is *missing*, so after a `SlangVersion` bump a plain `-t:Regenerate` silently regenerates from the **old** committed headers. Delete `native/slang/include/*.h` first. Likewise, an existing `native/slang/staged/win-x64/` is not re-staged (the Windows file names carry no version) — delete it so local tests load the new binaries.
 
+**VMA gotcha:** same shape. `FetchVma` only runs when `native/vma/include/vk_mem_alloc.h` is *missing*, and that committed header is what both the regen **and the native cmake build (local and CI)** compile. After a `VmaVersion` bump, delete it before regenerating; otherwise the bindings stay on the old API and CI ships an old-version binary under the new pin. Confirm with `grep VMA_VERSION native/vma/include/vk_mem_alloc.h`. Keep only one `VulkanMemoryAllocator-*` tree under `native/vma/downloaded/`, because the header copy globs over all of them.
+
 ## Procedure
 
 1. **Edit the input**, not the output: bump the pin in `Directory.Build.props` and/or edit the rsp. Pins are pinned deliberately — all packages ship under a single `v*` tag, so a header bump is a release-visible decision; confirm the user wants it if they only asked vaguely.
