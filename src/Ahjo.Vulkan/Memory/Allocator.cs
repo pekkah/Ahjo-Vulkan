@@ -439,9 +439,9 @@ public readonly unsafe struct Allocator : IDisposable
 
     /// <summary>
     /// The <c>VmaAllocationCreateInfo</c> an <see cref="AllocationDescription"/> denotes.
-    /// Every field assigned explicitly — the struct exposes several optional pointers and a
-    /// priority the wrapper does not drive, and pinning each to its zero here keeps a future
-    /// field reorder honest.
+    /// Every field assigned explicitly — the struct exposes several optional pointers, a
+    /// priority and an extra minimum alignment (VMA 3.4.0) the wrapper does not drive, and
+    /// pinning each to its zero here keeps a future field reorder honest.
     /// </summary>
     private static VmaAllocationCreateInfo ToNative(in AllocationDescription allocation)
     {
@@ -454,6 +454,7 @@ public readonly unsafe struct Allocator : IDisposable
         aci.pool           = null;
         aci.pUserData      = null;
         aci.priority       = 0f;
+        aci.minAlignment   = 0;
         return aci;
     }
 
