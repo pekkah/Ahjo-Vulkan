@@ -215,7 +215,8 @@ public sealed unsafe class Device : IDisposable
     /// </summary>
     /// <param name="timeout">Bounds the KHR path's first, possibly blocking,
     /// count call; every later call passes 0, and the EXT path ignores it.
-    /// Must be finite and non-negative.</param>
+    /// Must be non-negative and finite: below the roughly 292-year span whose
+    /// nanosecond count overflows to <c>UINT64_MAX</c>.</param>
     /// <param name="report">The report, when the method returns
     /// <see langword="true"/>.</param>
     /// <returns><see langword="false"/> when neither device-fault extension is
@@ -224,8 +225,12 @@ public sealed unsafe class Device : IDisposable
     /// <see cref="DiagnosticSeverity.Warning"/>, source <c>"Device"</c>).</returns>
     /// <exception cref="ObjectDisposedException">The device was disposed.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeout"/>
-    /// is negative or <see cref="Timeout.InfiniteTimeSpan"/> — an unbounded
-    /// wait after device loss is refused; see #120.</exception>
+    /// is negative, <see cref="Timeout.InfiniteTimeSpan"/>, or so large that it
+    /// converts to <c>UINT64_MAX</c> nanoseconds (Vulkan's infinite wait —
+    /// about 292 years and up, <see cref="TimeSpan.MaxValue"/> included). An
+    /// unbounded wait after device loss is refused; see #120. Checked before
+    /// the extension and <see cref="IsLost"/> gates, so it throws on any
+    /// device.</exception>
     /// <remarks>
     /// <para><b>When to call.</b> After observing <c>VK_ERROR_DEVICE_LOST</c>,
     /// that is, once <see cref="IsLost"/> is set. It is set by a
@@ -261,6 +266,14 @@ public sealed unsafe class Device : IDisposable
         // Rejects Timeout.InfiniteTimeSpan too: ToVulkanTimeout maps negative
         // spans to "wait forever", the post-loss hang #120 removed.
         ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
+        // ToVulkanTimeout saturates to UINT64_MAX — Vulkan's "wait forever" —
+        // for any span whose nanosecond count overflows (about 292 years and
+        // up, TimeSpan.MaxValue included). Refuse it for the same reason.
+        ulong timeoutNs = timeout.ToVulkanTimeout();
+        if (timeoutNs == ulong.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(timeout), timeout,
+                "The timeout converts to UINT64_MAX nanoseconds, which Vulkan treats as an infinite wait; " +
+                "an unbounded wait after device loss is refused. Pass a finite span.");
         report = null;
         var eps = FaultEntryPoints;
         if (eps.Api == DeviceFaultApi.None) return false;
@@ -268,7 +281,7 @@ public sealed unsafe class Device : IDisposable
         // also keeps the draining KHR reports call off healthy devices.
         if (!IsLost) return false;
         lock (_faultReadLock)
-            return DeviceFaultReader.TryRead(in eps, Handle, timeout.ToVulkanTimeout(), out report);
+            return DeviceFaultReader.TryRead(in eps, Handle, timeoutNs, out report);
     }
 
     private DeviceFaultEntryPoints FaultEntryPoints =>

@@ -94,6 +94,32 @@ public sealed unsafe class DeviceFaultTests(ITestOutputHelper output)
             () => device.TryGetDeviceFault(Timeout.InfiniteTimeSpan, out _));
     }
 
+    /// <summary>
+    /// <c>ToVulkanTimeout</c> saturates any span whose nanosecond count
+    /// overflows to <c>UINT64_MAX</c> — Vulkan's infinite wait — so those are
+    /// refused too. The check runs before the extension and
+    /// <see cref="Device.IsLost"/> gates, which is what makes it testable on a
+    /// healthy device with no device-fault extension.
+    /// </summary>
+    [Fact]
+    public void UnboundedTimeout_MaxValueOrOverflowing_Throws()
+    {
+        TestGate.RequireDriver();
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out _);
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => device.TryGetDeviceFault(TimeSpan.MaxValue, out _));
+        // The first span past the ns overflow boundary.
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => device.TryGetDeviceFault(TimeSpan.FromTicks(long.MaxValue / 100 + 1), out _));
+
+        // A large but representable span is accepted: no extension ⇒ false.
+        Assert.False(device.TryGetDeviceFault(TimeSpan.FromTicks(long.MaxValue / 100), out _));
+        Assert.False(device.TryGetDeviceFault(TimeSpan.FromDays(365 * 100), out _));
+    }
+
     // ---- [gate:feature] ----
 
     [Fact]

@@ -221,8 +221,11 @@ internal readonly unsafe struct DeviceFaultEntryPoints
 
 internal static unsafe class DeviceFaultReader
 {
-    internal const int MaxKhrEntries = 1024;
-    internal const int MaxKhrRounds  = 8;
+    internal const int  MaxKhrEntries        = 1024;
+    internal const int  MaxKhrRounds         = 8;
+    internal const uint MaxAddressInfos      = 4096;              // 96 KiB
+    internal const uint MaxVendorInfos       = 4096;              // ~1.1 MiB
+    internal const uint MaxVendorBinaryBytes = 64u * 1024 * 1024; // EXT and KHR
 
     internal static bool TryRead(in DeviceFaultEntryPoints eps, VkDevice_T* device, ulong timeoutNs,
                                  [NotNullWhen(true)] out DeviceFaultReport? report);
@@ -246,17 +249,21 @@ Rules for the whole file:
   includes every `VkDeviceFaultInfoKHR` array element.
 - **Descriptions decode via `Utf8.FromBounded(MemoryMarshal.CreateReadOnlySpan(ref x.description.e0, 256))`.**
   Put a comment next to the `256` naming `VK_MAX_DESCRIPTION_SIZE`.
-- **Binary sizes are clamped to `Array.MaxLength`, and the clamped value is
-  written back** into the size field before the fill call.
+- **Every driver-reported size is clamped to its cap, and the clamped value
+  is written back** into the size field before the fill call. That covers
+  the EXT address and vendor counts and both binary sizes. A clamp also sets
+  `IsIncomplete` / `incomplete`, even if the driver answers `VK_SUCCESS`.
 
 **`ReadExt`** follows spec §D "EXT reader" exactly:
 1. Count call.
-2. Allocate the three arrays and write back the clamped binary size.
+2. Clamp the three sizes to `MaxAddressInfos` / `MaxVendorInfos` /
+   `MaxVendorBinaryBytes`, write all three back into `counts`
+   (VUIDs 07337/07338/07339), and allocate at the clamped sizes.
 3. Make the fill call, **always**, with null pointers for zero counts.
 4. Clamp the returned counts to the allocated lengths and trim.
 5. Build the report: `Api = Ext`, one `DeviceFaultEntry` (`Flags = None`,
    `GroupId = 0`), `VendorBinary` = the trimmed bytes, and
-   `IsIncomplete = r == VK_INCOMPLETE`.
+   `IsIncomplete = r == VK_INCOMPLETE || capped`.
 
 There is no retry. A negative result returns `r` with `report = null`.
 
@@ -270,6 +277,8 @@ There is no retry. A negative result returns `r` with `report = null`.
    - allocate `new VkDeviceFaultInfoKHR[n]` and set each element's
      sType/pNext;
    - fill call `fn(device, 0, &n, p)`;
+   - if the fill returned `VK_TIMEOUT`, append nothing and stop (the written
+     count is not trusted);
    - append `Math.Min(written, requested)` translated entries;
    - continue only when the fill returned `VK_INCOMPLETE`,
      `collected < MaxKhrEntries` and `round + 1 < MaxKhrRounds`.
@@ -292,10 +301,11 @@ There is no retry. A negative result returns `r` with `report = null`.
 1. Size query. A negative result returns it with `binary = []`.
 2. If the size is 0, return `VK_SUCCESS` with `binary = []` and **no fill
    call**.
-3. Otherwise allocate, write back the clamped size, and fill.
+3. Otherwise clamp the size to `MaxVendorBinaryBytes`, allocate, write back
+   the clamped size, and fill.
 4. A negative result returns it with `binary = []`.
 5. On `VK_SUCCESS` or `VK_INCOMPLETE`, trim to the written size and set
-   `incomplete = r == VK_INCOMPLETE`.
+   `incomplete = r == VK_INCOMPLETE || capped`.
 
 **`TryRead`** dispatches on `eps.Api`. Use exactly these sink messages,
 written with `AhjoDiagnostics.Write(DiagnosticSeverity.Warning, "Device", …)`.
@@ -345,12 +355,15 @@ public bool TryGetDeviceFault(TimeSpan timeout, [NotNullWhen(true)] out DeviceFa
 {
     ObjectDisposedException.ThrowIf(_disposed, this);
     ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);  // rejects InfiniteTimeSpan
+    ulong timeoutNs = timeout.ToVulkanTimeout();
+    if (timeoutNs == ulong.MaxValue)   // saturated (~292 years and up, TimeSpan.MaxValue): Vulkan's infinite wait
+        throw new ArgumentOutOfRangeException(nameof(timeout), timeout, "…");
     report = null;
     var eps = FaultEntryPoints;
     if (eps.Api == DeviceFaultApi.None) return false;
     if (!IsLost) return false;   // VUID-…-07336 / VUID-…-12383; keeps the draining KHR call off healthy devices
     lock (_faultReadLock)
-        return DeviceFaultReader.TryRead(in eps, Handle, timeout.ToVulkanTimeout(), out report);
+        return DeviceFaultReader.TryRead(in eps, Handle, timeoutNs, out report);
 }
 
 private DeviceFaultEntryPoints FaultEntryPoints =>
@@ -372,7 +385,9 @@ XML docs:
     is not lost, or when the read failed with nothing to report (reported
     via `AhjoDiagnostics.Sink`, `Warning`, source `"Device"`).
   - `<exception>`: `ObjectDisposedException`, and
-    `ArgumentOutOfRangeException` for a negative or infinite `timeout`
+    `ArgumentOutOfRangeException` for a negative or infinite `timeout`, or
+    one that converts to `UINT64_MAX` nanoseconds. Both checks precede the
+    extension and `IsLost` gates.
     ("an unbounded wait after device loss is refused; see #120").
   - `<remarks>`:
     - Call it after observing `DeviceLost`. List the `MarkLost` sources in
@@ -404,7 +419,7 @@ Add after `AccelerationStructureCopyMode_MatchesNative` (`:240`):
 4. `FromBounded_InvalidUtf8_DoesNotThrow`: the result contains `'�'`.
 5. `FromBounded_Empty`: a leading NUL gives `string.Empty`.
 
-### 9b. `tests/Ahjo.Vulkan.Tests/DeviceFaultReaderTests.cs` (new; driverless; **no `TestGate`**) — 30 cases
+### 9b. `tests/Ahjo.Vulkan.Tests/DeviceFaultReaderTests.cs` (new; driverless; **no `TestGate`**) — 35 cases
 
 `public sealed unsafe class DeviceFaultReaderTests`. All three fakes and every
 scenario live in this one class. The suite is serial (`xunit.runner.json`:
@@ -441,7 +456,7 @@ changes only the count *reported back*.
 - **`FakeDebugInfo`**: scenario is the binary length and the result per call.
   It records sType/pNext and the size passed.
 
-**EXT (10):**
+**EXT (13):**
 
 1. `Ext_ZeroCounts_StillMakesFillCall_AndPassesNullPointers`.
 2. `Ext_Populated_MapsToExactlyOneEntry`. Asserts every field, `Flags == None`,
@@ -454,8 +469,17 @@ changes only the count *reported back*.
 8. `Ext_SecondCallError_ReturnsError_NoReport`.
 9. `Ext_ReturnedCountsLargerThanAllocated_AreClamped`.
 10. `Ext_PassesAllocatedSizes_OnFillCall`.
+10a. `Ext_CountsAboveCap_AreCapped_PassedAsCap_AndIncomplete`. The fake
+     reports 1,000,000 address and vendor infos. The fill is passed exactly
+     `MaxAddressInfos` / `MaxVendorInfos`, the conforming fake answers
+     `VK_INCOMPLETE`, and the report is capped and `IsIncomplete`.
+10b. `Ext_BinarySizeAboveCap_IsCapped_PassedAsCap_AndIncomplete`. A 1 TiB
+     reported size; the fill is passed `MaxVendorBinaryBytes`.
+10c. `Ext_CapExceeded_DriverAnswersSuccess_StillIncomplete`. A
+     non-conforming fake answers `VK_SUCCESS` to a clamped fill;
+     `IsIncomplete` is still set.
 
-**KHR entries (10):**
+**KHR entries (11):**
 
 11. `Khr_TimeoutOnCount_NoFillCall_ZeroEntries`. The result is `VK_TIMEOUT`
     and `entries` is non-null and empty.
@@ -479,13 +503,20 @@ changes only the count *reported back*.
     `incomplete == true`.
 19. `Khr_FirstCountError_ReturnsError_NoEntries`.
 20. `Khr_SecondRoundError_KeepsFirstRoundEntries`.
+20a. `Khr_FillTimeout_TranslatesNothing_StopsDraining`. The fill returns
+     `VK_TIMEOUT` and leaves `*pFaultCounts` at the requested 3. The result
+     is `VK_TIMEOUT`, zero entries, one fill, and no further round. The fake
+     gets a `NoWrite` script step for this.
 
-**KHR debug info (4):**
+**KHR debug info (5):**
 
 21. `KhrDebug_SizeThenFill_WritesBackSize_SetsSTypeNullPNext`.
 22. `KhrDebug_SizeZero_NoFillCall_EmptyBinary`.
 23. `KhrDebug_Incomplete_KeepsBytes_AndFlagsIt`.
 24. `KhrDebug_Error_ReturnsError_EmptyBinary` (`VK_ERROR_NOT_ENOUGH_SPACE_KHR`).
+24a. `KhrDebug_SizeAboveCap_IsCapped_PassedAsCap_AndIncomplete`. A
+     `uint.MaxValue` reported size; the fill is passed `MaxVendorBinaryBytes`
+     and the result is `VK_INCOMPLETE` plus `incomplete`.
 
 **`TryRead` composition (6).** Capture the sink with the
 `DeviceLossTests.cs:162-170` try/finally pattern.
@@ -500,11 +531,12 @@ changes only the count *reported back*.
 29. `TryRead_KhrPartialDrainError_ReturnsTrue_IncompleteAndWarning`.
 30. `TryRead_KhrDebugInfoError_KeepsEntries_EmptyBinary_Warning`.
 
-**Not unit-tested, by design:** the `> Array.MaxLength` clamps (they would
-genuinely allocate more than 2 GB). They are covered by review of Step 6.
-Say so in a comment.
+The caps are unit-tested directly (10a-10c, 24a). The fakes are
+conforming: a `VK_SUCCESS`-scripted fill that was passed less than is
+available answers `VK_INCOMPLETE`. The two binary-cap cases allocate the
+64 MiB cap once each.
 
-### 9c. `tests/Ahjo.Vulkan.Tests/DeviceFaultTests.cs` (new; device-level) — 12 cases
+### 9c. `tests/Ahjo.Vulkan.Tests/DeviceFaultTests.cs` (new; device-level) — 13 cases
 
 Copy these private helpers from `MeshShaderTests.cs` and adapt them:
 `CreateValidatedInstance` (`:889`), `AssertNoValidationErrors` (`:901`) and
@@ -526,13 +558,18 @@ An older layer reporting an unknown sType is a gap in the oracle, not a
 wrapper defect. Every validation-tier test must record **zero** errors
 (`AssertNoValidationErrors`). There is no allowlist.
 
-**`[gate:driver]` (3):**
+**`[gate:driver]` (4):**
 
 1. `NoExtension_ApiNone_TryGetFalse_EvenAfterMarkLost`. This `MarkLost` is
    safe: there is no pointer to call.
 2. `Disposed_TryGetDeviceFault_Throws`.
 3. `NegativeOrInfiniteTimeout_Throws`. Checks both
    `TimeSpan.FromMilliseconds(-1)` and `Timeout.InfiniteTimeSpan`.
+3a. `UnboundedTimeout_MaxValueOrOverflowing_Throws`. `TimeSpan.MaxValue` and
+    `TimeSpan.FromTicks(long.MaxValue / 100 + 1)` throw. `FromTicks(long.MaxValue / 100)`
+    and 100 years are accepted (no extension, so `false`). This runs on a
+    plain device because the argument checks precede the extension and
+    `IsLost` gates.
 
 **`[gate:feature]`.** Each case calls
 `TestGate.RequireDeviceFeature(device is not null, "No GPU exposes <ext> with the deviceFault feature.")`.

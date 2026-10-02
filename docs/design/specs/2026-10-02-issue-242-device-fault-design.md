@@ -392,18 +392,21 @@ public enum DeviceFaultAddressType { None = 0, ReadInvalid = 1, WriteInvalid = 2
    `Memory/StagingBatch.cs:98`. Calling into a destroyed `VkDevice` is
    undefined behavior.
 2. Validate the timeout. Throw `ArgumentOutOfRangeException` when
-   `timeout < TimeSpan.Zero`, which includes `Timeout.InfiniteTimeSpan`. This
-   deliberately does **not** reuse `ToVulkanTimeout`'s negative-is-infinite
-   mapping: an unbounded block after loss is exactly what #120 removed
-   (`Fence.cs:110-114`).
+   `timeout < TimeSpan.Zero`, which includes `Timeout.InfiniteTimeSpan`, **and
+   when `timeout.ToVulkanTimeout()` is `ulong.MaxValue`**. `ToVulkanTimeout`
+   saturates any span whose nanosecond count overflows (about 292 years and
+   up, `TimeSpan.MaxValue` included) to `UINT64_MAX`, which Vulkan treats as
+   an infinite wait. This deliberately does **not** reuse `ToVulkanTimeout`'s
+   negative-is-infinite mapping, or its saturation: an unbounded block after
+   loss is exactly what #120 removed (`Fence.cs:110-114`). Both checks run
+   before the extension and `IsLost` gates, so they throw on any device.
 3. `report = null`. If `DeviceFaultApi == None`, return `false`.
 4. If `!IsLost`, return `false`. This is the gate for VUID-07336 (EXT) and
    VUID-12383 (KHR debug info). It also keeps the destructive KHR reports call
    off healthy devices (E).
 5. Under `lock (_faultReadLock)`, return
-   `DeviceFaultReader.TryRead(in pointers, Handle, timeout.ToVulkanTimeout(), out report)`.
-   The conversion is safe here because the timeout is now known
-   non-negative. The lock exists because concurrent KHR readers would each get
+   `DeviceFaultReader.TryRead(in pointers, Handle, timeoutNs, out report)`,
+   passing the value converted in step 2, which is now known finite. The lock exists because concurrent KHR readers would each get
    a disjoint subset of entries (§2). One lock on a cold path, the
    `_allocatorLock` shape (`Device.cs:44`), makes a read see everything not
    already drained.
@@ -427,16 +430,22 @@ second exception over the one the caller is handling.
 
 1. Count call `fn(device, &counts, null)`. `counts` has `sType` set
    explicitly and `pNext = null`. A negative result ends the read.
-2. Allocate the three arrays at the returned sizes, with the binary clamped
-   to `Array.MaxLength`. Write the clamped size **back into
-   `counts.vendorBinarySize`**, because VUID-07339 ties the pointer to the
-   size passed.
+2. Clamp each returned size to its cap: `MaxAddressInfos = 4096` (96 KiB),
+   `MaxVendorInfos = 4096` (about 1.1 MiB) and `MaxVendorBinaryBytes = 64 MiB`.
+   Allocate the three arrays at the clamped sizes, and write the clamped
+   sizes **back into `counts`**, because VUIDs 07337, 07338 and 07339 tie each
+   pointer to the count passed. The caps exist because the counts come from a
+   driver on a crash path. A garbage count would otherwise turn into an
+   out-of-memory or overflow throw, out of a method that must not throw. A
+   conforming driver answers a clamped fill with `VK_INCOMPLETE`.
 3. Make the fill call, **always**, even when every count is 0, because
    `description` arrives only here. A zero count gets a null pointer, which
    `fixed` over an empty array yields.
 4. A negative result ends the read. On `VK_SUCCESS` or `VK_INCOMPLETE`, clamp
    each returned count to the allocated length and trim.
-   `IsIncomplete = (r == VK_INCOMPLETE)`.
+   `IsIncomplete = (r == VK_INCOMPLETE) || (a cap was applied in step 2)`.
+   The second term covers a driver that answers `VK_SUCCESS` to a clamped
+   fill.
 5. **No retry.** Counts are identical across calls by spec (§2), so a retry
    cannot return more.
 
@@ -451,7 +460,10 @@ second exception over the one the caller is handling.
    `sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_KHR`, `pNext = null`, because
    a `new T[n]` does not run the generated ctor.
 4. Fill call `fn(device, 0, &n, p)`. If it is negative, the round errors.
-   Otherwise append `min(written, requested)` entries.
+   If it is `VK_TIMEOUT`, append nothing and stop draining: the written count
+   is not trusted then, because a driver need not write `*pFaultCounts` when
+   nothing was posted, and trusting the requested count would emit blank
+   entries. Otherwise append `min(written, requested)` entries.
 5. If the fill returned `VK_INCOMPLETE` (more entries are queued) and
    `collected < MaxEntries` and `round < MaxRounds` (`MaxRounds = 8`), go
    back to step 1. Otherwise stop. Reaching a cap while the driver still
@@ -475,8 +487,10 @@ because the device is lost by the gate:
 
 1. Size query with `sType` set, `pNext = null`, `vendorBinarySize = 0`,
    `pVendorBinaryData = null`.
-2. Allocate `min(size, Array.MaxLength)` bytes and write the size back.
-3. Fill. `VK_INCOMPLETE` keeps the written bytes and sets `IsIncomplete`.
+2. Allocate `min(size, MaxVendorBinaryBytes)` bytes (the same 64 MiB cap
+   as EXT) and write the clamped size back.
+3. Fill. `VK_INCOMPLETE` keeps the written bytes and sets `IsIncomplete`, and
+   so does a clamp in step 2.
 4. **A debug-info error (`VK_ERROR_NOT_ENOUGH_SPACE_KHR` or any negative
    result) does not fail the report.** The entries are kept, `VendorBinary`
    is empty, and a sink warning is written.
@@ -567,8 +581,14 @@ test fakes are `[UnmanagedCallersOnly]` statics.
 - **KHR healthy-device polling through `TryGetDeviceFault`.** Rejected in E:
   it is a different feature, and the destructive semantics would make it
   compete with the crash read.
-- **Accept `Timeout.InfiniteTimeSpan`.** An unbounded block after loss is the
-  #120 hang (`Fence.cs:110-114`). The caller can pass any finite span.
+- **Accept `Timeout.InfiniteTimeSpan`, or a span that saturates to
+  `UINT64_MAX`.** An unbounded block after loss is the #120 hang
+  (`Fence.cs:110-114`). The caller can pass any finite span below about 292
+  years.
+- **Clamp the EXT counts and both binary sizes only to `Array.MaxLength`.**
+  That stops an overflow, but a garbage count can still make the crash-path
+  read throw `OutOfMemoryException`. Fixed caps far above any real report keep
+  the read non-throwing and cost nothing in practice.
 - **Default timeout 0.** It cannot hang, but it misses an entry the driver
   posts slightly after `VK_ERROR_DEVICE_LOST` surfaces, which is the
   proposal's "faults provoked asynchronously … not triggered until after the
@@ -632,6 +652,9 @@ fields of the one class. That is safe because the suite runs serially
 - every sType/pNext;
 - timeout routing (caller timeout on the first count call, 0 afterwards);
 - the drain loop and its caps;
+- a `VK_TIMEOUT` fill that leaves the count unwritten (no blank entries);
+- the EXT count and binary caps and the KHR binary cap (a garbage size is
+  passed as the cap and the report is incomplete);
 - partial-drain errors;
 - debug-info failure isolation;
 - bounded and multi-byte UTF-8.
@@ -642,6 +665,11 @@ fields of the one class. That is safe because the suite runs serially
   That is safe because there is no pointer to call.
 - Disposed device: `ObjectDisposedException`.
 - Negative or infinite timeout: `ArgumentOutOfRangeException`.
+- A timeout that saturates to `UINT64_MAX` (`TimeSpan.MaxValue`, and the
+  first span past the nanosecond overflow): `ArgumentOutOfRangeException`. A
+  large but representable span is accepted. The argument checks run before
+  the extension and `IsLost` gates, so a healthy device with no device-fault
+  extension is enough.
 - EXT-only device: `Ext`.
 - KHR-only device: `Khr`.
 - Both enabled: `Khr`.

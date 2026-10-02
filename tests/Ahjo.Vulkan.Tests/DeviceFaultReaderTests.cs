@@ -24,9 +24,11 @@ namespace Ahjo.Vulkan.Tests;
 /// <c>s_fakeException</c>, and turned into <c>VK_ERROR_UNKNOWN</c>. No fake
 /// ever writes more elements or bytes than the caller passed; an override
 /// changes only the count <i>reported back</i>.</para>
-/// <para><b>Not unit-tested, by design:</b> the <c>Array.MaxLength</c> clamps
-/// on the EXT and KHR vendor-binary sizes. Exercising them would genuinely
-/// allocate more than 2 GB; they are covered by review of the reader.</para>
+/// <para>The allocation caps (<c>MaxAddressInfos</c>, <c>MaxVendorInfos</c>,
+/// <c>MaxVendorBinaryBytes</c>) are exercised directly: a fake reports a
+/// garbage count or size above the cap, and the test checks that the cap is
+/// what the fill call was passed and that the report is marked incomplete.
+/// The binary-cap cases allocate the 64 MiB cap once each.</para>
 /// </remarks>
 public sealed unsafe class DeviceFaultReaderTests
 {
@@ -49,6 +51,9 @@ public sealed unsafe class DeviceFaultReaderTests
     private static ulong?   s_extReportedBinaryOverride;
     private static byte[]   s_extDescription = [];
     private static byte[]?  s_extVendorDescription;
+    // When true (the default), a VK_SUCCESS-scripted fill that was passed less
+    // than is available answers VK_INCOMPLETE, as a conforming driver must.
+    private static bool     s_extConformingIncomplete;
 
     // Recorders.
     private static int                     s_extCalls;
@@ -82,6 +87,7 @@ public sealed unsafe class DeviceFaultReaderTests
         s_extReportedBinaryOverride = null;
         s_extDescription            = System.Text.Encoding.UTF8.GetBytes(description);
         s_extVendorDescription      = null;
+        s_extConformingIncomplete   = true;
 
         s_extCalls             = 0;
         s_extCountsSTypes      = [];
@@ -155,7 +161,12 @@ public sealed unsafe class DeviceFaultReaderTests
 
             counts->addressInfoCount = s_extReportedAddrOverride ?? na;
             counts->vendorInfoCount  = s_extReportedVendorOverride ?? nv;
+            bool short_ = s_extFillAddrPassed < s_extAddrAvail
+                       || s_extFillVendorPassed < s_extVendorAvail
+                       || s_extFillBinaryPassed < s_extBinaryAvail;
             counts->vendorBinarySize = s_extReportedBinaryOverride ?? nb;
+            if (s_extSecondResult == VkResult.VK_SUCCESS && short_ && s_extConformingIncomplete)
+                return VkResult.VK_INCOMPLETE;
             return s_extSecondResult;
         }
         catch (Exception ex)
@@ -171,8 +182,10 @@ public sealed unsafe class DeviceFaultReaderTests
 
     /// <summary>Per-call override. <c>Result</c> replaces the fake's natural
     /// result (a negative one returns before anything is written);
-    /// <c>WriteCap</c> limits how many elements a fill call writes.</summary>
-    private readonly record struct ReportsStep(VkResult? Result = null, int? WriteCap = null);
+    /// <c>WriteCap</c> limits how many elements a fill call writes;
+    /// <c>NoWrite</c> makes a fill return <c>Result</c> without touching the
+    /// array or <c>*pFaultCounts</c>.</summary>
+    private readonly record struct ReportsStep(VkResult? Result = null, int? WriteCap = null, bool NoWrite = false);
 
     // Scenario.
     private static Queue<VkDeviceFaultInfoKHR>  s_queue = new();
@@ -235,6 +248,7 @@ public sealed unsafe class DeviceFaultReaderTests
                 s_reportsElements.Add((pInfo[i].sType, (nint)pInfo[i].pNext));
 
             if (forced is { } fe && (int)fe < 0) return fe;
+            if (scripted && step.NoWrite) return forced ?? VkResult.VK_SUCCESS;
 
             uint available = s_reportsInfinite ? 1u : (uint)s_queue.Count;
             uint n         = Math.Min(requested, available);
@@ -317,6 +331,9 @@ public sealed unsafe class DeviceFaultReaderTests
             for (uint j = 0; j < n; j++)
                 p[j] = (byte)j;
             info->vendorBinarySize = n;
+            // A conforming driver answers VK_INCOMPLETE when passed too little.
+            if (r == VkResult.VK_SUCCESS && s_debugSizePassedOnFill < s_debugLength)
+                return VkResult.VK_INCOMPLETE;
             return r;
         }
         catch (Exception ex)
@@ -392,7 +409,7 @@ public sealed unsafe class DeviceFaultReaderTests
         Assert.True(s_fakeException is null, "A fake threw: " + s_fakeException);
 
     // =====================================================================
-    // EXT (10)
+    // EXT (13)
     // =====================================================================
 
     [Fact]
@@ -571,8 +588,56 @@ public sealed unsafe class DeviceFaultReaderTests
         Assert.False(s_extFillBinaryPtrNull);
     }
 
+    [Fact]
+    public void Ext_CountsAboveCap_AreCapped_PassedAsCap_AndIncomplete()
+    {
+        ArrangeExt(addresses: 1_000_000, vendors: 1_000_000);
+
+        VkResult r = DeviceFaultReader.ReadExt(&FakeExt, FakeDevice, out DeviceFaultReport? report);
+
+        AssertNoFakeException();
+        Assert.Equal(DeviceFaultReader.MaxAddressInfos, s_extFillAddrPassed);
+        Assert.Equal(DeviceFaultReader.MaxVendorInfos, s_extFillVendorPassed);
+        Assert.Equal(VkResult.VK_INCOMPLETE, r);
+        Assert.NotNull(report);
+        Assert.True(report.IsIncomplete);
+        DeviceFaultEntry entry = Assert.Single(report.Entries);
+        Assert.Equal((int)DeviceFaultReader.MaxAddressInfos, entry.AddressInfos.Length);
+        Assert.Equal((int)DeviceFaultReader.MaxVendorInfos, entry.VendorInfos.Length);
+    }
+
+    [Fact]
+    public void Ext_BinarySizeAboveCap_IsCapped_PassedAsCap_AndIncomplete()
+    {
+        ArrangeExt(binary: 1UL << 40); // a garbage 1 TiB size
+
+        VkResult r = DeviceFaultReader.ReadExt(&FakeExt, FakeDevice, out DeviceFaultReport? report);
+
+        AssertNoFakeException();
+        Assert.Equal((ulong)DeviceFaultReader.MaxVendorBinaryBytes, s_extFillBinaryPassed);
+        Assert.Equal(VkResult.VK_INCOMPLETE, r);
+        Assert.NotNull(report);
+        Assert.True(report.IsIncomplete);
+        Assert.Equal((int)DeviceFaultReader.MaxVendorBinaryBytes, report.VendorBinary.Length);
+    }
+
+    [Fact]
+    public void Ext_CapExceeded_DriverAnswersSuccess_StillIncomplete()
+    {
+        ArrangeExt(addresses: DeviceFaultReader.MaxAddressInfos + 1);
+        s_extConformingIncomplete = false; // a driver that says VK_SUCCESS anyway
+
+        VkResult r = DeviceFaultReader.ReadExt(&FakeExt, FakeDevice, out DeviceFaultReport? report);
+
+        AssertNoFakeException();
+        Assert.Equal(VkResult.VK_SUCCESS, r);
+        Assert.NotNull(report);
+        Assert.True(report.IsIncomplete);
+        Assert.Equal((int)DeviceFaultReader.MaxAddressInfos, Assert.Single(report.Entries).AddressInfos.Length);
+    }
+
     // =====================================================================
-    // KHR entries (10)
+    // KHR entries (11)
     // =====================================================================
 
     [Fact]
@@ -784,8 +849,31 @@ public sealed unsafe class DeviceFaultReaderTests
             Assert.Equal((ulong)i, entries[i].GroupId);
     }
 
+    [Fact]
+    public void Khr_FillTimeout_TranslatesNothing_StopsDraining()
+    {
+        ArrangeReports(
+            MakeKhr(DeviceFaultFlags.None),
+            MakeKhr(DeviceFaultFlags.None),
+            MakeKhr(DeviceFaultFlags.None));
+        // The fill times out and leaves *pFaultCounts at the requested 3 —
+        // trusting it would emit three blank entries.
+        s_reportsScript[1] = new ReportsStep(Result: VkResult.VK_TIMEOUT, NoWrite: true);
+
+        VkResult r = DeviceFaultReader.ReadKhrEntries(&FakeReports, FakeDevice, 0,
+            out DeviceFaultEntry[] entries, out bool incomplete);
+
+        AssertNoFakeException();
+        Assert.Equal(VkResult.VK_TIMEOUT, r);
+        Assert.Empty(entries);
+        Assert.False(incomplete);
+        Assert.Equal(1, s_reportsFillCalls);
+        Assert.Equal(2, s_reportsCalls); // no further round
+        Assert.Equal(3, s_queue.Count);
+    }
+
     // =====================================================================
-    // KHR debug info (4)
+    // KHR debug info (5)
     // =====================================================================
 
     [Fact]
@@ -852,6 +940,21 @@ public sealed unsafe class DeviceFaultReaderTests
         Assert.NotNull(binary);
         Assert.Empty(binary);
         Assert.False(incomplete);
+    }
+
+    [Fact]
+    public void KhrDebug_SizeAboveCap_IsCapped_PassedAsCap_AndIncomplete()
+    {
+        ArrangeDebug(length: uint.MaxValue); // a garbage 4 GiB size
+
+        VkResult r = DeviceFaultReader.ReadKhrDebugInfo(&FakeDebugInfo, FakeDevice,
+            out byte[] binary, out bool incomplete);
+
+        AssertNoFakeException();
+        Assert.Equal(DeviceFaultReader.MaxVendorBinaryBytes, s_debugSizePassedOnFill);
+        Assert.Equal(VkResult.VK_INCOMPLETE, r);
+        Assert.True(incomplete);
+        Assert.Equal((int)DeviceFaultReader.MaxVendorBinaryBytes, binary.Length);
     }
 
     // =====================================================================

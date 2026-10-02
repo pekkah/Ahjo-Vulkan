@@ -71,6 +71,26 @@ internal static unsafe class DeviceFaultReader
     /// <summary>Upper bound on KHR count/fill rounds one read makes.</summary>
     internal const int MaxKhrRounds = 8;
 
+    /// <summary>Upper bound on EXT address-info elements one read requests
+    /// (4096 × 24 bytes = 96 KiB). A larger driver count is clamped and the
+    /// clamped value passed on the fill call, so a garbage count on a crash
+    /// path cannot turn into an out-of-memory or overflow throw; the driver
+    /// then answers <c>VK_INCOMPLETE</c>, which surfaces as
+    /// <see cref="DeviceFaultReport.IsIncomplete"/>.</summary>
+    internal const uint MaxAddressInfos = 4096;
+
+    /// <summary>Upper bound on EXT vendor-info elements one read requests
+    /// (4096 × 272 bytes ≈ 1.1 MiB). Clamped like
+    /// <see cref="MaxAddressInfos"/>.</summary>
+    internal const uint MaxVendorInfos = 4096;
+
+    /// <summary>Upper bound, in bytes, on the vendor binary one read requests
+    /// (64 MiB), on both the EXT path and <see cref="ReadKhrDebugInfo"/>.
+    /// Clamped like <see cref="MaxAddressInfos"/>; vendor crash dumps are far
+    /// smaller in practice, and a size above this is treated as a driver
+    /// count not worth trusting with the allocation.</summary>
+    internal const uint MaxVendorBinaryBytes = 64u * 1024 * 1024;
+
     // VK_MAX_DESCRIPTION_SIZE: every device-fault description field is char[256].
     private const int DescriptionSize = 256;
 
@@ -160,14 +180,23 @@ internal static unsafe class DeviceFaultReader
         VkResult r = fn(device, &counts, null);
         if ((int)r < 0) return r;
 
-        var addresses = new VkDeviceFaultAddressInfoKHR[counts.addressInfoCount];
-        var vendors   = new VkDeviceFaultVendorInfoKHR[counts.vendorInfoCount];
-        // Clamp to what a managed array can hold, and write the clamped value
-        // back: VUID-vkGetDeviceFaultInfoEXT-pFaultCounts-07339 ties the
-        // pointer to the size passed.
-        ulong binarySize = Math.Min(counts.vendorBinarySize, (ulong)Array.MaxLength);
-        var   binary     = new byte[(int)binarySize];
+        // Clamp every driver-reported size to its cap and write the clamped
+        // value back: VUID-vkGetDeviceFaultInfoEXT-pFaultCounts-07337 / -07338 /
+        // -07339 tie each pointer to the count passed. A clamp is also
+        // recorded as incomplete in case the driver answers VK_SUCCESS anyway.
+        bool  capped      = counts.addressInfoCount > MaxAddressInfos
+                         || counts.vendorInfoCount  > MaxVendorInfos
+                         || counts.vendorBinarySize > MaxVendorBinaryBytes;
+        uint  addressSize = Math.Min(counts.addressInfoCount, MaxAddressInfos);
+        uint  vendorSize  = Math.Min(counts.vendorInfoCount, MaxVendorInfos);
+        ulong binarySize  = Math.Min(counts.vendorBinarySize, MaxVendorBinaryBytes);
+        counts.addressInfoCount = addressSize;
+        counts.vendorInfoCount  = vendorSize;
         counts.vendorBinarySize = binarySize;
+
+        var addresses = new VkDeviceFaultAddressInfoKHR[addressSize];
+        var vendors   = new VkDeviceFaultVendorInfoKHR[vendorSize];
+        var binary    = new byte[(int)binarySize];
 
         var info = new VkDeviceFaultInfoEXT
         {
@@ -215,7 +244,7 @@ internal static unsafe class DeviceFaultReader
                 },
             ],
             VendorBinary = binaryCount == binary.Length ? binary : binary.AsSpan(0, binaryCount).ToArray(),
-            IsIncomplete = r == VkResult.VK_INCOMPLETE,
+            IsIncomplete = r == VkResult.VK_INCOMPLETE || capped,
         };
         return r;
     }
@@ -223,8 +252,10 @@ internal static unsafe class DeviceFaultReader
     /// <summary>
     /// <c>vkGetDeviceFaultReportsKHR</c> bounded drain. The first count call
     /// passes <paramref name="timeoutNs"/>; every other call passes 0. Stops on
-    /// <c>VK_TIMEOUT</c>, a zero count, a non-<c>VK_INCOMPLETE</c> fill, or a
-    /// cap (<see cref="MaxKhrEntries"/>, <see cref="MaxKhrRounds"/>). A
+    /// <c>VK_TIMEOUT</c> from either call (a fill that times out contributes no
+    /// entries — its written count is not trusted), a zero count, a
+    /// non-<c>VK_INCOMPLETE</c> fill, or a cap (<see cref="MaxKhrEntries"/>,
+    /// <see cref="MaxKhrRounds"/>). A
     /// negative result in any round returns it; <paramref name="entries"/>
     /// then holds what was already drained and is never null.
     /// </summary>
@@ -271,6 +302,11 @@ internal static unsafe class DeviceFaultReader
             }
             last = r;
 
+            // VK_TIMEOUT from the fill means nothing was posted; *pFaultCounts
+            // is not trusted then (a driver need not write it), so nothing is
+            // translated and the drain stops.
+            if (r == VkResult.VK_TIMEOUT) break;
+
             uint written = Math.Min(n, requested);
             for (int i = 0; i < (int)written; i++)
                 collected.Add(ToManaged(ref buffer[i]));
@@ -314,9 +350,11 @@ internal static unsafe class DeviceFaultReader
         if ((int)r < 0) return r;
         if (info.vendorBinarySize == 0) return VkResult.VK_SUCCESS;
 
-        // Clamp to what a managed array can hold, and write the clamped value
-        // back so the size passed matches the buffer.
-        uint size   = Math.Min(info.vendorBinarySize, (uint)Array.MaxLength);
+        // Clamp to the cap and write the clamped value back so the size passed
+        // matches the buffer. A clamp is recorded as incomplete in case the
+        // driver answers VK_SUCCESS anyway.
+        bool capped = info.vendorBinarySize > MaxVendorBinaryBytes;
+        uint size   = Math.Min(info.vendorBinarySize, MaxVendorBinaryBytes);
         var  buffer = new byte[size];
         info.vendorBinarySize = size;
 
@@ -329,7 +367,7 @@ internal static unsafe class DeviceFaultReader
 
         int written = (int)Math.Min(info.vendorBinarySize, size);
         binary     = written == buffer.Length ? buffer : buffer.AsSpan(0, written).ToArray();
-        incomplete = r == VkResult.VK_INCOMPLETE;
+        incomplete = r == VkResult.VK_INCOMPLETE || capped;
         return r;
     }
 
