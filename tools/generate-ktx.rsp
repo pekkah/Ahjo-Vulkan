@@ -38,6 +38,11 @@ c
 # native calling convention, so __stdcall and Cdecl are the same ABI.
 --additional
 --target=x86_64-unknown-linux-gnu
+# ClangSharp >= 21.1.8.4 emits [assembly: GeneratedCode("ClangSharp", "<ver>")]
+# by default. Opt out: it would churn every package on each tool bump, and
+# an assembly-wide marker could change how analyzers treat hand-written code.
+--generate
+generated-code=none
 --config
 latest-codegen
 generate-helper-types
