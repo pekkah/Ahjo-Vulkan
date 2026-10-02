@@ -130,7 +130,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # MinVer walks git history to find the nearest tag + commit
           # height, and Source Link embeds commit SHAs into PDBs. Both
@@ -138,7 +138,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
           cache: true
@@ -150,7 +150,7 @@ jobs:
       # where Ahjo.Vulkan.Vma.Native.csproj's PackVmaRuntimes target looks.
       - name: Download VMA native artifacts
         if: needs.build-vma.result == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: vma-native-*
           path: ${{ github.workspace }}/vma-artifacts
@@ -174,7 +174,7 @@ jobs:
       # MSVC's Release\ subdirectory or Linux's SOVERSION symlink chain.
       - name: Download KTX native artifacts
         if: needs.build-ktx.result == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: ktx-native-*
           path: ${{ github.workspace }}/ktx-artifacts
@@ -197,7 +197,7 @@ jobs:
       # the whole directory is copied rather than a named binary.
       - name: Download Slang native artifacts
         if: needs.build-slang.result == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: slang-native-*
           path: ${{ github.workspace }}/slang-artifacts
@@ -225,7 +225,7 @@ jobs:
       # can produce one (#214).
       - name: Download NGX native artifacts
         if: needs.build-ngx.result == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: ngx-native-*
           path: ${{ github.workspace }}/ngx-artifacts
@@ -374,7 +374,7 @@ jobs:
         run: ls -la ${{ github.workspace }}/artifacts
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nuget-packages
           path: ${{ github.workspace }}/artifacts/*.*nupkg
@@ -402,7 +402,7 @@ jobs:
       # (no associated tag).
       - name: Attach assets to GitHub Release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.release.tag_name }}
           files: |

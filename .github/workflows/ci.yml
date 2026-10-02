@@ -48,10 +48,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
           cache: true
@@ -61,7 +61,7 @@ jobs:
       # don't hit GitHub. Invalidates when Directory.Build.props changes —
       # where VulkanHeadersVersion lives.
       - name: Cache Vulkan-Headers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: native/downloaded
           key: vulkan-headers-windows-latest-${{ hashFiles('Directory.Build.props') }}
@@ -71,7 +71,7 @@ jobs:
       # whenever either pinned version env var changes.
       - name: Cache Vulkan ICD bundle
         id: cache-vk
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: build/vulkan/win-x64
           key: vk-win-x64-loader${{ env.SILK_VULKAN_LOADER_VERSION }}-sws${{ env.SILK_VULKAN_SWIFTSHADER_VERSION }}
@@ -133,7 +133,7 @@ jobs:
       # content, so it is downloaded once per pin and restored thereafter.
       # Same path and key shape as build-slang-native.yml's cache.
       - name: Cache staged Slang binaries
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: native/slang/staged/win-x64
           key: slang-win-x64-${{ hashFiles('Directory.Build.props', 'src/Ahjo.Vulkan.Slang.Native/Ahjo.Vulkan.Slang.Native.csproj', '.github/workflows/build-slang-native.yml') }}
@@ -385,10 +385,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
           cache: true
@@ -398,7 +398,7 @@ jobs:
       # archive and the VMA tarball the cmake build compiles against; both
       # versions are pinned in Directory.Build.props, so that's the key.
       - name: Cache Vulkan + VMA headers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             native/downloaded
