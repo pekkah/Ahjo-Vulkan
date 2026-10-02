@@ -116,6 +116,15 @@ exclude-enum-operators
 # The consequence is that enum members keep their NVSDK_NGX_-prefixed names in
 # this one project. That is deliberate; do not "fix" it.
 multi-file
+# Collapses AHJO_NGX_API to nothing for the parse (native/ngx/src/ahjo_ngx.h).
+# Under the linux-gnu target above it would otherwise expand to
+# __attribute__((visibility("default"))), which ClangSharp reports as
+# "Unsupported attribute: 'Visibility'" on each of the seven ahjo_ngx_*
+# declarations — seven warnings, exit code 7, Regenerate fails (the GROUP 6
+# mechanism below). The attribute carries nothing a P/Invoke can express;
+# the shim build never defines this macro, so its exports are unaffected.
+--define-macro
+AHJO_NGX_BINDGEN=1
 --remap
 size_t=nuint
 # Ten Vk* remaps into Ahjo.Vulkan.Native, the tools/generate-vma.rsp pattern.

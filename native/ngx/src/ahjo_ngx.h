@@ -70,8 +70,15 @@ extern "C" {
  * On MSVC this expands to nothing on purpose. ahjo_ngx.def is the single
  * Windows export list — see the header comment there — and adding
  * __declspec(dllexport) here would create a second, competing one.
+ *
+ * Under ClangSharp it also expands to nothing. tools/generate-ngx.rsp parses
+ * this header as x86_64-unknown-linux-gnu clang, so it would otherwise see
+ * the GCC/Clang branch, warn "Unsupported attribute: 'Visibility'" once per
+ * declaration, and exit with that diagnostic count - failing the Regenerate
+ * target even though the output is complete. AHJO_NGX_BINDGEN is defined by
+ * the rsp only, never by the shim build. Do not drop it from either side.
  */
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(AHJO_NGX_BINDGEN)
 #define AHJO_NGX_API
 #elif defined(__GNUC__) || defined(__clang__)
 #define AHJO_NGX_API __attribute__((visibility("default")))
