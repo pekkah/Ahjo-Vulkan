@@ -9,5 +9,6 @@ public unsafe partial struct VkTexelBufferDescriptorInfoEXT
 
     public VkFormat format;
 
-    public VkDeviceAddressRangeEXT addressRange;
+    [NativeTypeName("VkDeviceAddressRangeEXT")]
+    public VkDeviceAddressRangeKHR addressRange;
 }

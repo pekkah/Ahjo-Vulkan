@@ -7,7 +7,7 @@ public unsafe partial struct VkDataGraphPipelineCreateInfoARM
     [NativeTypeName("const void *")]
     public void* pNext;
 
-    [NativeTypeName("VkPipelineCreateFlags2KHR")]
+    [NativeTypeName("VkPipelineCreateFlags2")]
     public ulong flags;
 
     [NativeTypeName("VkPipelineLayout")]

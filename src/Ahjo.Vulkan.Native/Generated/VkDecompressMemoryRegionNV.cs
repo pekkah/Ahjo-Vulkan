@@ -14,6 +14,6 @@ public partial struct VkDecompressMemoryRegionNV
     [NativeTypeName("VkDeviceSize")]
     public ulong decompressedSize;
 
-    [NativeTypeName("VkMemoryDecompressionMethodFlagsNV")]
+    [NativeTypeName("VkMemoryDecompressionMethodFlagsEXT")]
     public ulong decompressionMethod;
 }

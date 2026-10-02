@@ -15,7 +15,7 @@
     <!-- Pinned Vulkan-Headers tag. Bump deliberately; the generated
          bindings are committed and a regen run is required after a bump.
          See https://github.com/KhronosGroup/Vulkan-Headers/releases. -->
-    <VulkanHeadersVersion>vulkan-sdk-1.4.341.0</VulkanHeadersVersion>
+    <VulkanHeadersVersion>vulkan-sdk-1.4.363.0</VulkanHeadersVersion>
     <!-- Pinned VulkanMemoryAllocator tag. Independent cadence from
          VulkanHeadersVersion. Bump deliberately; the generated bindings are
          committed and a regen run is required after a bump.

@@ -1,0 +1,7 @@
+namespace Ahjo.Vulkan.Native;
+
+public enum VkDataGraphPipelineNodeTypeARM
+{
+    VK_DATA_GRAPH_PIPELINE_NODE_TYPE_OPTICAL_FLOW_ARM = 1000631000,
+    VK_DATA_GRAPH_PIPELINE_NODE_TYPE_MAX_ENUM_ARM = 0x7FFFFFFF,
+}

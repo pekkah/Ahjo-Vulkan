@@ -1,0 +1,9 @@
+namespace Ahjo.Vulkan.Native;
+
+public enum VkGpaSampleTypeAMD
+{
+    VK_GPA_SAMPLE_TYPE_CUMULATIVE_AMD = 0,
+    VK_GPA_SAMPLE_TYPE_TRACE_AMD = 1,
+    VK_GPA_SAMPLE_TYPE_TIMING_AMD = 2,
+    VK_GPA_SAMPLE_TYPE_MAX_ENUM_AMD = 0x7FFFFFFF,
+}

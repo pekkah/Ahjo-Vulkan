@@ -10,7 +10,7 @@ public unsafe partial struct VkAccelerationStructureInfoNV
     [NativeTypeName("VkAccelerationStructureTypeNV")]
     public VkAccelerationStructureTypeKHR type;
 
-    [NativeTypeName("VkBuildAccelerationStructureFlagsNV")]
+    [NativeTypeName("VkBuildAccelerationStructureFlagsKHR")]
     public uint flags;
 
     [NativeTypeName("uint32_t")]

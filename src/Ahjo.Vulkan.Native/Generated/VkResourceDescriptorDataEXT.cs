@@ -15,7 +15,7 @@ public unsafe partial struct VkResourceDescriptorDataEXT
 
     [FieldOffset(0)]
     [NativeTypeName("const VkDeviceAddressRangeEXT *")]
-    public VkDeviceAddressRangeEXT* pAddressRange;
+    public VkDeviceAddressRangeKHR* pAddressRange;
 
     [FieldOffset(0)]
     [NativeTypeName("const VkTensorViewCreateInfoARM *")]

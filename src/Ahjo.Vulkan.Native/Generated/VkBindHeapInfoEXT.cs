@@ -7,7 +7,8 @@ public unsafe partial struct VkBindHeapInfoEXT
     [NativeTypeName("const void *")]
     public void* pNext;
 
-    public VkDeviceAddressRangeEXT heapRange;
+    [NativeTypeName("VkDeviceAddressRangeEXT")]
+    public VkDeviceAddressRangeKHR heapRange;
 
     [NativeTypeName("VkDeviceSize")]
     public ulong reservedRangeOffset;

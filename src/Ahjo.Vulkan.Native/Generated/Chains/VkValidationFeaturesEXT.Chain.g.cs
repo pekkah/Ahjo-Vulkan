@@ -3,7 +3,7 @@
 // Edits to this file are overwritten by RegenerateChains.
 namespace Ahjo.Vulkan.Native;
 
-public unsafe partial struct VkValidationFeaturesEXT : IChainable<VkInstanceCreateInfo>, IChainable<VkShaderModuleCreateInfo>, IChainable<VkShaderCreateInfoEXT>
+public unsafe partial struct VkValidationFeaturesEXT : IChainable<VkInstanceCreateInfo>, IChainable<VkShaderModuleCreateInfo>, IChainable<VkShaderCreateInfoEXT>, IChainable<VkPipelineShaderStageCreateInfo>, IChainable<VkGraphicsPipelineCreateInfo>, IChainable<VkComputePipelineCreateInfo>, IChainable<VkRayTracingPipelineCreateInfoKHR>
 {
     public VkValidationFeaturesEXT()
     {
