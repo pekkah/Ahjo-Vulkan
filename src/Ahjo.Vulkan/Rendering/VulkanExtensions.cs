@@ -139,4 +139,46 @@ public static class VulkanExtensions
     /// <see cref="KhrAccelerationStructure"/>.</remarks>
     public static Utf8Name KhrDeferredHostOperations =>
         Utf8Name.FromLiteral(DeviceExtensionNames.DeferredHostOperations);
+
+    /// <summary>VK_EXT_device_fault — device-level. Enables
+    /// <see cref="Device.TryGetDeviceFault(out DeviceFaultReport)"/> after
+    /// device loss (used when <see cref="KhrDeviceFault"/> is not also
+    /// enabled).</summary>
+    /// <remarks>
+    /// <para><b>The enable recipe.</b> Add this name to
+    /// <see cref="DeviceDescription.Extensions"/>, then push
+    /// <c>VkPhysicalDeviceFaultFeaturesEXT</c> from
+    /// <see cref="DeviceDescription.ConfigureFeatures"/> with
+    /// <c>deviceFault = 1</c> — and <c>deviceFaultVendorBinary = 1</c> for a
+    /// vendor crash dump in <see cref="DeviceFaultReport.VendorBinary"/>. The
+    /// extension alone is not enough, and the wrapper cannot check the
+    /// feature — Vulkan exposes no post-<c>vkCreateDevice</c> feature
+    /// query.</para>
+    /// </remarks>
+    public static Utf8Name ExtDeviceFault => Utf8Name.FromLiteral(DeviceExtensionNames.ExtDeviceFault);
+
+    /// <summary>VK_KHR_device_fault — device-level. Promotion of
+    /// <see cref="ExtDeviceFault"/>; when enabled,
+    /// <see cref="Device.TryGetDeviceFault(out DeviceFaultReport)"/> reads
+    /// through it in preference to EXT.</summary>
+    /// <remarks>
+    /// <para><b>The enable recipe.</b> Add this name to
+    /// <see cref="DeviceDescription.Extensions"/>, then push
+    /// <b><c>VkPhysicalDeviceFaultFeaturesKHR</c></b> — a different
+    /// <c>sType</c> from the EXT feature struct — from
+    /// <see cref="DeviceDescription.ConfigureFeatures"/> with
+    /// <c>deviceFault = 1</c>, and <c>deviceFaultVendorBinary = 1</c> for a
+    /// vendor crash dump. As with EXT, the extension alone is not enough and
+    /// the wrapper cannot check the feature.</para>
+    /// <para><b>Validation layer floor: 1.4.363.</b> That layer validates both
+    /// KHR commands and the KHR feature struct. Older layers (1.4.341 is one)
+    /// do not know the extension, and report the KHR feature struct as
+    /// <c>VUID-VkDeviceCreateInfo-pNext-pNext</c> ("unknown
+    /// VkStructureType"). The wrapper does not suppress that message.</para>
+    /// <para><c>deviceFaultReportMasked</c> /
+    /// <c>deviceFaultDeviceLostOnMasked</c> are the caller's to set. The
+    /// wrapper's read is post-loss only; healthy-device polling of
+    /// <c>vkGetDeviceFaultReportsKHR</c> is not wrapped.</para>
+    /// </remarks>
+    public static Utf8Name KhrDeviceFault => Utf8Name.FromLiteral(DeviceExtensionNames.KhrDeviceFault);
 }

@@ -28,6 +28,11 @@ namespace Ahjo.Vulkan;
 /// itself depends on <c>VK_KHR_deferred_host_operations</c>, so device
 /// creation fails without it whether or not the wrapper ever calls a
 /// deferred command.</para>
+/// <para><see cref="ExtDeviceFault"/> gates <c>vkGetDeviceFaultInfoEXT</c>,
+/// which is legal only on a lost device. <see cref="KhrDeviceFault"/> gates
+/// <c>vkGetDeviceFaultReportsKHR</c>, which is legal at any time but called by
+/// the wrapper only after loss, and <c>vkGetDeviceFaultDebugInfoKHR</c>, which
+/// is legal only on a lost device.</para>
 /// </remarks>
 internal static class DeviceExtensionNames
 {
@@ -48,4 +53,11 @@ internal static class DeviceExtensionNames
     public static ReadOnlySpan<byte> CmdBuildAccelerationStructures           => "vkCmdBuildAccelerationStructuresKHR"u8;
     public static ReadOnlySpan<byte> CmdWriteAccelerationStructuresProperties => "vkCmdWriteAccelerationStructuresPropertiesKHR"u8;
     public static ReadOnlySpan<byte> CmdCopyAccelerationStructure             => "vkCmdCopyAccelerationStructureKHR"u8;
+
+    public static ReadOnlySpan<byte> ExtDeviceFault          => "VK_EXT_device_fault"u8;
+    public static ReadOnlySpan<byte> GetDeviceFaultInfo      => "vkGetDeviceFaultInfoEXT"u8;
+
+    public static ReadOnlySpan<byte> KhrDeviceFault          => "VK_KHR_device_fault"u8;
+    public static ReadOnlySpan<byte> GetDeviceFaultReports   => "vkGetDeviceFaultReportsKHR"u8;
+    public static ReadOnlySpan<byte> GetDeviceFaultDebugInfo => "vkGetDeviceFaultDebugInfoKHR"u8;
 }

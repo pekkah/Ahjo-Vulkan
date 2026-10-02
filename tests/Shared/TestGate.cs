@@ -35,6 +35,25 @@ internal static class TestGate
             VulkanEnvironment.HasValidationLayer,
             "[gate:validation] VK_LAYER_KHRONOS_validation is not installed.");
 
+    /// <summary>
+    /// Coverage gap: the validation layer is present but older than
+    /// <paramref name="minimumSpecVersion"/> (a packed Vulkan version), so it
+    /// does not know the extension under test and cannot serve as its oracle.
+    /// Applies <see cref="RequireValidationLayer()"/> first.
+    /// </summary>
+    public static void RequireValidationLayer(uint minimumSpecVersion, string reason)
+    {
+        RequireValidationLayer();
+        uint found = VulkanEnvironment.ValidationLayerSpecVersion;
+        Assert.SkipWhen(
+            found < minimumSpecVersion,
+            $"[gate:validation] {reason} Requires VK_LAYER_KHRONOS_validation >= {Fmt(minimumSpecVersion)}; found {Fmt(found)}.");
+    }
+
+    /// <summary>Formats a packed Vulkan version as <c>major.minor.patch</c>.</summary>
+    internal static string Fmt(uint version)
+        => $"{(version >> 22) & 0x7Fu}.{(version >> 12) & 0x3FFu}.{version & 0xFFFu}";
+
     /// <summary>Toolchain gap: the build could not compile this shader because <c>glslc</c> was absent.</summary>
     public static void RequireSpirv(string spvPath)
         => Assert.SkipUnless(

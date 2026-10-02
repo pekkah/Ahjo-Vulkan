@@ -109,7 +109,8 @@ AhjoDiagnostics.Sink = (severity, source, message) => myLogger.Log(severity, sou
   `VulkanExtensions` static class exposes ready-made `Utf8Name` constants
   for the names it actively wraps (`KhrSurface`, `KhrWin32Surface`,
   `KhrSwapchain`, `ExtMeshShader`, `KhrAccelerationStructure`,
-  `KhrRayQuery`, `KhrDeferredHostOperations`).
+  `KhrRayQuery`, `KhrDeferredHostOperations`, `ExtDeviceFault`,
+  `KhrDeviceFault`).
 
 Deeper rationale on each layer lives under
 [`docs/design/specs/`](https://github.com/pekkah/Ahjo-Vulkan/tree/main/docs/design/specs)

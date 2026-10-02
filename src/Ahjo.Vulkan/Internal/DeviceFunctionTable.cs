@@ -50,7 +50,12 @@ namespace Ahjo.Vulkan;
 /// anticipated. <c>VK_KHR_ray_query</c> and
 /// <c>VK_KHR_deferred_host_operations</c> ride along at
 /// <c>vkCreateDevice</c> but gate nothing here: the first defines no entry
-/// points and the wrapper calls none of the second extension commands.</description></item>
+/// points and the wrapper calls none of the second extension commands.
+/// <c>VK_EXT_device_fault</c> and <c>VK_KHR_device_fault</c> are the third
+/// and fourth blocks (issue #242). Two of their three pointers (EXT info, KHR
+/// debug-info) are legal only on a lost device; KHR reports is legal at any
+/// time but destructive. The wrapper calls all three only after
+/// <see cref="Device.IsLost"/>.</description></item>
 /// </list>
 /// All pointers are resolved at <see cref="Device"/> construction. Cold-path
 /// and instance-level calls keep using the static <c>[DllImport]</c>s on
@@ -197,6 +202,26 @@ internal readonly unsafe struct DeviceFunctionTable
         VkCommandBuffer_T*, VkCopyAccelerationStructureInfoKHR*, void>
         CmdCopyAccelerationStructure;
 
+    // ---- Device fault (VK_EXT_device_fault / VK_KHR_device_fault) ----
+
+    /// <summary><c>vkGetDeviceFaultInfoEXT</c>. Null unless VK_EXT_device_fault
+    /// was enabled. Legal only on a lost device
+    /// (VUID-vkGetDeviceFaultInfoEXT-device-07336).</summary>
+    public readonly delegate* unmanaged[Stdcall]<
+        VkDevice_T*, VkDeviceFaultCountsEXT*, VkDeviceFaultInfoEXT*, VkResult> GetDeviceFaultInfo;
+
+    /// <summary><c>vkGetDeviceFaultReportsKHR</c>. Null unless VK_KHR_device_fault
+    /// was enabled. Legal at any time, blocks up to its timeout, and drains:
+    /// each report is returned exactly once.</summary>
+    public readonly delegate* unmanaged[Stdcall]<
+        VkDevice_T*, ulong, uint*, VkDeviceFaultInfoKHR*, VkResult> GetDeviceFaultReports;
+
+    /// <summary><c>vkGetDeviceFaultDebugInfoKHR</c>. Null unless VK_KHR_device_fault
+    /// was enabled. Legal only on a lost device
+    /// (VUID-vkGetDeviceFaultDebugInfoKHR-device-12383).</summary>
+    public readonly delegate* unmanaged[Stdcall]<
+        VkDevice_T*, VkDeviceFaultDebugInfoKHR*, VkResult> GetDeviceFaultDebugInfo;
+
     // ---- Pipeline barriers (sync2) ----
 
     public readonly delegate* unmanaged[Stdcall]<
@@ -310,6 +335,10 @@ internal readonly unsafe struct DeviceFunctionTable
         CmdBuildAccelerationStructures           = null;
         CmdWriteAccelerationStructuresProperties = null;
         CmdCopyAccelerationStructure             = null;
+
+        GetDeviceFaultInfo      = null;
+        GetDeviceFaultReports   = null;
+        GetDeviceFaultDebugInfo = null;
 
         // Core hot-path commands. The wrapper rejects pre-1.3 devices, so
         // every one of these resolves to a valid pointer; the resulting
@@ -529,6 +558,34 @@ internal readonly unsafe struct DeviceFunctionTable
                 ResolveExtensionRequired(
                     Utf8Name.FromLiteral(DeviceExtensionNames.CmdCopyAccelerationStructure),
                     DeviceExtensionNames.AccelerationStructure);
+        }
+
+        // VK_EXT_device_fault: one device-level query, legal only on a lost
+        // device. Device.TryGetDeviceFault calls it only after IsLost.
+        if (IsExtensionEnabled(enabledExtensions, DeviceExtensionNames.ExtDeviceFault))
+        {
+            GetDeviceFaultInfo =
+                (delegate* unmanaged[Stdcall]<VkDevice_T*, VkDeviceFaultCountsEXT*, VkDeviceFaultInfoEXT*, VkResult>)
+                ResolveExtensionRequired(
+                    Utf8Name.FromLiteral(DeviceExtensionNames.GetDeviceFaultInfo),
+                    DeviceExtensionNames.ExtDeviceFault);
+        }
+
+        // VK_KHR_device_fault: the reports query (legal at any time, but
+        // destructive) and the debug-info query (legal only on a lost device).
+        // Device.TryGetDeviceFault calls both only after IsLost.
+        if (IsExtensionEnabled(enabledExtensions, DeviceExtensionNames.KhrDeviceFault))
+        {
+            GetDeviceFaultReports =
+                (delegate* unmanaged[Stdcall]<VkDevice_T*, ulong, uint*, VkDeviceFaultInfoKHR*, VkResult>)
+                ResolveExtensionRequired(
+                    Utf8Name.FromLiteral(DeviceExtensionNames.GetDeviceFaultReports),
+                    DeviceExtensionNames.KhrDeviceFault);
+            GetDeviceFaultDebugInfo =
+                (delegate* unmanaged[Stdcall]<VkDevice_T*, VkDeviceFaultDebugInfoKHR*, VkResult>)
+                ResolveExtensionRequired(
+                    Utf8Name.FromLiteral(DeviceExtensionNames.GetDeviceFaultDebugInfo),
+                    DeviceExtensionNames.KhrDeviceFault);
         }
     }
 
