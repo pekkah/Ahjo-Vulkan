@@ -348,17 +348,18 @@ public sealed unsafe class DescriptorSetPool : IDisposable
         // carries no fragmentation — that half is real, and it is what makes
         // ordinary growth work (#60); this repo's driver was measured enforcing
         // maxSets (#191's mutation run), so it is the half with real coverage.
-        // It does NOT guarantee the requested binding shape fits. Two requests
-        // are unsatisfiable by construction and still reach here: a variable
-        // count larger than the template's entry for the variable binding's
-        // own descriptor type but under the largest per-type total the guard
-        // above checks (the type is not readable back from a
-        // VkDescriptorSetLayout handle, so that guard is necessary and never
-        // sufficient — #182), and any layout with real bindings against a pool
-        // created with an empty poolSizes template, through the plain
-        // Acquire(layout) overload (#191). Both fail the retry too, so the
-        // sub-pool this branch built is rolled back rather than chained
-        // forever (#187).
+        // It does NOT guarantee the requested binding shape fits. Any request
+        // that needs more of some descriptor type than the template holds can
+        // still reach here — for example a variable count larger than the
+        // template's entry for the variable binding's own descriptor type but
+        // under the largest per-type total the guard above checks (the type is
+        // not readable back from a VkDescriptorSetLayout handle, so that guard
+        // is necessary and never sufficient — #182), a layout with real
+        // bindings against a pool created with an empty poolSizes template
+        // (#191), or a fixed binding of a type the template lacks, through the
+        // plain Acquire(layout) overload. On a driver that enforces per-type
+        // pool accounting such a request fails the retry too, so the sub-pool
+        // this branch built is rolled back rather than chained forever (#187).
         if (_growOnExhaustion && IsExhaustion(result))
         {
             _pools.EnsureCapacity(_pools.Count + 1);
@@ -558,9 +559,9 @@ public sealed unsafe class DescriptorSetPool : IDisposable
     /// still holds.
     /// </para>
     /// <para>
-    /// <c>NoInlining</c> for the same IL-size reason documented on
-    /// <see cref="ThrowVariableCountExceedsBudget"/>: <c>Acquire</c>'s body size
-    /// governs the one-arg forwarder's inlining. Do not fold it back inline. Not
+    /// <c>NoInlining</c> keeps this cold, failure-only code out of
+    /// <c>Acquire</c>'s hot body, as <see cref="ThrowVariableCountExceedsBudget"/>
+    /// does for the guard's message. Do not fold it back inline. Not
     /// <c>DoesNotReturn</c> — it returns, and the throw stays in <c>Acquire</c>.
     /// </para>
     /// </summary>

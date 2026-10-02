@@ -145,7 +145,7 @@ Two conclusions follow, and they point in opposite directions:
 
 **This is the load-bearing uncertainty in this spec, and it is not resolved by it.** Whether any
 real driver returns `OUT_OF_POOL_MEMORY` for either route is spec-derived, not measured — no AMD or
-Intel box was available. The Vulkan spec mandates the failure; this repo has never observed it.
+Intel box was available. The Vulkan spec permits the failure ("may fail due to lack of space") rather than mandating it; this repo has never observed it.
 
 ### E6 — consumer audit: nothing in `src/` or `samples/` calls `Acquire`
 

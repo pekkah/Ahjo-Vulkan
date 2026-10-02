@@ -195,7 +195,7 @@ Fixture:
 
 - `TestGate.RequireDriver();`
 - `Instance.Create(default)` — **a plain instance, deliberately no validation callback.** The layer
-  flags the over-subscription as an error and this test is about the wrapper's chain bookkeeping, not
+  warns about the over-allocation (a warning, not a VUID, since maintenance1 is core) and this test is about the wrapper's chain bookkeeping, not
   the layer's opinion. Model the body on `Pool_EmptyPoolSizes_AcquireBeyondMaxSets_Grows` (`:314-343`),
   not on `Pool_EmptyPoolSizes_AcquireZeroBindingLayout_RoundTrips`.
 - `CreateGraphicsDevice(instance)`, `CreateUniformBufferLayout(device)` (the existing helper at

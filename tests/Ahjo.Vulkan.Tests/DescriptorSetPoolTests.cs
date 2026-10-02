@@ -384,7 +384,8 @@ public sealed unsafe class DescriptorSetPoolTests
     /// branch; it becomes rollback coverage on the first AMD/Intel run,
     /// unedited.</b> The exact <c>1</c> is the assertion the fix buys — do not
     /// weaken it to <c>PoolCount &lt;= 2</c>. A plain instance, deliberately no
-    /// validation callback: the layer flags the over-subscription as an error,
+    /// validation callback: the layer warns about the over-allocation (#182's
+    /// spec records it as a warning, not a VUID, since maintenance1 is core),
     /// and this test is about the wrapper's chain bookkeeping, not the layer's
     /// opinion.
     /// </summary>
