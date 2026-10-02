@@ -7,7 +7,7 @@ namespace Ahjo.Vulkan.Slang.Native;
 public unsafe partial struct SpecializationArg
 {
     [NativeTypeName("slang::SpecializationArg::Kind")]
-    public Kind kind;
+    public SpecializationArg.Kind kind;
 
     [NativeTypeName("__AnonymousRecord_slang_L5850_C5")]
     public _Anonymous_e__Union Anonymous;
@@ -33,7 +33,7 @@ public unsafe partial struct SpecializationArg
     }
 
     [NativeTypeName("int32_t")]
-    public enum Kind : uint
+    public enum Kind
     {
         Unknown = 0,
         Type = 1,

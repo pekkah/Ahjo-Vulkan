@@ -18,6 +18,11 @@ src/Ahjo.Vulkan.Vma.Native/Generated
 CSharp
 --language
 c++
+# ClangSharp >= 21.1.8.4 emits [assembly: GeneratedCode("ClangSharp", "<ver>")]
+# by default. Opt out: it would churn every package on each tool bump, and
+# an assembly-wide marker could change how analyzers treat hand-written code.
+--generate
+generated-code=none
 --config
 latest-codegen
 generate-helper-types

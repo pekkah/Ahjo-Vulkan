@@ -35,6 +35,11 @@ c++
 # to linux-gnu changes nothing at runtime and keeps the output host-independent.
 --additional
 --target=x86_64-unknown-linux-gnu
+# ClangSharp >= 21.1.8.4 emits [assembly: GeneratedCode("ClangSharp", "<ver>")]
+# by default. Opt out: it would churn every package on each tool bump, and
+# an assembly-wide marker could change how analyzers treat hand-written code.
+--generate
+generated-code=none
 --config
 latest-codegen
 implicit-vtbls
@@ -72,6 +77,9 @@ slang::VMPrintFunc=nint
 # TypeReflection::Kind (slang.h:2446) and DeclReflection::Kind (slang.h:3857)
 # are nested `enum class`es emitted without an underlying type, while their
 # members come from uint-backed SlangTypeKind / SlangDeclKind: 29x CS0266.
+# The bare name also matches SpecializationArg::Kind, declared `: int32_t`.
+# Since ClangSharp 21.1.8.4 the default int32_t->int remap wins there, so that
+# one is emitted as `int`, which matches the header.
 --with-type
 Kind=uint
 # Three declarations that would produce EntryPointNotFoundException or worse.
