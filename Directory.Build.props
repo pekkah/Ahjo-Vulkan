@@ -63,7 +63,7 @@
          committed and src/Ahjo.Vulkan.Ngx.Native/Generated/ is derived from
          them, so moving the tag without regenerating leaves the bindings
          describing the old API. -->
-    <NgxVersion>v310.7.0</NgxVersion>
+    <NgxVersion>v310.9.1</NgxVersion>
     <!-- The libktx feature set, defined ONCE. The local host build
          (BuildKtxForHost) and every CI matrix job invoke that same target,
          so these flags cannot drift between a developer's binary and the
