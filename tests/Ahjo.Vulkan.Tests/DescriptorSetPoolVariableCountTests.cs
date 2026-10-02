@@ -228,6 +228,63 @@ public sealed unsafe class DescriptorSetPoolVariableCountTests
     }
 
     /// <summary>
+    /// Issue #187, #182's residual route: the pre-flight guard compares the
+    /// count against the largest per-type total (64 uniform buffers here), not
+    /// against the variable binding's own type (1 storage buffer), because that
+    /// type is not readable back from the layout handle. A count of 8 therefore
+    /// <b>passes</b> the guard while being unsatisfiable by construction — that
+    /// gap is the test. Whether or not the acquire throws,
+    /// <see cref="DescriptorSetPool.PoolCount"/> must stay exactly 1:
+    /// <list type="bullet">
+    ///   <item><description>on a driver that enforces only <c>maxSets</c> (this
+    ///     repo's) the acquire succeeds — no exhaustion, no growth — and the
+    ///     assertion holds on the no-growth leg;</description></item>
+    ///   <item><description>on a driver that enforces per-type pool accounting
+    ///     the acquire fails, growth runs, the retry fails too, and the assertion
+    ///     holds only because the retry's sub-pool is rolled back.</description></item>
+    /// </list>
+    /// <b>On this repo's hardware this test does not execute the rollback
+    /// branch; it becomes rollback coverage on the first AMD/Intel run,
+    /// unedited.</b> The <c>catch</c> is <see cref="VulkanException"/> only, so
+    /// if the guard ever fires instead, the <see cref="ArgumentOutOfRangeException"/>
+    /// escapes and the test goes red rather than passing silently. Do not "fix"
+    /// that by shrinking the uniform-buffer entry — its size relative to the
+    /// storage-buffer entry is what makes this the residual case. No validation
+    /// instance, for the same reason as
+    /// <c>DescriptorSetPoolTests.Pool_EmptyPoolSizes_AcquireLayoutWithBindings_LeavesNoResidualSubPool</c>.
+    /// </summary>
+    [Fact]
+    public void Acquire_CountWithinAnotherTypesTotal_LeavesNoResidualSubPool()
+    {
+        TestGate.RequireDriver();
+        TestGate.RequireDeviceFeature(
+            VulkanDriverProbe.SupportsBindlessVariableCountStorageBuffer, FeatureGateReason);
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateVariableCountDevice(instance);
+        using var layout   = CreateVariableCountLayout(device, declaredCount: 32);
+
+        // The variable binding is a storage buffer with a budget of 1; the
+        // uniform-buffer entry exists only to lift the largest per-type total
+        // to 64 so the guard lets a count of 8 through. updateAfterBind: true
+        // to match the layout's UpdateAfterBindPool
+        // (VUID-VkDescriptorSetAllocateInfo-pSetLayouts-03044).
+        ReadOnlySpan<VkDescriptorPoolSize> sizes =
+        [
+            new VkDescriptorPoolSize { type = VkDescriptorType.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, descriptorCount = 64 },
+            new VkDescriptorPoolSize { type = VkDescriptorType.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, descriptorCount = 1 },
+        ];
+        using var pool = new DescriptorSetPool(device, maxSets: 4, sizes, updateAfterBind: true);
+
+        bool threw = false;
+        try { pool.Acquire(layout.Handle, variableDescriptorCount: 8); }
+        catch (VulkanException) { threw = true; }
+
+        Assert.Equal(1, pool.PoolCount);
+        Assert.Equal(threw ? 0 : 1, pool.AllocatedCount);
+    }
+
+    /// <summary>
     /// <c>Acquire(layout, 0)</c> and <c>Acquire(layout)</c> are the same
     /// request and must land in the same bucket — zero is not a sentinel.
     /// </summary>

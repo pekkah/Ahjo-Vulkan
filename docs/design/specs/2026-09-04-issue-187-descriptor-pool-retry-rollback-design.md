@@ -2,15 +2,20 @@
 
 Paired plan: `../plans/2026-09-04-issue-187-descriptor-pool-retry-rollback.md`
 
-> **Status: DEFERRED — design approved, implementation not scheduled.**
-> Approved on 2026-09-04 alongside issue #196, then deliberately held back: #196
-> shipped first and #187 was parked rather than implemented. Nothing in this
-> document is in `main` — `DescriptorSetPool.Acquire` still leaves the failed
-> retry's sub-pool chained. The agreed evidence bar for merging the eventual
-> change is a **local mutation run** (force the retry to fail; confirm
-> `PoolCount == 1` with the fix and `2` without, recorded in the PR body, nothing
-> test-only shipped) rather than holding out for AMD/Intel hardware. Line numbers
-> below were accurate at 2026-09-04 and drift with every edit to the file.
+> **Status: IMPLEMENTED on branch `issue-187-retry-rollback-docs` (2026-10-02).**
+> Approved on 2026-09-04 alongside issue #196 and parked while #196 shipped
+> (#226); implemented as designed on 2026-10-02. The evidence bar agreed for
+> merging (OPEN-2) is the **local mutation run** — force the retry to fail;
+> `PoolCount == 1` with the fix and `2` without — recorded in the PR body, with
+> nothing test-only shipped. OPEN-1's premise is moot now that #196 has landed;
+> `FrameRing.cs` was still left untouched.
+>
+> **Line citations are as of `main` at `60cd9f2`** and were not refreshed.
+> `src/Ahjo.Vulkan/Pools/DescriptorSetPool.cs` has since moved twice: #229 added
+> ~22 lines above the retry block (the `descriptorCount = 0` guard), and this
+> change added the rollback helper and rewrote the comments and XML docs it
+> names. Re-locate by the quoted text, not by line number; citations into other
+> files may also have drifted.
 
 
 ## Problem

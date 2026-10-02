@@ -48,7 +48,11 @@ namespace Ahjo.Vulkan;
 /// <c>VkDescriptorPool</c> with the same <c>maxSets</c> + pool-size
 /// template the caller passed at construction and retries the alloc.
 /// All sub-pools live until <see cref="Dispose"/>;
-/// <see cref="Reset"/> resets every one of them. This matches the
+/// <see cref="Reset"/> resets every one of them. The one exception is a
+/// sub-pool the auto-grow retry built for a request the retry could not
+/// satisfy either: it is destroyed before the throw (issue #187), so a
+/// failed <see cref="Acquire(VkDescriptorSetLayout_T*, uint)"/> leaves
+/// <see cref="PoolCount"/> unchanged. This matches the
 /// engine's <c>DescriptorPoolManager</c> behaviour and lets long-lived
 /// bindless tables, hot-reload spikes, and asset surges grow past the
 /// original budget without having to re-architect around the pool.
@@ -130,12 +134,11 @@ public sealed unsafe class DescriptorSetPool : IDisposable
     /// layout's bindings are not readable back from a
     /// <c>VkDescriptorSetLayout</c> handle, so passing a layout that <i>does</i>
     /// have bindings is not diagnosable here. On a driver that enforces per-type
-    /// pool accounting it fails with <c>VK_ERROR_OUT_OF_POOL_MEMORY</c>, having
-    /// chained one wasted sub-pool <i>per failed call</i> — the auto-grow retry
-    /// builds it and nothing rolls it back, so they accumulate until
-    /// <see cref="Dispose"/> (issue #187, widened by this route, not closed by
-    /// it). On a driver that enforces only <c>maxSets</c> — which is what this
-    /// repo's hardware was measured doing — it may simply succeed.</para>
+    /// pool accounting it fails with <c>VK_ERROR_OUT_OF_POOL_MEMORY</c>. The
+    /// failure is clean: the sub-pool the auto-grow retry built for it is
+    /// destroyed before the throw (issue #187), so <see cref="PoolCount"/> is
+    /// unchanged. On a driver that enforces only <c>maxSets</c> — which is what
+    /// this repo's hardware was measured doing — it may simply succeed.</para>
     /// </param>
     /// <param name="updateAfterBind">
     /// Set <see langword="true"/> to create the pool with
@@ -232,7 +235,8 @@ public sealed unsafe class DescriptorSetPool : IDisposable
     /// otherwise <c>vkAllocateDescriptorSets</c> grows the current
     /// sub-pool by one. On exhaustion (<c>OUT_OF_POOL_MEMORY</c> /
     /// <c>FRAGMENTED_POOL</c>) and when growth is enabled, allocates a
-    /// fresh sub-pool with the original template and retries.
+    /// fresh sub-pool with the original template and retries, and destroys
+    /// that sub-pool again if the retry also fails.
     /// </summary>
     /// <remarks>
     /// For a layout whose highest binding carries
@@ -300,6 +304,13 @@ public sealed unsafe class DescriptorSetPool : IDisposable
     /// <c>vkCreateDescriptorPool</c> sums them), so no sub-pool built from
     /// that template could satisfy it for any descriptor type.
     /// </exception>
+    /// <exception cref="VulkanException">
+    /// The allocation failed and, where growth was enabled and the failure was
+    /// exhaustion, the retry from a fresh sub-pool failed too; the
+    /// <see cref="VulkanException.Result"/> is then the retry's.
+    /// <see cref="PoolCount"/> is unchanged — a failed <c>Acquire</c> never
+    /// leaves a sub-pool behind.
+    /// </exception>
     public DescriptorSet Acquire(VkDescriptorSetLayout_T* layout, uint variableDescriptorCount)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -332,12 +343,22 @@ public sealed unsafe class DescriptorSetPool : IDisposable
             return new DescriptorSet(raw, layout, variableDescriptorCount);
         }
 
-        // Exhaustion is the only retry-able failure: a fresh sub-pool built
-        // from the same template fits the requested binding shape, and a
-        // brand-new pool can't already be fragmented. The guard above is
-        // what keeps that true once the shape depends on a runtime count —
-        // it rejects the counts no template entry could hold, before any
-        // sub-pool is built for them.
+        // Exhaustion is retry-able, but not always satisfiable. A fresh
+        // sub-pool from the same template restores the full maxSets budget and
+        // carries no fragmentation — that half is real, and it is what makes
+        // ordinary growth work (#60); this repo's driver was measured enforcing
+        // maxSets (#191's mutation run), so it is the half with real coverage.
+        // It does NOT guarantee the requested binding shape fits. Two requests
+        // are unsatisfiable by construction and still reach here: a variable
+        // count larger than the template's entry for the variable binding's
+        // own descriptor type but under the largest per-type total the guard
+        // above checks (the type is not readable back from a
+        // VkDescriptorSetLayout handle, so that guard is necessary and never
+        // sufficient — #182), and any layout with real bindings against a pool
+        // created with an empty poolSizes template, through the plain
+        // Acquire(layout) overload (#191). Both fail the retry too, so the
+        // sub-pool this branch built is rolled back rather than chained
+        // forever (#187).
         if (_growOnExhaustion && IsExhaustion(result))
         {
             _pools.EnsureCapacity(_pools.Count + 1);
@@ -348,9 +369,14 @@ public sealed unsafe class DescriptorSetPool : IDisposable
                 _allHandles.Add((nint)raw);
                 return new DescriptorSet(raw, layout, variableDescriptorCount);
             }
+            RollBackFailedGrowth();
         }
 
-        // Neither retry path produced a set — surface the original failure.
+        // No set was produced. On the growth leg `result` is the retry's,
+        // reassigned through `out` above: it came from a brand-new sub-pool, so
+        // it is strictly more diagnostic than the original — fragmentation is
+        // ruled out as the explanation. On the other legs (growth disabled, or a
+        // non-exhaustion failure) it is still the original allocation's.
         result.ThrowIfFailed();
         return default; // unreachable: ThrowIfFailed always throws on non-success.
     }
@@ -501,6 +527,49 @@ public sealed unsafe class DescriptorSetPool : IDisposable
         VkDescriptorSet_T* raw = null;
         result = Vk.vkAllocateDescriptorSets(_device.Handle, &ai, &raw);
         return result == VkResult.VK_SUCCESS ? raw : null;
+    }
+
+    /// <summary>
+    /// Unchains and destroys the sub-pool the auto-grow retry in
+    /// <see cref="Acquire(VkDescriptorSetLayout_T*, uint)"/> built, once that
+    /// retry has also failed (issue #187). The sub-pool was created solely to
+    /// satisfy that one request, and the request was not satisfied — so it has
+    /// served nothing and never will. Left chained, it would survive every
+    /// <see cref="Reset"/> until <see cref="Dispose"/>.
+    /// <para>
+    /// <b>Why destroying it is safe:</b>
+    /// VUID-vkDestroyDescriptorPool-descriptorPool-00303 ("all submitted
+    /// commands that refer to <c>descriptorPool</c> via any allocated descriptor
+    /// sets must have completed execution") is vacuously satisfied.
+    /// <c>vkAllocateDescriptorSets</c> frees any partially allocated sets and
+    /// sets every <c>pDescriptorSets</c> entry to <c>VK_NULL_HANDLE</c> on
+    /// failure, so no <c>VkDescriptorSet</c> derived from this sub-pool exists —
+    /// not in <c>_allHandles</c>, not in <c>_idle</c>, not in the caller's hands.
+    /// <c>pAllocator</c> is <c>null</c> both here and in <c>CreatePool</c>, per
+    /// VUID-vkDestroyDescriptorPool-descriptorPool-00304 / -00305.
+    /// </para>
+    /// <para>
+    /// Unchain <i>before</i> destroy: the object's own state must never name a
+    /// destroyed handle, so a later <see cref="Reset"/> or <see cref="Dispose"/>
+    /// cannot reach it. <c>List&lt;T&gt;.RemoveAt</c> at the last index neither
+    /// allocates nor shrinks capacity. This removes exactly the element the
+    /// caller added two statements earlier, so <see cref="PoolCount"/> is
+    /// unchanged across a throwing <c>Acquire</c> and <c>_pools.Count &gt;= 1</c>
+    /// still holds.
+    /// </para>
+    /// <para>
+    /// <c>NoInlining</c> for the same IL-size reason documented on
+    /// <see cref="ThrowVariableCountExceedsBudget"/>: <c>Acquire</c>'s body size
+    /// governs the one-arg forwarder's inlining. Do not fold it back inline. Not
+    /// <c>DoesNotReturn</c> — it returns, and the throw stays in <c>Acquire</c>.
+    /// </para>
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void RollBackFailedGrowth()
+    {
+        nint doomed = _pools[^1];
+        _pools.RemoveAt(_pools.Count - 1);
+        Vk.vkDestroyDescriptorPool(_device.Handle, (VkDescriptorPool_T*)doomed, null);
     }
 
     /// <summary>

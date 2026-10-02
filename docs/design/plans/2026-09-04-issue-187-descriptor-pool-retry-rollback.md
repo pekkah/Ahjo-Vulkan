@@ -2,15 +2,19 @@ Paired with ../specs/2026-09-04-issue-187-descriptor-pool-retry-rollback-design.
 
 # Plan — issue #187: roll the auto-grow retry's sub-pool back on a failed retry
 
-> **Status: DEFERRED — design approved, implementation not scheduled.**
-> Approved on 2026-09-04 alongside issue #196, then deliberately held back: #196
-> shipped first and #187 was parked rather than implemented. Nothing in this
-> document is in `main` — `DescriptorSetPool.Acquire` still leaves the failed
-> retry's sub-pool chained. The agreed evidence bar for merging the eventual
-> change is a **local mutation run** (force the retry to fail; confirm
-> `PoolCount == 1` with the fix and `2` without, recorded in the PR body, nothing
-> test-only shipped) rather than holding out for AMD/Intel hardware. Line numbers
-> below were accurate at 2026-09-04 and drift with every edit to the file.
+> **Status: IMPLEMENTED on branch `issue-187-retry-rollback-docs` (2026-10-02).**
+> Approved on 2026-09-04 alongside issue #196 and parked while #196 shipped
+> (#226); executed on 2026-10-02 on the branch named here, not the
+> `issue-187-descriptor-pool-retry-rollback` branch the body below mentions.
+> OPEN-1's premise is moot (#196 has landed) and `FrameRing.cs` was still left
+> untouched; OPEN-2 is resolved — the step 8 local mutation run is the accepted
+> evidence bar.
+>
+> **Line citations are as of `main` at `60cd9f2`** and were not refreshed.
+> `src/Ahjo.Vulkan/Pools/DescriptorSetPool.cs` has since moved twice: #229 added
+> ~22 lines above the retry block (the `descriptorCount = 0` guard), and this
+> plan's own steps then rewrote the cited regions. Re-locate by the quoted text,
+> not by line number; test-file citations may also have drifted.
 
 
 Branch: `issue-187-descriptor-pool-retry-rollback`. Nine steps. Steps 1-3 are the wrapper code,
