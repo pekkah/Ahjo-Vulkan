@@ -155,10 +155,12 @@ public enum CompilerOptionName
     CoverageManifestOutput = 150,
     TraceCoverageCounterByteWidth = 151,
     TraceCoverageBoolean = 152,
-    CompilerVersion = 153,
     SPIRVUnifiedDescriptorHeapStride = 154,
     WarningLevel = 155,
     SeparateDebugInfoOutput = 156,
     DebugInfoIncludeSource = 157,
+    TraceCoverageBindlessIndex = 158,
+    GetCompilerPath = 159,
+    BitfieldPackingRules = 160,
     CountOf,
 }

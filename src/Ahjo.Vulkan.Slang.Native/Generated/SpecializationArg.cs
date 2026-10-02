@@ -9,7 +9,7 @@ public unsafe partial struct SpecializationArg
     [NativeTypeName("slang::SpecializationArg::Kind")]
     public Kind kind;
 
-    [NativeTypeName("__AnonymousRecord_slang_L5671_C5")]
+    [NativeTypeName("__AnonymousRecord_slang_L5850_C5")]
     public _Anonymous_e__Union Anonymous;
 
     [UnscopedRef]

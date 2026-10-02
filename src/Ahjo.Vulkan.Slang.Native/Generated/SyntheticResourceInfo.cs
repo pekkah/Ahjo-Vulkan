@@ -37,4 +37,7 @@ public unsafe partial struct SyntheticResourceInfo
 
     [NativeTypeName("const char *")]
     public sbyte* debugName;
+
+    [NativeTypeName("int32_t")]
+    public int bindlessIndex;
 }
