@@ -115,6 +115,17 @@
 
   <Target Name="RunClangSharpGenerator" DependsOnTargets="CopyGeneratedHeaders">
     <MakeDir Directories="$(GeneratedDir)" />
+    <!--
+      ClangSharp writes into the existing directory and never removes files,
+      so a type that upstream turns into a typedef alias (e.g. an EXT struct
+      promoted to KHR) would survive as a stale, distinct C# type. Clear the
+      flat *.cs output first; non-recursive, so Generated/Chains/ (owned by
+      RegenerateChains, which cleans its own output) is left alone.
+    -->
+    <ItemGroup>
+      <_StaleGeneratedFiles Include="$(GeneratedDir)*.cs" />
+    </ItemGroup>
+    <Delete Files="@(_StaleGeneratedFiles)" />
     <Exec
       Command="dotnet tool run ClangSharpPInvokeGenerator @&quot;$(GeneratorResponseFile)&quot;"
       WorkingDirectory="$(RepositoryRoot)" />
