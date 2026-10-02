@@ -1,6 +1,6 @@
 # Ahjo.Vulkan — Claude Project Memory
 
-.NET 10 / C# 14 Vulkan bindings + low-allocation wrapper, aimed at the [Logos game engine](https://github.com/pekkah/logos). Eight publishable NuGet packages live in this repo; see `README.md` for the consumer-facing overview.
+.NET 10 / C# 14 Vulkan bindings + low-allocation wrapper, aimed at the Ahjo game engine. Eight publishable NuGet packages live in this repo; see `README.md` for the consumer-facing overview.
 
 Work is driven by GitHub issues. `/work-issue <number>` runs the standard flow: triage → architect (spec + plan) → approval → implementer → reviewers → PR.
 

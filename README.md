@@ -120,7 +120,6 @@ the names the wrapper actively wraps as ready-made `Utf8Name` values.
 
 Full design rationale (instance lifecycle, validation wiring, callback
 contract): [`docs/design/specs/2026-05-04-issue-06-instance-creation-design.md`](docs/design/specs/2026-05-04-issue-06-instance-creation-design.md).
-Porting from Vortice.Vulkan: [`docs/migration-vortice-to-ahjo.md`](docs/migration-vortice-to-ahjo.md).
 DLSS / DLAA consumer contract — the feature DLL, the licence obligations it carries, and the
 renderer conventions the wrapper cannot check: [`docs/ngx-notes.md`](docs/ngx-notes.md).
 Other specs and plans live under [`docs/design/specs/`](docs/design/specs/) and [`docs/design/plans/`](docs/design/plans/).
