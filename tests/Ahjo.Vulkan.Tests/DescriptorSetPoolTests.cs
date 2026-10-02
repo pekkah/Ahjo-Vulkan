@@ -368,6 +368,50 @@ public sealed unsafe class DescriptorSetPoolTests
     }
 
     /// <summary>
+    /// Issue #187, #191's route: a layout with real bindings acquired from a
+    /// budget-less pool through the plain <c>Acquire(layout)</c> overload must
+    /// leave <see cref="DescriptorSetPool.PoolCount"/> at exactly 1 whether or
+    /// not the acquire throws. Driver-portable by construction:
+    /// <list type="bullet">
+    ///   <item><description>on a driver that enforces only <c>maxSets</c> (this
+    ///     repo's) the acquire succeeds — no exhaustion, no growth — and the
+    ///     assertion holds on the no-growth leg;</description></item>
+    ///   <item><description>on a driver that enforces per-type pool accounting
+    ///     the acquire fails, growth runs, the retry fails too, and the assertion
+    ///     holds only because the retry's sub-pool is rolled back.</description></item>
+    /// </list>
+    /// <b>On this repo's hardware this test does not execute the rollback
+    /// branch; it becomes rollback coverage on the first AMD/Intel run,
+    /// unedited.</b> The exact <c>1</c> is the assertion the fix buys — do not
+    /// weaken it to <c>PoolCount &lt;= 2</c>. A plain instance, deliberately no
+    /// validation callback: the layer warns about the over-allocation (#182's
+    /// spec records it as a warning, not a VUID, since maintenance1 is core),
+    /// and this test is about the wrapper's chain bookkeeping, not the layer's
+    /// opinion.
+    /// </summary>
+    [Fact]
+    public void Pool_EmptyPoolSizes_AcquireLayoutWithBindings_LeavesNoResidualSubPool()
+    {
+        TestGate.RequireDriver();
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance);
+        VkDescriptorSetLayout_T* layout = CreateUniformBufferLayout(device);
+        try
+        {
+            using var pool = new DescriptorSetPool(device, maxSets: 4, []);
+
+            bool threw = false;
+            try { pool.Acquire(layout); }
+            catch (VulkanException) { threw = true; }
+
+            Assert.Equal(1, pool.PoolCount);
+            Assert.Equal(threw ? 0 : 1, pool.AllocatedCount);
+        }
+        finally { Vk.vkDestroyDescriptorSetLayout(device.Handle, layout, null); }
+    }
+
+    /// <summary>
     /// A pool with no <c>poolSizes</c> holds no descriptors of any type, so
     /// <c>_maxPerTypeDescriptorTotal</c> is 0 and #182's pre-flight guard rejects
     /// every variable count ≥ 1 — the right answer, not merely a tolerated one.
