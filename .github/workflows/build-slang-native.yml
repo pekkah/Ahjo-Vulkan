@@ -109,7 +109,7 @@ jobs:
       # AHJO_VULKAN_TIER stays unset (i.e. `none`) for the same reason: the
       # lane touches no Vulkan surface, so it has nothing to declare.
       - name: Test — Ahjo.Vulkan.Slang.Native.Tests
-        run: dotnet test tests/Ahjo.Vulkan.Slang.Native.Tests/Ahjo.Vulkan.Slang.Native.Tests.csproj -c Release --nologo -l "console;verbosity=detailed"
+        run: dotnet test --project tests/Ahjo.Vulkan.Slang.Native.Tests/Ahjo.Vulkan.Slang.Native.Tests.csproj -c Release --nologo --output Detailed
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

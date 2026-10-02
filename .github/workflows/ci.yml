@@ -153,16 +153,17 @@ jobs:
         run: dotnet build Ahjo.Vulkan.slnx -c Release --nologo -p:SkipKtxNativeBuild=true -p:SkipNgxNativeBuild=true
 
       - name: Test — Ahjo.Vulkan.Native.Tests
-        run: dotnet test tests/Ahjo.Vulkan.Native.Tests/Ahjo.Vulkan.Native.Tests.csproj -c Release --no-build --nologo -l "console;verbosity=detailed"
+        run: dotnet test --project tests/Ahjo.Vulkan.Native.Tests/Ahjo.Vulkan.Native.Tests.csproj -c Release --no-build --nologo --output Detailed
 
-      # Detailed console logging prints each test name as it starts so a
-      # native crash (SIGSEGV/AV) names the offending test in the log
-      # instead of just surfacing as exit 139 with no context. --blame
-      # also writes Sequence.xml naming the test that was running when
-      # the test host crashed — printed below on step failure.
+      # --crashdump (Microsoft.Testing.Extensions.CrashDump) is what makes
+      # a native crash (SIGSEGV/AV) name the offending test instead of just
+      # surfacing as a bare exit code: on a test host crash the platform
+      # prints the tests still running, and writes *_crash.sequence.log
+      # listing them — printed below on step failure. The trx is xunit's
+      # own reporter; the coverage summary below reads it.
       - name: Test — Ahjo.Vulkan.Tests
         id: wrapper-tests
-        run: dotnet test tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj -c Release --no-build --nologo -l "console;verbosity=detailed" --logger "trx;LogFileName=wrapper.trx" --blame --blame-crash --results-directory TestResults
+        run: dotnet test --project tests/Ahjo.Vulkan.Tests/Ahjo.Vulkan.Tests.csproj -c Release --no-build --nologo --output Detailed --report-xunit-trx --report-xunit-trx-filename wrapper.trx --crashdump --results-directory TestResults
 
       # Slang wrapper coverage. Compiling shader text to bytes needs no ICD,
       # so all but one test here runs regardless of what the SwiftShader
@@ -170,7 +171,7 @@ jobs:
       # Device.CreateShaderModule gates on TestGate.RequireDriver like every
       # other device-dependent test.
       - name: Test — Ahjo.Vulkan.Slang.Tests
-        run: dotnet test tests/Ahjo.Vulkan.Slang.Tests/Ahjo.Vulkan.Slang.Tests.csproj -c Release --no-build --nologo -l "console;verbosity=detailed"
+        run: dotnet test --project tests/Ahjo.Vulkan.Slang.Tests/Ahjo.Vulkan.Slang.Tests.csproj -c Release --no-build --nologo --output Detailed
 
       # NGX wrapper coverage. The NGX SDK is proprietary and this lane stages
       # none of it, so the shim-dependent and NVIDIA-dependent tests skip
@@ -184,11 +185,11 @@ jobs:
       # docs/ci-coverage.md says so, and #32 is why it is recorded rather than
       # faked.
       #
-      # No trx logger, deliberately: the coverage summary below parses
+      # No trx report, deliberately: the coverage summary below parses
       # wrapper.trx only, and this suite does not join it — same as the Slang
       # wrapper step above.
       - name: Test — Ahjo.Vulkan.Ngx.Tests
-        run: dotnet test tests/Ahjo.Vulkan.Ngx.Tests/Ahjo.Vulkan.Ngx.Tests.csproj -c Release --no-build --nologo -l "console;verbosity=detailed"
+        run: dotnet test --project tests/Ahjo.Vulkan.Ngx.Tests/Ahjo.Vulkan.Ngx.Tests.csproj -c Release --no-build --nologo --output Detailed
 
       # Turns the run's skips into the headline verdict instead of a number
       # nobody reads out of the log (issue 158). Two conditions fail this step:
@@ -220,7 +221,7 @@ jobs:
 
           $trx = "TestResults/wrapper.trx"
           if (-not (Test-Path $trx)) {
-            Write-Output "::error::$trx was not produced, so this run's Vulkan coverage cannot be verified. The trx logger on the 'Test — Ahjo.Vulkan.Tests' step is what the coverage summary reads."
+            Write-Output "::error::$trx was not produced, so this run's Vulkan coverage cannot be verified. The trx report on the 'Test — Ahjo.Vulkan.Tests' step is what the coverage summary reads."
             exit 1
           }
 
@@ -240,7 +241,12 @@ jobs:
           $unclassified = @()
 
           foreach ($r in $skipped) {
+            # VSTest put the skip reason in ErrorInfo/Message; Microsoft
+            # Testing Platform trx writers (xunit's and Microsoft's) put it
+            # in StdOut. Read either, so the classification can't silently
+            # break if the writer changes again.
             $message = [string]$r.Output.ErrorInfo.Message
+            if ([string]::IsNullOrWhiteSpace($message)) { $message = [string]$r.Output.StdOut }
             $m = [regex]::Match($message, '^\[gate:([a-z]+)\]')
             if ($m.Success -and $counts.Contains($m.Groups[1].Value)) {
               $counts[$m.Groups[1].Value] += 1
@@ -310,12 +316,12 @@ jobs:
           }
           if ($bad) { exit 1 }
 
-      - name: Print blame logs on failure
+      - name: Print crash sequence logs on failure
         if: failure()
         shell: bash
         run: |
-          echo "::group::Blame Sequence files"
-          find TestResults -type f \( -name 'Sequence_*.xml' -o -name '*.txt' -o -name '*.dmp.txt' \) -print -exec cat {} \; 2>/dev/null || true
+          echo "::group::Crash sequence logs"
+          find TestResults -type f -name '*_crash.sequence.log' -print -exec cat {} \; 2>/dev/null || true
           echo "::endgroup::"
 
       # Issue 28 — Native AOT smoke. Publishing under PublishAot=true is the
@@ -429,7 +435,7 @@ jobs:
       - name: Test — Ahjo.Vulkan.Vma.Native.Tests
         env:
           AHJO_VULKAN_TIER: "software"
-        run: dotnet test tests/Ahjo.Vulkan.Vma.Native.Tests/Ahjo.Vulkan.Vma.Native.Tests.csproj -c Release --nologo -l "console;verbosity=detailed"
+        run: dotnet test --project tests/Ahjo.Vulkan.Vma.Native.Tests/Ahjo.Vulkan.Vma.Native.Tests.csproj -c Release --nologo --output Detailed
 
   # Ahjo.Vulkan.Ktx.Native ships a native binary per RID, and the same
   # reasoning that produced the vma-linux lane applies with less nuance:

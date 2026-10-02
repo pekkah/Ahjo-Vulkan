@@ -147,7 +147,7 @@ jobs:
       - name: Test — Ahjo.Vulkan.Ngx.Native.Tests
         env:
           AHJO_NGX_REQUIRE_SHIM: "1"
-        run: dotnet test tests/Ahjo.Vulkan.Ngx.Native.Tests/Ahjo.Vulkan.Ngx.Native.Tests.csproj -c Release --nologo -l "console;verbosity=detailed"
+        run: dotnet test --project tests/Ahjo.Vulkan.Ngx.Native.Tests/Ahjo.Vulkan.Ngx.Native.Tests.csproj -c Release --nologo --output Detailed
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
