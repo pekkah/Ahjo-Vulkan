@@ -420,6 +420,9 @@ public static unsafe partial class SlangApi
     public static extern SlangReflectionVariableLayout* spReflectionTypeLayout_getContainerVarLayout(SlangReflectionTypeLayout* type);
 
     [DllImport("slang", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    public static extern SlangReflectionVariableLayout* spReflectionTypeLayout_GetContentVarLayout(SlangReflectionTypeLayout* type);
+
+    [DllImport("slang", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     public static extern SlangParameterCategory spReflectionTypeLayout_GetParameterCategory(SlangReflectionTypeLayout* type);
 
     [DllImport("slang", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -914,6 +917,9 @@ public static unsafe partial class SlangApi
 
     [NativeTypeName("const uint32_t")]
     public const uint kInvalidCoverageCounterIndex = 0xffffffffU;
+
+    [NativeTypeName("const uint32_t")]
+    public const uint kUnboundedSyntheticResourceArraySize = ~(uint)(0);
 
     [DllImport("slang", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     public static extern ISlangBlob* slang_createBlob([NativeTypeName("const void *")] void* data, [NativeTypeName("size_t")] nuint size);
