@@ -12,16 +12,14 @@
   -->
 
   <ItemGroup>
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.5.1" />
-    <PackageVersion Include="xunit.v3" Version="3.2.2" />
-    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
-    <PackageVersion Include="Verify.XunitV3" Version="31.16.1" />
+    <PackageVersion Include="xunit.v3" Version="4.0.1" />
+    <PackageVersion Include="Microsoft.Testing.Extensions.CrashDump" Version="2.4.1" />
   </ItemGroup>
 
   <!-- Derives package version from git tags + commit height; see
        Directory.Build.props and .github/workflows/publish.yml. -->
   <ItemGroup>
-    <PackageVersion Include="MinVer" Version="7.0.0" />
+    <PackageVersion Include="MinVer" Version="8.0.0" />
   </ItemGroup>
 
   <!-- Window/surface integration for tests (Wayland/Metal E2E surface
@@ -30,13 +28,13 @@
        ships bundled SDL3 native binaries for win/linux/macOS via
        runtimes/<rid>/native/. -->
   <ItemGroup>
-    <PackageVersion Include="ppy.SDL3-CS" Version="2026.429.0" />
+    <PackageVersion Include="ppy.SDL3-CS" Version="2026.1002.1" />
   </ItemGroup>
 
   <!-- On-demand allocation + latency benchmarks. See
        tests/Ahjo.Vulkan.Benchmarks/ for usage. -->
   <ItemGroup>
-    <PackageVersion Include="BenchmarkDotNet" Version="0.14.0" />
+    <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
   </ItemGroup>
 
 </Project>

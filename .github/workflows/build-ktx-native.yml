@@ -101,7 +101,7 @@ jobs:
       # and no device. If this ever starts needing one, something has been
       # linked in that the package's contract says is not there.
       - name: Test — Ahjo.Vulkan.Ktx.Native.Tests
-        run: dotnet test tests/Ahjo.Vulkan.Ktx.Native.Tests/Ahjo.Vulkan.Ktx.Native.Tests.csproj -c Release --nologo -l "console;verbosity=detailed"
+        run: dotnet test --project tests/Ahjo.Vulkan.Ktx.Native.Tests/Ahjo.Vulkan.Ktx.Native.Tests.csproj -c Release --nologo --output Detailed
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
