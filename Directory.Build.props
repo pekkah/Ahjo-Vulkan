@@ -115,6 +115,11 @@
     <RepositoryUrl>https://github.com/pekkah/Ahjo-Vulkan</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>vulkan;graphics;gpu;interop;native</PackageTags>
+    <!-- Source Link ships in the .NET SDK (8.0+), so there is no
+         Microsoft.SourceLink.GitHub PackageReference: a pinned package would
+         override the SDK copy and put its Microsoft.Build.Tasks.Git through
+         NuGetAudit (NU1902 on 8.0.0). These properties drive the SDK copy:
+         commit + repo URL into the .nuspec, source map into the PDBs. -->
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
