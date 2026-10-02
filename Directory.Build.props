@@ -20,7 +20,7 @@
          VulkanHeadersVersion. Bump deliberately; the generated bindings are
          committed and a regen run is required after a bump.
          See https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/releases. -->
-    <VmaVersion>v3.3.0</VmaVersion>
+    <VmaVersion>v3.4.0</VmaVersion>
     <!-- Pinned KTX-Software (libktx) tag. Independent cadence from the two
          above. Bump deliberately; the generated bindings are committed and
          a regen run is required after a bump.

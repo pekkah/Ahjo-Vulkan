@@ -73,6 +73,10 @@ public static unsafe partial class Vma
 
     [DllImport("vma", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     [return: NativeTypeName("VkResult")]
+    public static extern Ahjo.Vulkan.Native.VkResult vmaAllocateDedicatedMemory([NativeTypeName("VmaAllocator _Nonnull")] VmaAllocator_T* allocator, [NativeTypeName("const VkMemoryRequirements * _Nonnull")] Ahjo.Vulkan.Native.VkMemoryRequirements* pVkMemoryRequirements, [NativeTypeName("const VmaAllocationCreateInfo * _Nonnull")] VmaAllocationCreateInfo* pCreateInfo, [NativeTypeName("void * _Nullable")] void* pMemoryAllocateNext, [NativeTypeName("VmaAllocation  _Nullable * _Nonnull")] VmaAllocation_T** pAllocation, [NativeTypeName("VmaAllocationInfo * _Nullable")] VmaAllocationInfo* pAllocationInfo);
+
+    [DllImport("vma", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    [return: NativeTypeName("VkResult")]
     public static extern Ahjo.Vulkan.Native.VkResult vmaAllocateMemoryPages([NativeTypeName("VmaAllocator _Nonnull")] VmaAllocator_T* allocator, [NativeTypeName("const VkMemoryRequirements * _Nonnull")] Ahjo.Vulkan.Native.VkMemoryRequirements* pVkMemoryRequirements, [NativeTypeName("const VmaAllocationCreateInfo * _Nonnull")] VmaAllocationCreateInfo* pCreateInfo, [NativeTypeName("size_t")] nuint allocationCount, [NativeTypeName("VmaAllocation  _Nullable * _Nonnull")] VmaAllocation_T** pAllocations, [NativeTypeName("VmaAllocationInfo * _Nullable")] VmaAllocationInfo* pAllocationInfo);
 
     [DllImport("vma", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -180,6 +184,10 @@ public static unsafe partial class Vma
 
     [DllImport("vma", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     [return: NativeTypeName("VkResult")]
+    public static extern Ahjo.Vulkan.Native.VkResult vmaCreateDedicatedBuffer([NativeTypeName("VmaAllocator _Nonnull")] VmaAllocator_T* allocator, [NativeTypeName("const VkBufferCreateInfo * _Nonnull")] Ahjo.Vulkan.Native.VkBufferCreateInfo* pBufferCreateInfo, [NativeTypeName("const VmaAllocationCreateInfo * _Nonnull")] VmaAllocationCreateInfo* pAllocationCreateInfo, [NativeTypeName("void * _Nullable")] void* pMemoryAllocateNext, [NativeTypeName("VkBuffer  _Nullable * _Nonnull")] Ahjo.Vulkan.Native.VkBuffer_T** pBuffer, [NativeTypeName("VmaAllocation  _Nullable * _Nonnull")] VmaAllocation_T** pAllocation, [NativeTypeName("VmaAllocationInfo * _Nullable")] VmaAllocationInfo* pAllocationInfo);
+
+    [DllImport("vma", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    [return: NativeTypeName("VkResult")]
     public static extern Ahjo.Vulkan.Native.VkResult vmaCreateAliasingBuffer([NativeTypeName("VmaAllocator _Nonnull")] VmaAllocator_T* allocator, [NativeTypeName("VmaAllocation _Nonnull")] VmaAllocation_T* allocation, [NativeTypeName("const VkBufferCreateInfo * _Nonnull")] Ahjo.Vulkan.Native.VkBufferCreateInfo* pBufferCreateInfo, [NativeTypeName("VkBuffer  _Nullable * _Nonnull")] Ahjo.Vulkan.Native.VkBuffer_T** pBuffer);
 
     [DllImport("vma", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -192,6 +200,10 @@ public static unsafe partial class Vma
     [DllImport("vma", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     [return: NativeTypeName("VkResult")]
     public static extern Ahjo.Vulkan.Native.VkResult vmaCreateImage([NativeTypeName("VmaAllocator _Nonnull")] VmaAllocator_T* allocator, [NativeTypeName("const VkImageCreateInfo * _Nonnull")] Ahjo.Vulkan.Native.VkImageCreateInfo* pImageCreateInfo, [NativeTypeName("const VmaAllocationCreateInfo * _Nonnull")] VmaAllocationCreateInfo* pAllocationCreateInfo, [NativeTypeName("VkImage  _Nullable * _Nonnull")] Ahjo.Vulkan.Native.VkImage_T** pImage, [NativeTypeName("VmaAllocation  _Nullable * _Nonnull")] VmaAllocation_T** pAllocation, [NativeTypeName("VmaAllocationInfo * _Nullable")] VmaAllocationInfo* pAllocationInfo);
+
+    [DllImport("vma", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    [return: NativeTypeName("VkResult")]
+    public static extern Ahjo.Vulkan.Native.VkResult vmaCreateDedicatedImage([NativeTypeName("VmaAllocator _Nonnull")] VmaAllocator_T* allocator, [NativeTypeName("const VkImageCreateInfo * _Nonnull")] Ahjo.Vulkan.Native.VkImageCreateInfo* pImageCreateInfo, [NativeTypeName("const VmaAllocationCreateInfo * _Nonnull")] VmaAllocationCreateInfo* pAllocationCreateInfo, [NativeTypeName("void * _Nullable")] void* pMemoryAllocateNext, [NativeTypeName("VkImage  _Nullable * _Nonnull")] Ahjo.Vulkan.Native.VkImage_T** pImage, [NativeTypeName("VmaAllocation  _Nullable * _Nonnull")] VmaAllocation_T** pAllocation, [NativeTypeName("VmaAllocationInfo * _Nullable")] VmaAllocationInfo* pAllocationInfo);
 
     [DllImport("vma", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     [return: NativeTypeName("VkResult")]

@@ -52,6 +52,7 @@ VkImageCreateInfo=Ahjo.Vulkan.Native.VkImageCreateInfo
 VkMemoryRequirements=Ahjo.Vulkan.Native.VkMemoryRequirements
 VkMemoryRequirements2=Ahjo.Vulkan.Native.VkMemoryRequirements2
 VkPhysicalDeviceProperties=Ahjo.Vulkan.Native.VkPhysicalDeviceProperties
+VkPhysicalDeviceProperties2=Ahjo.Vulkan.Native.VkPhysicalDeviceProperties2
 VkPhysicalDeviceMemoryProperties=Ahjo.Vulkan.Native.VkPhysicalDeviceMemoryProperties
 VkPhysicalDeviceMemoryProperties2=Ahjo.Vulkan.Native.VkPhysicalDeviceMemoryProperties2
 VkInstance_T=Ahjo.Vulkan.Native.VkInstance_T
