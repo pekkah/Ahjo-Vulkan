@@ -71,7 +71,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # The cached content is the SDK's static CLIENT LIBRARY — someone else's
       # input to our build — not our output. Keyed on everything that can
@@ -84,13 +84,13 @@ jobs:
       # tests execute. Caching our own artifact would be caching the answer.
       - name: Cache staged NGX client library
         id: cache-ngx
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: native/ngx/staged/${{ matrix.rid }}
           key: ngx-${{ matrix.rid }}-${{ hashFiles('Directory.Build.props', 'native/ngx/pins.sha256', 'tools/setup-ngx.ps1') }}
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
           cache: true
@@ -150,7 +150,7 @@ jobs:
         run: dotnet test --project tests/Ahjo.Vulkan.Ngx.Native.Tests/Ahjo.Vulkan.Ngx.Native.Tests.csproj -c Release --nologo --output Detailed
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ngx-native-${{ matrix.rid }}
           path: native/ngx/build/${{ matrix.rid }}/

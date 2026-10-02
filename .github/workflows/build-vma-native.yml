@@ -58,7 +58,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Cache the produced binary per RID, keyed by the hash of every
       # input that can change the output: the impl TU, CMakeLists, the
@@ -69,14 +69,14 @@ jobs:
       # restore, and upload-artifact run.
       - name: Cache VMA build output
         id: cache-vma
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: native/vma/${{ matrix.built-path }}
           key: vma-${{ matrix.rid }}-${{ hashFiles('native/vma/src/vma.cpp', 'native/vma/CMakeLists.txt', 'Directory.Build.props', '.github/workflows/build-vma-native.yml') }}
 
       - name: Setup .NET
         if: steps.cache-vma.outputs.cache-hit != 'true'
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -124,7 +124,7 @@ jobs:
         run: ls -la native/vma/build/${{ matrix.rid }} || true
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vma-native-${{ matrix.rid }}
           path: native/vma/${{ matrix.built-path }}

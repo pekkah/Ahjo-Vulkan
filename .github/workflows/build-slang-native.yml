@@ -64,7 +64,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # The staged directory IS the cache: every fetch target is conditioned
       # on the primary file's absence, so a hit skips the ~77 MB download and
@@ -76,13 +76,13 @@ jobs:
       # no longer loads is exactly the thing worth finding out about.
       - name: Cache staged Slang binaries
         id: cache-slang
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: native/slang/staged/${{ matrix.rid }}
           key: slang-${{ matrix.rid }}-${{ hashFiles('Directory.Build.props', 'src/Ahjo.Vulkan.Slang.Native/Ahjo.Vulkan.Slang.Native.csproj', '.github/workflows/build-slang-native.yml') }}
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
           cache: true
@@ -112,7 +112,7 @@ jobs:
         run: dotnet test --project tests/Ahjo.Vulkan.Slang.Native.Tests/Ahjo.Vulkan.Slang.Native.Tests.csproj -c Release --nologo --output Detailed
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: slang-native-${{ matrix.rid }}
           path: native/slang/staged/${{ matrix.rid }}/

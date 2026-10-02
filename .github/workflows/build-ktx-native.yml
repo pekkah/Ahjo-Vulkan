@@ -58,7 +58,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # The staged binary IS the cache: BuildKtxForHost is conditioned on
       # its absence, so a hit skips the ~170 MB shallow clone of
@@ -71,13 +71,13 @@ jobs:
       # that no longer loads is exactly the thing worth finding out about.
       - name: Cache staged ktx binary
         id: cache-ktx
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: native/ktx/staged/${{ matrix.rid }}/${{ matrix.lib-file }}
           key: ktx-${{ matrix.rid }}-${{ hashFiles('Directory.Build.props', 'src/Ahjo.Vulkan.Ktx.Native/Ahjo.Vulkan.Ktx.Native.csproj', '.github/workflows/build-ktx-native.yml') }}
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
           cache: true
@@ -104,7 +104,7 @@ jobs:
         run: dotnet test --project tests/Ahjo.Vulkan.Ktx.Native.Tests/Ahjo.Vulkan.Ktx.Native.Tests.csproj -c Release --nologo --output Detailed
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ktx-native-${{ matrix.rid }}
           path: native/ktx/staged/${{ matrix.rid }}/${{ matrix.lib-file }}
