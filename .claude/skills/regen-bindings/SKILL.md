@@ -19,6 +19,8 @@ Generated code is generated — `src/*/Generated/` (including `src/Ahjo.Vulkan.N
 
 Only regenerate the project(s) whose pin or rsp actually changed.
 
+**Slang gotcha:** `StageSlangHeaders` only copies headers out of the archive when `native/slang/include/slang.h` is *missing*, so after a `SlangVersion` bump a plain `-t:Regenerate` silently regenerates from the **old** committed headers. Delete `native/slang/include/*.h` first. Likewise, an existing `native/slang/staged/win-x64/` is not re-staged (the Windows file names carry no version) — delete it so local tests load the new binaries.
+
 ## Procedure
 
 1. **Edit the input**, not the output: bump the pin in `Directory.Build.props` and/or edit the rsp. Pins are pinned deliberately — all packages ship under a single `v*` tag, so a header bump is a release-visible decision; confirm the user wants it if they only asked vaguely.

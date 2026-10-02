@@ -88,8 +88,8 @@
     <!-- Windows names this file without a version; Linux embeds the version
          in it AND dlopen's it by that exact name, so the Linux one must be
          staged, copied and packed UNRENAMED. Verified against the
-         v2026.14.1 archives: bin/slang-glslang.dll and
-         lib/libslang-glslang-2026.14.1.so. -->
+         v2026.14.1 and v2026.19 archives: bin/slang-glslang.dll and
+         lib/libslang-glslang-<version>.so. -->
     <_SlangGlslangFile Condition="'$(_SlangRid)' == 'win-x64'">slang-glslang.dll</_SlangGlslangFile>
     <_SlangGlslangFile Condition="'$(_SlangRid)' == 'linux-x64'">libslang-glslang-$(_SlangVersionNumber).so</_SlangGlslangFile>
     <_SlangStagedGlslang>$(_SlangStagedDir)$(_SlangGlslangFile)</_SlangStagedGlslang>
