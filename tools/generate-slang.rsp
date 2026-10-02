@@ -38,6 +38,11 @@ c++
 --config
 latest-codegen
 implicit-vtbls
+# --target above pins what clang PARSES, but not how ClangSharp MAPS C types:
+# without an explicit choice it falls back to the host OS, so `long` comes out
+# as nint on Linux and int on Windows (ISlangProfiler::getEntryTimeMS flips).
+# unix-types matches the linux-gnu parse target and the committed output.
+unix-types
 generate-vtbl-index-attribute
 generate-native-inheritance-attribute
 generate-callconv-member-function
