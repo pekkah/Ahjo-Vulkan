@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -42,6 +43,10 @@ public sealed unsafe class Device : IDisposable
     // always taking the lock is negligible and removes the
     // double-create race on concurrent first access.
     private  readonly object              _allocatorLock = new();
+    // Serializes wrapper device-fault reads. KHR reports are drained exactly
+    // once, so concurrent readers would each see a disjoint subset; one lock
+    // on a cold, post-loss path makes a read see everything not yet drained.
+    private  readonly object              _faultReadLock = new();
     // Set once when any wrapper call observes VK_ERROR_DEVICE_LOST; never
     // cleared. volatile (not Interlocked) because the flag is monotonic —
     // there is no lost-update hazard, and both race directions are benign:
@@ -147,6 +152,140 @@ public sealed unsafe class Device : IDisposable
                 s_live.RemoveAt(i);
         }
     }
+
+    /// <summary>
+    /// The timeout <see cref="TryGetDeviceFault(out DeviceFaultReport)"/>
+    /// uses: 100 ms.
+    /// </summary>
+    /// <remarks>
+    /// It bounds only the KHR path's first, possibly blocking, count call — the
+    /// one that waits for a fault entry the driver may post slightly after
+    /// <c>VK_ERROR_DEVICE_LOST</c> surfaces. Every later call passes 0, and
+    /// the EXT path ignores it. The value is a judgment, not a measurement: it
+    /// only has to be bounded (no post-loss hang, see #120), invisible on a
+    /// crash path, and long enough for an asynchronously posted entry.
+    /// </remarks>
+    public static readonly TimeSpan DefaultDeviceFaultTimeout = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>
+    /// The path a <see cref="TryGetDeviceFault(out DeviceFaultReport)"/> read
+    /// takes: <see cref="Ahjo.Vulkan.DeviceFaultApi.Khr"/> when
+    /// <c>VK_KHR_device_fault</c> was enabled (whether or not
+    /// <c>VK_EXT_device_fault</c> was too),
+    /// <see cref="Ahjo.Vulkan.DeviceFaultApi.Ext"/> when only
+    /// <c>VK_EXT_device_fault</c> was, otherwise
+    /// <see cref="Ahjo.Vulkan.DeviceFaultApi.None"/>.
+    /// </summary>
+    /// <remarks>
+    /// Means <b>enabled</b> at <c>vkCreateDevice</c>, not supported. This
+    /// check only proves the extension was enabled: the wrapper cannot see the
+    /// enabled feature chain after <c>vkCreateDevice</c>, so a device that
+    /// enabled the extension without the <c>deviceFault</c> feature still
+    /// reports a non-<see cref="Ahjo.Vulkan.DeviceFaultApi.None"/> value here.
+    /// </remarks>
+    public DeviceFaultApi DeviceFaultApi => FaultEntryPoints.Api;
+
+    /// <summary>
+    /// <see langword="true"/> when <see cref="DeviceFaultApi"/> is not
+    /// <see cref="Ahjo.Vulkan.DeviceFaultApi.None"/>: a device-fault extension
+    /// was <b>enabled</b> at <c>vkCreateDevice</c> (extension-only, not
+    /// feature — see <see cref="DeviceFaultApi"/>). KHR wins when both are
+    /// enabled.
+    /// </summary>
+    public bool IsDeviceFaultEnabled => DeviceFaultApi != DeviceFaultApi.None;
+
+    /// <summary>
+    /// Reads why this device was lost, using
+    /// <see cref="DefaultDeviceFaultTimeout"/>. See
+    /// <see cref="TryGetDeviceFault(TimeSpan, out DeviceFaultReport)"/>.
+    /// </summary>
+    /// <param name="report">The report, when the method returns
+    /// <see langword="true"/>.</param>
+    /// <returns><see langword="false"/> when neither device-fault extension is
+    /// enabled, when the device is not lost, or when the read failed with
+    /// nothing to report (reported via <see cref="AhjoDiagnostics.Sink"/>,
+    /// <see cref="DiagnosticSeverity.Warning"/>, source <c>"Device"</c>).</returns>
+    /// <exception cref="ObjectDisposedException">The device was disposed.</exception>
+    public bool TryGetDeviceFault([NotNullWhen(true)] out DeviceFaultReport? report)
+        => TryGetDeviceFault(DefaultDeviceFaultTimeout, out report);
+
+    /// <summary>
+    /// Reads why this device was lost through <c>VK_KHR_device_fault</c> (when
+    /// enabled) or <c>VK_EXT_device_fault</c>.
+    /// </summary>
+    /// <param name="timeout">Bounds the KHR path's first, possibly blocking,
+    /// count call; every later call passes 0, and the EXT path ignores it.
+    /// Must be non-negative and finite: below the roughly 292-year span whose
+    /// nanosecond count overflows to <c>UINT64_MAX</c>.</param>
+    /// <param name="report">The report, when the method returns
+    /// <see langword="true"/>.</param>
+    /// <returns><see langword="false"/> when neither device-fault extension is
+    /// enabled, when the device is not lost, or when the read failed with
+    /// nothing to report (reported via <see cref="AhjoDiagnostics.Sink"/>,
+    /// <see cref="DiagnosticSeverity.Warning"/>, source <c>"Device"</c>).</returns>
+    /// <exception cref="ObjectDisposedException">The device was disposed.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeout"/>
+    /// is negative, <see cref="Timeout.InfiniteTimeSpan"/>, or so large that it
+    /// converts to <c>UINT64_MAX</c> nanoseconds (Vulkan's infinite wait —
+    /// about 292 years and up, <see cref="TimeSpan.MaxValue"/> included). An
+    /// unbounded wait after device loss is refused; see #120. Checked before
+    /// the extension and <see cref="IsLost"/> gates, so it throws on any
+    /// device.</exception>
+    /// <remarks>
+    /// <para><b>When to call.</b> After observing <c>VK_ERROR_DEVICE_LOST</c>,
+    /// that is, once <see cref="IsLost"/> is set. It is set by a
+    /// <c>VK_ERROR_DEVICE_LOST</c> from any wrapper call that throws a
+    /// <see cref="VulkanException"/> (submit, wait-idle, …), by
+    /// <see cref="Fence"/> status queries and waits, by
+    /// <see cref="TimelineSemaphore"/> waits, and by <see cref="Swapchain"/>
+    /// acquire/present. On a healthy device this returns
+    /// <see langword="false"/> without calling the driver: the EXT info and KHR
+    /// debug-info commands are legal only on a lost device
+    /// (VUID-vkGetDeviceFaultInfoEXT-device-07336,
+    /// VUID-vkGetDeviceFaultDebugInfoKHR-device-12383), and the KHR reports
+    /// command drains its queue.</para>
+    /// <para><b>Repeat calls.</b> EXT returns the same report again. KHR
+    /// returns no further entries (each is drained exactly once) but the same
+    /// <see cref="DeviceFaultReport.VendorBinary"/>. Nothing is cached.</para>
+    /// <para><b>Thread safety.</b> Wrapper callers are serialized by a lock.
+    /// Calling the raw <c>vkGetDeviceFaultReportsKHR</c> elsewhere in the
+    /// process splits the KHR queue with this read.</para>
+    /// <para><b>Multi-device caveat.</b> <see cref="IsLost"/> is over-broad in
+    /// a multi-device process (a context-free loss marks every live device),
+    /// so the EXT info call and the KHR debug-info call can then reach a
+    /// healthy sibling. The wrapper's target shape is one device per
+    /// process.</para>
+    /// <para><b>Allocation.</b> Allocates once (arrays, strings, the report),
+    /// after loss; not a per-frame path.</para>
+    /// <para>Healthy-device KHR polling (<c>deviceFaultReportMasked</c>) is not
+    /// wrapped.</para>
+    /// </remarks>
+    public bool TryGetDeviceFault(TimeSpan timeout, [NotNullWhen(true)] out DeviceFaultReport? report)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        // Rejects Timeout.InfiniteTimeSpan too: ToVulkanTimeout maps negative
+        // spans to "wait forever", the post-loss hang #120 removed.
+        ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
+        // ToVulkanTimeout saturates to UINT64_MAX — Vulkan's "wait forever" —
+        // for any span whose nanosecond count overflows (about 292 years and
+        // up, TimeSpan.MaxValue included). Refuse it for the same reason.
+        ulong timeoutNs = timeout.ToVulkanTimeout();
+        if (timeoutNs == ulong.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(timeout), timeout,
+                "The timeout converts to UINT64_MAX nanoseconds, which Vulkan treats as an infinite wait; " +
+                "an unbounded wait after device loss is refused. Pass a finite span.");
+        report = null;
+        var eps = FaultEntryPoints;
+        if (eps.Api == DeviceFaultApi.None) return false;
+        // VUID-vkGetDeviceFaultInfoEXT-device-07336 / VUID-vkGetDeviceFaultDebugInfoKHR-device-12383;
+        // also keeps the draining KHR reports call off healthy devices.
+        if (!IsLost) return false;
+        lock (_faultReadLock)
+            return DeviceFaultReader.TryRead(in eps, Handle, timeoutNs, out report);
+    }
+
+    private DeviceFaultEntryPoints FaultEntryPoints =>
+        new(Functions.GetDeviceFaultInfo, Functions.GetDeviceFaultReports, Functions.GetDeviceFaultDebugInfo);
 
     /// <summary>
     /// The device's VMA allocator. Created on first access and disposed

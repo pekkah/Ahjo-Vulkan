@@ -51,7 +51,7 @@ internal static unsafe class VulkanEnvironment
 
     private static readonly Lazy<VulkanCapability> _declared = new(ParseDeclaredTier);
     private static readonly Lazy<(VulkanCapability Capability, string Detail)> _observed = new(Probe);
-    private static readonly Lazy<bool> _hasLayer = new(ProbeValidationLayer);
+    private static readonly Lazy<(bool Present, uint SpecVersion)> _layer = new(ProbeValidationLayer);
 
     /// <summary>
     /// Parsed <c>AHJO_VULKAN_TIER</c>. Unset or empty =&gt;
@@ -91,7 +91,15 @@ internal static unsafe class VulkanEnvironment
     /// device to do anything with the layer, and this keeps a driverless host
     /// reporting the driver gap rather than a layer gap.
     /// </remarks>
-    public static bool HasValidationLayer => HasDriver && _hasLayer.Value;
+    public static bool HasValidationLayer => HasDriver && _layer.Value.Present;
+
+    /// <summary>
+    /// The packed <c>VkLayerProperties.specVersion</c> of the enumerated
+    /// <c>VK_LAYER_KHRONOS_validation</c>, or 0 when there is no layer. Read
+    /// by <c>TestGate.RequireValidationLayer(uint, string)</c> for tests whose
+    /// oracle needs a layer that knows a recent extension.
+    /// </summary>
+    public static uint ValidationLayerSpecVersion => _layer.Value.Present ? _layer.Value.SpecVersion : 0;
 
     /// <summary>The lowercase spelling a lane writes into <c>AHJO_VULKAN_TIER</c>.</summary>
     public static string Name(VulkanCapability capability) => capability switch
@@ -240,7 +248,7 @@ internal static unsafe class VulkanEnvironment
             Vk.vkDestroyInstance(instance, null);
         }
 
-        if (!_hasLayer.Value)
+        if (!_layer.Value.Present)
             return (VulkanCapability.Hardware, "VK_LAYER_KHRONOS_validation is not installed");
 
         return (VulkanCapability.Validation, "hardware device + VK_LAYER_KHRONOS_validation");
@@ -248,20 +256,21 @@ internal static unsafe class VulkanEnvironment
 
     // Independent of any instance and of the device type — see HasValidationLayer.
     // Guarded for the same reason Probe is: a throw cached in this Lazy would turn
-    // the 13 layer gates into errors instead of skips.
-    private static bool ProbeValidationLayer()
+    // the 13 layer gates into errors instead of skips. Also captures the
+    // matching entry's specVersion for the layer-version gate (#242).
+    private static (bool Present, uint SpecVersion) ProbeValidationLayer()
     {
         try
         {
             uint count = 0;
             if (Vk.vkEnumerateInstanceLayerProperties(&count, null) != VkResult.VK_SUCCESS || count == 0)
-                return false;
+                return (false, 0);
 
             var props = new VkLayerProperties[count];
             fixed (VkLayerProperties* p = props)
             {
                 if (Vk.vkEnumerateInstanceLayerProperties(&count, p) != VkResult.VK_SUCCESS)
-                    return false;
+                    return (false, 0);
             }
 
             ReadOnlySpan<byte> target = "VK_LAYER_KHRONOS_validation"u8;
@@ -269,16 +278,16 @@ internal static unsafe class VulkanEnvironment
             {
                 fixed (VkLayerProperties* entry = &props[i])
                 {
-                    if (Match((sbyte*)entry, target)) return true;
+                    if (Match((sbyte*)entry, target)) return (true, entry->specVersion);
                 }
             }
-            return false;
+            return (false, 0);
         }
         catch (Exception)
         {
             // No layer we can prove is present. Gates skip; a lane that declared
             // `validation` still goes red through the tier contract.
-            return false;
+            return (false, 0);
         }
     }
 

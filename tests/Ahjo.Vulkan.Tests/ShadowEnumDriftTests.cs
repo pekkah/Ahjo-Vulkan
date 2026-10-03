@@ -246,4 +246,53 @@ public sealed class ShadowEnumDriftTests
             (int)VkCopyAccelerationStructureModeKHR.VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR,
             (int)AccelerationStructureCopyMode.Compact);
     }
+
+    [Fact]
+    public void DeviceFaultAddressType_MatchesNative()
+    {
+        Assert.Equal(
+            (int)VkDeviceFaultAddressTypeKHR.VK_DEVICE_FAULT_ADDRESS_TYPE_NONE_KHR,
+            (int)DeviceFaultAddressType.None);
+        Assert.Equal(
+            (int)VkDeviceFaultAddressTypeKHR.VK_DEVICE_FAULT_ADDRESS_TYPE_READ_INVALID_KHR,
+            (int)DeviceFaultAddressType.ReadInvalid);
+        Assert.Equal(
+            (int)VkDeviceFaultAddressTypeKHR.VK_DEVICE_FAULT_ADDRESS_TYPE_WRITE_INVALID_KHR,
+            (int)DeviceFaultAddressType.WriteInvalid);
+        Assert.Equal(
+            (int)VkDeviceFaultAddressTypeKHR.VK_DEVICE_FAULT_ADDRESS_TYPE_EXECUTE_INVALID_KHR,
+            (int)DeviceFaultAddressType.ExecuteInvalid);
+        Assert.Equal(
+            (int)VkDeviceFaultAddressTypeKHR.VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_UNKNOWN_KHR,
+            (int)DeviceFaultAddressType.InstructionPointerUnknown);
+        Assert.Equal(
+            (int)VkDeviceFaultAddressTypeKHR.VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_INVALID_KHR,
+            (int)DeviceFaultAddressType.InstructionPointerInvalid);
+        Assert.Equal(
+            (int)VkDeviceFaultAddressTypeKHR.VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_FAULT_KHR,
+            (int)DeviceFaultAddressType.InstructionPointerFault);
+    }
+
+    [Fact]
+    public void DeviceFaultFlags_MatchesNative()
+    {
+        Assert.Equal(
+            (uint)VkDeviceFaultFlagBitsKHR.VK_DEVICE_FAULT_FLAG_DEVICE_LOST_KHR,
+            (uint)DeviceFaultFlags.DeviceLost);
+        Assert.Equal(
+            (uint)VkDeviceFaultFlagBitsKHR.VK_DEVICE_FAULT_FLAG_MEMORY_ADDRESS_KHR,
+            (uint)DeviceFaultFlags.MemoryAddress);
+        Assert.Equal(
+            (uint)VkDeviceFaultFlagBitsKHR.VK_DEVICE_FAULT_FLAG_INSTRUCTION_ADDRESS_KHR,
+            (uint)DeviceFaultFlags.InstructionAddress);
+        Assert.Equal(
+            (uint)VkDeviceFaultFlagBitsKHR.VK_DEVICE_FAULT_FLAG_VENDOR_KHR,
+            (uint)DeviceFaultFlags.Vendor);
+        Assert.Equal(
+            (uint)VkDeviceFaultFlagBitsKHR.VK_DEVICE_FAULT_FLAG_WATCHDOG_TIMEOUT_KHR,
+            (uint)DeviceFaultFlags.WatchdogTimeout);
+        Assert.Equal(
+            (uint)VkDeviceFaultFlagBitsKHR.VK_DEVICE_FAULT_FLAG_OVERFLOW_KHR,
+            (uint)DeviceFaultFlags.Overflow);
+    }
 }
