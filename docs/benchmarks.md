@@ -305,8 +305,9 @@ is ever submitted.
   is the only new hot-path method in #202, which is why it is the only one with
   rows. (Stated explicitly so the next reviewer does not have to re-derive it
   from the call graph.)
-- **No row for the physical-device property queries, deliberately.**
+- **No row for the physical-device property and feature queries, deliberately.**
   `PhysicalDevice.SupportsExtension`, `PhysicalDevice.TryGetProperties<T>`,
+  `PhysicalDevice.TryGetFeatures<T>`,
   `PhysicalDevice.TryGetMeshShaderLimits` and
   `PhysicalDevice.TryGetAccelerationStructureLimits` (plus the
   `MeshShaderLimits` / `AccelerationStructureLimits` projections) are
@@ -317,7 +318,11 @@ is ever submitted.
   `TryGetMeshShaderLimits` issue three
   (`vkEnumerateDeviceExtensionProperties` twice — count, then fill — then
   `vkGetPhysicalDeviceProperties2`); `TryGetAccelerationStructureLimits` is
-  the same name-gated three. `Device.GetAccelerationStructureBuildSizes` is
+  the same name-gated three. `TryGetFeatures<T>` has the same counts with
+  `vkGetPhysicalDeviceFeatures2` in place of `vkGetPhysicalDeviceProperties2`:
+  the version-gated overload issues two native calls and allocates nothing,
+  the name-gated overloads issue three and rent and return one pooled
+  `VkExtensionProperties[]`. `Device.GetAccelerationStructureBuildSizes` is
   setup-time for the same reason and has no row either: it is a sizing query a
   caller runs before it can allocate anything, and it is stack-only at 16
   geometries or fewer. `Lifecycle/` is not on the

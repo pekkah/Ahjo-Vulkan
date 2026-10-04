@@ -24,6 +24,11 @@ namespace Ahjo.Vulkan.Tests;
 /// lost. Under validation the 1.4.363 layer would flag it — it tracks loss from
 /// real <c>VK_ERROR_DEVICE_LOST</c> returns and knows nothing of the wrapper's
 /// <c>MarkLost</c> seam. They are the obvious tests to write by mistake.</para>
+/// <para><b>Also forbidden.</b> No test enables <c>deviceFaultVendorBinary</c>
+/// on an adapter that reports 0 to "prove" the
+/// <see cref="PhysicalDevice.TryGetFeatures{T}(Utf8Name, out T)"/> gate. That
+/// would test the driver, and a failing <c>vkCreateDevice</c> pollutes
+/// validation captures.</para>
 /// <para><b>Tiers.</b> The no-extension, disposed and timeout cases are
 /// <c>[gate:driver]</c> and run on any host with an ICD. Everything that needs
 /// either extension is <c>[gate:feature]</c>: the hosted Windows CI runner has
@@ -32,14 +37,21 @@ namespace Ahjo.Vulkan.Tests;
 /// carry <c>[gate:validation]</c>; the KHR ones require a layer of at least
 /// 1.4.363, the first that knows <c>VK_KHR_device_fault</c>, and skip (not
 /// fail) on an older one — an older layer reporting an unknown sType is a gap
-/// in the oracle, not a wrapper defect.</para>
+/// in the oracle, not a wrapper defect. The vendor-binary cases (#246) follow
+/// the same tiers: <c>ExtVendorBinary_EnabledExactlyWhenReported_CreatesDevice</c>
+/// is <c>[gate:feature]</c>, its validated twin adds <c>[gate:validation]</c>,
+/// and the KHR one adds the 1.4.363 floor. Each runs on <b>every</b> adapter
+/// advertising the extension, enabling <c>deviceFaultVendorBinary</c> exactly
+/// when <see cref="PhysicalDevice.TryGetFeatures{T}(Utf8Name, out T)"/>
+/// reports it — on a host with mixed adapters that runs both the 1 and the 0
+/// branch.</para>
 /// </remarks>
 public sealed unsafe class DeviceFaultTests(ITestOutputHelper output)
 {
     // Packed 1.4.363: the pinned Vulkan-Headers version
     // (Directory.Build.props:18) and the first validation layer verified to
     // know VK_KHR_device_fault.
-    private const uint MinKhrLayer = (1u << 22) | (4u << 12) | 363u;
+    internal const uint MinKhrLayer = (1u << 22) | (4u << 12) | 363u;
 
     private const string ExtSkipReason  = "No GPU exposes VK_EXT_device_fault with the deviceFault feature.";
     private const string KhrSkipReason  = "No GPU exposes VK_KHR_device_fault with the deviceFault feature.";
@@ -313,6 +325,87 @@ public sealed unsafe class DeviceFaultTests(ITestOutputHelper output)
         AssertNoValidationErrors(errors);
     }
 
+    // ---- #246: deviceFaultVendorBinary, enabled exactly when reported ----
+    //
+    // Every adapter advertising the extension, not the first one: on the dev
+    // host that runs both branches (RTX 4070 Ti reports 1, the AMD iGPU 0).
+    // Never enable the bit where the query reported 0 (class remarks).
+
+    [Fact]
+    public void ExtVendorBinary_EnabledExactlyWhenReported_CreatesDevice()
+    {
+        TestGate.RequireDriver();
+
+        using var instance = Instance.Create(default);
+        var adapters = PhysicalDeviceFeaturesTests.WalkAdapters(instance);
+        TestGate.RequireDeviceFeature(adapters.Exists(a => a.HasExtFault && a.HasGraphics), ExtSkipReason);
+
+        foreach (var a in adapters)
+        {
+            if (!a.HasExtFault || !a.HasGraphics) continue;
+
+            Assert.True(a.Gpu.TryGetFeatures<VkPhysicalDeviceFaultFeaturesEXT>(
+                VulkanExtensions.ExtDeviceFault, out var f));
+            using var device = CreateFaultDeviceOn(a.Gpu, a.GraphicsFamily, khr: false, f.deviceFaultVendorBinary);
+            Assert.Equal(DeviceFaultApi.Ext, device.DeviceFaultApi);
+            output.WriteLine($"{a.Name}: deviceFaultVendorBinary={f.deviceFaultVendorBinary}");
+        }
+    }
+
+    [Fact]
+    public void ExtVendorBinary_EnabledExactlyWhenReported_UnderValidation_Clean()
+    {
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer();
+
+        var errors = new List<DebugMessage>();
+        using var instance = CreateValidatedInstance(errors);
+        var adapters = PhysicalDeviceFeaturesTests.WalkAdapters(instance);
+        TestGate.RequireDeviceFeature(adapters.Exists(a => a.HasExtFault && a.HasGraphics), ExtSkipReason);
+
+        output.WriteLine($"Validation layer {TestGate.Fmt(VulkanEnvironment.ValidationLayerSpecVersion)}");
+        foreach (var a in adapters)
+        {
+            if (!a.HasExtFault || !a.HasGraphics) continue;
+
+            Assert.True(a.Gpu.TryGetFeatures<VkPhysicalDeviceFaultFeaturesEXT>(
+                VulkanExtensions.ExtDeviceFault, out var f));
+            using var device = CreateFaultDeviceOn(a.Gpu, a.GraphicsFamily, khr: false, f.deviceFaultVendorBinary);
+            Assert.Equal(DeviceFaultApi.Ext, device.DeviceFaultApi);
+            output.WriteLine($"{a.Name}: deviceFaultVendorBinary={f.deviceFaultVendorBinary}");
+        }
+
+        // Every device was disposed at the end of its iteration.
+        AssertNoValidationErrors(errors);
+    }
+
+    [Fact]
+    public void KhrVendorBinary_EnabledExactlyWhenReported_UnderValidation_Clean()
+    {
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer(MinKhrLayer, "The KHR device-fault feature struct needs a layer that knows VK_KHR_device_fault.");
+
+        var errors = new List<DebugMessage>();
+        using var instance = CreateValidatedInstance(errors);
+        var adapters = PhysicalDeviceFeaturesTests.WalkAdapters(instance);
+        TestGate.RequireDeviceFeature(adapters.Exists(a => a.HasKhrFault && a.HasGraphics), KhrSkipReason);
+
+        output.WriteLine($"Validation layer {TestGate.Fmt(VulkanEnvironment.ValidationLayerSpecVersion)}");
+        foreach (var a in adapters)
+        {
+            if (!a.HasKhrFault || !a.HasGraphics) continue;
+
+            Assert.True(a.Gpu.TryGetFeatures<VkPhysicalDeviceFaultFeaturesKHR>(
+                VulkanExtensions.KhrDeviceFault, out var f));
+            using var device = CreateFaultDeviceOn(a.Gpu, a.GraphicsFamily, khr: true, f.deviceFaultVendorBinary);
+            Assert.Equal(DeviceFaultApi.Khr, device.DeviceFaultApi);
+            output.WriteLine($"{a.Name}: KHR deviceFaultVendorBinary={f.deviceFaultVendorBinary}");
+        }
+
+        // Every device was disposed at the end of its iteration.
+        AssertNoValidationErrors(errors);
+    }
+
     // ---- Helpers (adapted from MeshShaderTests) ----
 
     private static string GpuName(Device device)
@@ -370,9 +463,13 @@ public sealed unsafe class DeviceFaultTests(ITestOutputHelper output)
     /// <c>VkPhysicalDeviceFaultFeaturesEXT</c> / <c>…KHR</c> with
     /// <c>deviceFault = 1</c> only — or returns <see langword="null"/> when no
     /// GPU on this host can supply them. <c>deviceFaultVendorBinary</c> is
-    /// deliberately not requested: a GPU without it (the AMD iGPU on the dev
-    /// host) would turn the whole tier into <c>VK_ERROR_FEATURE_NOT_PRESENT</c>
-    /// skips. The picker screens on
+    /// still deliberately not requested <b>here</b>, because this helper
+    /// screens by extension only: a GPU without the bit (the AMD iGPU on the
+    /// dev host) would turn the whole tier into
+    /// <c>VK_ERROR_FEATURE_NOT_PRESENT</c> skips. The vendor-binary cases
+    /// request it through <see cref="CreateFaultDeviceOn"/>, after
+    /// <see cref="PhysicalDevice.TryGetFeatures{T}(Utf8Name, out T)"/> has
+    /// reported it. The picker screens on
     /// <see cref="PhysicalDeviceInfo.SupportsExtension"/>, so a host whose
     /// first graphics-capable GPU lacks the extension still finds one that has
     /// it.
@@ -446,4 +543,47 @@ public sealed unsafe class DeviceFaultTests(ITestOutputHelper output)
             return null;
         }
     }
+
+    /// <summary>
+    /// Creates a device on <paramref name="gpu"/> with exactly one device-fault
+    /// extension — KHR when <paramref name="khr"/>, EXT otherwise — and the
+    /// matching feature struct with <c>deviceFault = 1</c> and
+    /// <c>deviceFaultVendorBinary = <paramref name="vendorBinary"/></c>.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately does <b>not</b> catch <c>VK_ERROR_FEATURE_NOT_PRESENT</c>:
+    /// the callers pass the value
+    /// <see cref="PhysicalDevice.TryGetFeatures{T}(Utf8Name, out T)"/>
+    /// reported, so that exception is the failure the vendor-binary cases exist
+    /// to rule out.
+    /// </remarks>
+    private static Device CreateFaultDeviceOn(PhysicalDevice gpu, uint family, bool khr, uint vendorBinary)
+        => gpu.CreateDevice(new DeviceDescription
+        {
+            Queues     = [new QueueRequest(family, count: 1, priority: 1.0f)],
+            Extensions = [khr ? VulkanExtensions.KhrDeviceFault : VulkanExtensions.ExtDeviceFault],
+            // Not `static`: the closure captures khr/vendorBinary — the
+            // queried answer reaching the configurer, which does not receive
+            // the PhysicalDevice. Setup-time, so the capture is fine.
+            ConfigureFeatures = (
+                ref ChainBuilder<VkDeviceCreateInfo> chain,
+                ref VkPhysicalDeviceFeatures2 _,
+                ref VkPhysicalDeviceVulkan12Features _,
+                ref VkPhysicalDeviceVulkan13Features _,
+                ref VkPhysicalDeviceVulkan14Features _) =>
+            {
+                if (khr)
+                {
+                    ref var k = ref chain.Push<VkPhysicalDeviceFaultFeaturesKHR>();
+                    k.deviceFault             = 1;
+                    k.deviceFaultVendorBinary = vendorBinary;
+                }
+                else
+                {
+                    ref var e = ref chain.Push<VkPhysicalDeviceFaultFeaturesEXT>();
+                    e.deviceFault             = 1;
+                    e.deviceFaultVendorBinary = vendorBinary;
+                }
+            },
+        });
 }

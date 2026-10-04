@@ -151,9 +151,16 @@ public static class VulkanExtensions
     /// <see cref="DeviceDescription.ConfigureFeatures"/> with
     /// <c>deviceFault = 1</c> — and <c>deviceFaultVendorBinary = 1</c> for a
     /// vendor crash dump in <see cref="DeviceFaultReport.VendorBinary"/>. The
-    /// extension alone is not enough, and the wrapper cannot check the
-    /// feature — Vulkan exposes no post-<c>vkCreateDevice</c> feature
-    /// query.</para>
+    /// extension alone is not enough. <c>deviceFault</c> is guaranteed
+    /// wherever the extension is advertised; <c>deviceFaultVendorBinary</c>
+    /// is optional, so read it first with
+    /// <see cref="PhysicalDevice.TryGetFeatures{T}(Utf8Name, out T)"/>
+    /// (<c>TryGetFeatures&lt;VkPhysicalDeviceFaultFeaturesEXT&gt;(ExtDeviceFault, out …)</c>)
+    /// and set it only when reported. What the wrapper cannot see is the
+    /// <b>enabled</b> state after <c>vkCreateDevice</c> — Vulkan exposes no
+    /// post-create feature query — which is why
+    /// <see cref="Device.DeviceFaultApi"/> reflects the extension
+    /// only.</para>
     /// </remarks>
     public static Utf8Name ExtDeviceFault => Utf8Name.FromLiteral(DeviceExtensionNames.ExtDeviceFault);
 
@@ -168,16 +175,28 @@ public static class VulkanExtensions
     /// <c>sType</c> from the EXT feature struct — from
     /// <see cref="DeviceDescription.ConfigureFeatures"/> with
     /// <c>deviceFault = 1</c>, and <c>deviceFaultVendorBinary = 1</c> for a
-    /// vendor crash dump. As with EXT, the extension alone is not enough and
-    /// the wrapper cannot check the feature.</para>
+    /// vendor crash dump. As with EXT, the extension alone is not enough.
+    /// <c>deviceFault</c> is guaranteed wherever the extension is advertised;
+    /// <c>deviceFaultVendorBinary</c> is optional, so read it first with
+    /// <see cref="PhysicalDevice.TryGetFeatures{T}(Utf8Name, out T)"/>
+    /// (<c>TryGetFeatures&lt;VkPhysicalDeviceFaultFeaturesKHR&gt;(KhrDeviceFault, out …)</c>)
+    /// and set it only when reported. Query the KHR struct, not the EXT one —
+    /// they are separate structs, and a bit is legal to enable only in the
+    /// struct that reported it. What the wrapper cannot see is the
+    /// <b>enabled</b> state after <c>vkCreateDevice</c>, which is why
+    /// <see cref="Device.DeviceFaultApi"/> reflects the extension
+    /// only.</para>
     /// <para><b>Validation layer floor: 1.4.363.</b> That layer validates both
     /// KHR commands and the KHR feature struct. Older layers (1.4.341 is one)
     /// do not know the extension, and report the KHR feature struct as
     /// <c>VUID-VkDeviceCreateInfo-pNext-pNext</c> ("unknown
     /// VkStructureType"). The wrapper does not suppress that message.</para>
     /// <para><c>deviceFaultReportMasked</c> /
-    /// <c>deviceFaultDeviceLostOnMasked</c> are the caller's to set. The
-    /// wrapper's read is post-loss only; healthy-device polling of
+    /// <c>deviceFaultDeviceLostOnMasked</c> are the caller's to set; support
+    /// for them is readable through the same
+    /// <see cref="PhysicalDevice.TryGetFeatures{T}(Utf8Name, out T)"/> query
+    /// of <c>VkPhysicalDeviceFaultFeaturesKHR</c>. The wrapper's read is
+    /// post-loss only; healthy-device polling of
     /// <c>vkGetDeviceFaultReportsKHR</c> is not wrapped.</para>
     /// </remarks>
     public static Utf8Name KhrDeviceFault => Utf8Name.FromLiteral(DeviceExtensionNames.KhrDeviceFault);

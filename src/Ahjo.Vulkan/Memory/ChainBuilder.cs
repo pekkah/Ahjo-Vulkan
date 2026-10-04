@@ -40,7 +40,8 @@ namespace Ahjo.Vulkan;
 /// ref var head = ref chain.Root();
 /// ref var v13  = ref chain.Push&lt;VkPhysicalDeviceVulkan13Features&gt;();
 /// v13.synchronization2 = 1;
-/// // hand chain.Head to vkGetPhysicalDeviceFeatures2 (or device.GetFeatures(...))
+/// // hand chain.Head to the Vulkan call (here vkGetPhysicalDeviceFeatures2).
+/// // To read one features struct, use PhysicalDevice.TryGetFeatures&lt;T&gt; instead.
 /// </code>
 /// </remarks>
 public unsafe ref struct ChainBuilder<TRoot>
