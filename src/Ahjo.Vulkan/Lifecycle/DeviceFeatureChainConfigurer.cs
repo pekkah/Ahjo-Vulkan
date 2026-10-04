@@ -61,6 +61,14 @@ namespace Ahjo.Vulkan;
 /// them. Bits the wrapper would have enabled but the device doesn't
 /// support are left at zero, so device creation does not fail on the
 /// optional 1.0 flags.</para>
+/// <para>An optional extension feature bit (e.g.
+/// <c>VkPhysicalDeviceFaultFeaturesEXT.deviceFaultVendorBinary</c>) should be
+/// set only when the GPU reports it. Query it with
+/// <see cref="PhysicalDevice.TryGetFeatures{T}(Utf8Name, out T)"/>
+/// <b>before</b> <see cref="PhysicalDevice.CreateDevice"/>, because the
+/// configurer does not receive the <see cref="PhysicalDevice"/>; then capture
+/// the result in the configurer (a closure is fine at setup time) or pick
+/// between static configurers.</para>
 /// </remarks>
 public unsafe delegate void DeviceFeatureChainConfigurer(
     ref ChainBuilder<VkDeviceCreateInfo> chain,

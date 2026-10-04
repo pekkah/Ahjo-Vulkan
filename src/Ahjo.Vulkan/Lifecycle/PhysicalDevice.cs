@@ -307,7 +307,7 @@ public sealed unsafe class PhysicalDevice
             return false;
         }
 
-        QueryChained(out properties);
+        QueryChainedProperties(out properties);
         return true;
     }
 
@@ -368,12 +368,13 @@ public sealed unsafe class PhysicalDevice
             return false;
         }
 
-        QueryChained(out properties);
+        QueryChainedProperties(out properties);
         return true;
     }
 
     /// <summary>
-    /// The gate-free two-node query: root + <typeparamref name="T"/>, one
+    /// The gate-free two-node query on the <c>VkPhysicalDeviceProperties2</c>
+    /// root: root + <typeparamref name="T"/>, one
     /// <c>vkGetPhysicalDeviceProperties2</c>, copy the node out by value.
     /// Private because calling it without a gate is exactly the hazard the
     /// public overloads exist to prevent.
@@ -385,7 +386,7 @@ public sealed unsafe class PhysicalDevice
     /// instantiation. No <c>Clear()</c> is needed: <c>Reserve</c> zeroes each
     /// slot before <c>WriteHeader</c> runs.
     /// </remarks>
-    private void QueryChained<T>(out T properties)
+    private void QueryChainedProperties<T>(out T properties)
         where T : unmanaged, IChainable<VkPhysicalDeviceProperties2>
     {
         Span<byte> scratch = stackalloc byte[
@@ -396,6 +397,33 @@ public sealed unsafe class PhysicalDevice
         ref T node = ref chain.Push<T>();
         Vk.vkGetPhysicalDeviceProperties2(Handle, chain.Head);
         properties = node;
+    }
+
+    /// <summary>
+    /// The gate-free two-node query on the <c>VkPhysicalDeviceFeatures2</c>
+    /// root: root + <typeparamref name="T"/>, one
+    /// <c>vkGetPhysicalDeviceFeatures2</c>, copy the node out by value.
+    /// Private because calling it without a gate is exactly the hazard the
+    /// public overloads exist to prevent.
+    /// </summary>
+    /// <remarks>
+    /// The scratch is sized from two compile-time-known struct sizes plus 16
+    /// bytes — two 8-byte absolute-address pads, one per node, per
+    /// <c>ChainBuilder.Reserve</c>. ILC constant-folds both size terms per
+    /// instantiation. No <c>Clear()</c> is needed: <c>Reserve</c> zeroes each
+    /// slot before <c>WriteHeader</c> runs.
+    /// </remarks>
+    private void QueryChainedFeatures<T>(out T features)
+        where T : unmanaged, IChainable<VkPhysicalDeviceFeatures2>
+    {
+        Span<byte> scratch = stackalloc byte[
+            sizeof(VkPhysicalDeviceFeatures2) + Unsafe.SizeOf<T>() + 16];
+
+        var chain = ChainBuilder.For<VkPhysicalDeviceFeatures2>(scratch);
+        chain.Root();
+        ref T node = ref chain.Push<T>();
+        Vk.vkGetPhysicalDeviceFeatures2(Handle, chain.Head);
+        features = node;
     }
 
     /// <summary>
@@ -507,6 +535,179 @@ public sealed unsafe class PhysicalDevice
             MaxDescriptorSetAccelerationStructures =
                 p.maxDescriptorSetAccelerationStructures,
         };
+        return true;
+    }
+
+    // ---- Chained feature queries ----
+
+    /// <summary>
+    /// Reads one <c>VkPhysicalDeviceFeatures2</c> <c>pNext</c> struct — what
+    /// this GPU <b>supports</b> — but only when it advertises
+    /// <paramref name="utf8ExtensionName"/>.
+    /// </summary>
+    /// <typeparam name="T">
+    /// The features struct to read. The
+    /// <c>IChainable&lt;VkPhysicalDeviceFeatures2&gt;</c> constraint is
+    /// generated from <c>vk.xml</c>'s <c>structextends</c> attribute, so a
+    /// struct Vulkan does not permit on this chain root is a <b>compile</b>
+    /// error, and <c>sType</c> is written from <c>T.SType</c> — the caller
+    /// never supplies one and structurally cannot supply a wrong one.
+    /// </typeparam>
+    /// <param name="utf8ExtensionName">
+    /// The device extension that owns <typeparamref name="T"/>, as UTF-8 bytes
+    /// (a <c>"…"u8</c> literal).
+    /// </param>
+    /// <param name="features">
+    /// The filled struct on <see langword="true"/>; <c>default</c> on
+    /// <see langword="false"/>.
+    /// </param>
+    /// <returns>
+    /// <see langword="true"/> when the gate passed and the driver filled the
+    /// node.
+    /// </returns>
+    /// <remarks>
+    /// <para><b>Supported, not enabled.</b> This is the question to ask before
+    /// <see cref="CreateDevice"/>: use the answer to decide which bits to set
+    /// in <see cref="DeviceDescription.ConfigureFeatures"/>. Setting a bit the
+    /// device does not report makes <c>vkCreateDevice</c> fail with
+    /// <c>VK_ERROR_FEATURE_NOT_PRESENT</c>. It says nothing about what a
+    /// created <see cref="Device"/> enabled.</para>
+    /// <para><b>What the gate means.</b> When the gate fails this returns
+    /// <see langword="false"/> and leaves <paramref name="features"/> at
+    /// <c>default</c> <b>without</b> issuing the chained query at all. The
+    /// wrapper refuses to put an <c>sType</c> a driver may not recognise into a
+    /// <c>vkGetPhysicalDeviceFeatures2</c> chain: the spec says implementations
+    /// must skip unrecognized <c>pNext</c> nodes, but real ICDs have been
+    /// observed not to — see the SwiftShader note in
+    /// <c>Instance.PickPhysicalDevice</c>, where an unrecognized
+    /// <c>VkPhysicalDeviceVulkan14Features</c> in a read-back chain produced
+    /// cumulative state damage and later SIGSEGVs in unrelated entry points.
+    /// That failure was on a <i>features</i> read-back chain — this exact
+    /// root. A <see langword="false"/> result therefore means "not supported",
+    /// never "supported but zero".</para>
+    /// <para><b>Which overload to use.</b> An extension-only struct
+    /// (<c>VkPhysicalDeviceFaultFeaturesEXT</c>,
+    /// <c>VkPhysicalDeviceMeshShaderFeaturesEXT</c>) takes the name overloads.
+    /// A core-promoted struct takes
+    /// <see cref="TryGetFeatures{T}(VulkanVersion, out T)"/>; there is no
+    /// extension to name. <c>VkPhysicalDeviceVulkan11Features</c> is Vulkan
+    /// <b>1.2</b> (the "11" names the feature set it aggregates),
+    /// <c>VkPhysicalDeviceVulkan12Features</c> 1.2,
+    /// <c>VkPhysicalDeviceVulkan13Features</c> 1.3 and
+    /// <c>VkPhysicalDeviceVulkan14Features</c> 1.4. A struct that is
+    /// <i>both</i> — e.g. <c>VkPhysicalDeviceShaderDrawParametersFeatures</c>,
+    /// from <c>VK_KHR_shader_draw_parameters</c> and promoted to Vulkan 1.1 —
+    /// also takes the version overload, because a device that supports it
+    /// through core promotion is not required to keep advertising the
+    /// extension.</para>
+    /// <para><b>Query the struct you will push.</b> <c>VK_EXT_device_fault</c>
+    /// and <c>VK_KHR_device_fault</c> have separate feature structs
+    /// (<c>VkPhysicalDeviceFaultFeaturesEXT</c>,
+    /// <c>VkPhysicalDeviceFaultFeaturesKHR</c>) with separate <c>sType</c>s.
+    /// Enable a bit in the struct the query returned it from, and do not assume
+    /// one adapter's two structs agree.</para>
+    /// <para><b>Cost.</b> Setup-time, and nothing is cached. The
+    /// <see cref="TryGetFeatures{T}(VulkanVersion, out T)"/> overload issues
+    /// <b>two</b> native queries when the gate passes
+    /// (<c>vkGetPhysicalDeviceProperties</c> for the api version, then
+    /// <c>vkGetPhysicalDeviceFeatures2</c>) and one when it fails; it
+    /// allocates nothing (one <c>stackalloc</c>). The name overloads issue
+    /// <b>three</b> when the gate passes —
+    /// <c>vkEnumerateDeviceExtensionProperties</c> twice (count, then fill)
+    /// inside <see cref="SupportsExtension(ReadOnlySpan{byte})"/>, then
+    /// <c>vkGetPhysicalDeviceFeatures2</c> — and rent and return a pooled
+    /// array for the extension list. Same no-caching policy as
+    /// <see cref="GetMemoryLimits"/> and <c>Device.TimestampPeriod</c>. Not
+    /// for a per-frame path.</para>
+    /// <para>The returned struct's <c>pNext</c> is <see langword="null"/> by
+    /// construction — it is the chain tail — so nothing here hands the caller a
+    /// pointer into a dead stack frame.</para>
+    /// <para>Example — enable <c>deviceFaultVendorBinary</c> only where the GPU
+    /// reports it:</para>
+    /// <code>
+    /// bool vendorBinary =
+    ///     gpu.TryGetFeatures&lt;VkPhysicalDeviceFaultFeaturesEXT&gt;(VulkanExtensions.ExtDeviceFault, out var fault)
+    ///     &amp;&amp; fault.deviceFaultVendorBinary != 0;
+    /// // …later, in ConfigureFeatures (captures vendorBinary):
+    /// ref var f = ref chain.Push&lt;VkPhysicalDeviceFaultFeaturesEXT&gt;();
+    /// f.deviceFault             = 1;
+    /// f.deviceFaultVendorBinary = vendorBinary ? 1u : 0u;
+    /// </code>
+    /// Copy the bits you want; do not assign the whole queried struct into the
+    /// pushed slot — it would enable every supported bit, and the habit breaks
+    /// once the slot is not the chain tail.
+    /// </remarks>
+    public bool TryGetFeatures<T>(ReadOnlySpan<byte> utf8ExtensionName, out T features)
+        where T : unmanaged, IChainable<VkPhysicalDeviceFeatures2>
+    {
+        if (!SupportsExtension(utf8ExtensionName))
+        {
+            features = default;
+            return false;
+        }
+
+        QueryChainedFeatures(out features);
+        return true;
+    }
+
+    /// <inheritdoc cref="TryGetFeatures{T}(ReadOnlySpan{byte}, out T)"/>
+    /// <param name="extension">
+    /// The device extension that owns <typeparamref name="T"/>, as a
+    /// process-lifetime <see cref="Utf8Name"/> — e.g.
+    /// <see cref="VulkanExtensions.ExtDeviceFault"/>. A null name gates out.
+    /// </param>
+    /// <param name="features">
+    /// The filled struct on <see langword="true"/>; <c>default</c> on
+    /// <see langword="false"/>.
+    /// </param>
+    public bool TryGetFeatures<T>(Utf8Name extension, out T features)
+        where T : unmanaged, IChainable<VkPhysicalDeviceFeatures2>
+    {
+        if (extension.IsNull)
+        {
+            features = default;
+            return false;
+        }
+
+        return TryGetFeatures(
+            MemoryMarshal.CreateReadOnlySpanFromNullTerminated((byte*)extension.Ptr),
+            out features);
+    }
+
+    /// <inheritdoc cref="TryGetFeatures{T}(ReadOnlySpan{byte}, out T)"/>
+    /// <param name="minimumApiVersion">
+    /// The core Vulkan version that promoted <typeparamref name="T"/> — the
+    /// version whose header <i>defines</i> the struct, which is not always the
+    /// version its name suggests: <c>VkPhysicalDeviceVulkan11Features</c> is
+    /// Vulkan <b>1.2</b>, because the "11" names the feature set it
+    /// aggregates. The gate is this GPU's
+    /// <c>VkPhysicalDeviceProperties.apiVersion</c>, read with a plain
+    /// (un-chained) <c>vkGetPhysicalDeviceProperties</c>.
+    /// <para>The gate reads the <b>device</b> api version only. It assumes the
+    /// <see cref="Instance"/> this GPU came from was itself created at
+    /// <paramref name="minimumApiVersion"/> or above —
+    /// <c>vkGetPhysicalDeviceFeatures2</c> is an instance-scope entry point,
+    /// and the validation layer's stateless <c>pNext</c> checks for
+    /// physical-device commands key off the <i>instance</i> version. The
+    /// default satisfies this
+    /// (<see cref="InstanceDescription.ApiVersion"/> defaults to
+    /// <c>V1_4</c>); a caller who deliberately lowers it is responsible for
+    /// not querying above it.</para>
+    /// </param>
+    /// <param name="features">
+    /// The filled struct on <see langword="true"/>; <c>default</c> on
+    /// <see langword="false"/>.
+    /// </param>
+    public bool TryGetFeatures<T>(VulkanVersion minimumApiVersion, out T features)
+        where T : unmanaged, IChainable<VkPhysicalDeviceFeatures2>
+    {
+        if (ReadApiVersion() < minimumApiVersion.Packed)
+        {
+            features = default;
+            return false;
+        }
+
+        QueryChainedFeatures(out features);
         return true;
     }
 
