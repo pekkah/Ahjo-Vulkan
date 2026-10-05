@@ -20,7 +20,7 @@ Useful subsets:
 
 ```
 # Allocation-only round-trips (no driver required):
-dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*ChainBuilder*|*ResultPolicy*|*HandleOwnership*"
+dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*ChainBuilder*|*ResultPolicy*|*HandleOwnership*|*DeviceFaultPoll*"
 
 # Driver-bound: needs a real Vulkan ICD on the host. Fails at GlobalSetup
 # if the host cannot create a VkInstance.
@@ -166,6 +166,7 @@ managed-byte count BDN's `MemoryDiagnoser` reports; `-` is zero.
 | `HandleOwnership.MetadataRead_OwningAndBorrowed` |  0.92 ns  |        -  | Field read replacing the old side-table dictionary lookup + lock.       |
 | `HandleOwnership.OwnershipPredicate`            |   0.47 ns  |        -  | `OwnsHandle` — the Dispose guard / borrow check.                        |
 | `HandleOwnership.ConstrainedGenericDispatch`    |   3.69 ns  |        -  | `ObjectName.Set`-shaped `struct, IVulkanHandle<T>` dispatch — devirtualized, box-free under the relaxed constraint. |
+| `DeviceFaultPoll.ReadKhrEntries_NoFault_1024`   |   6.05 ns  |        -  | #244 canary: the no-fault per-frame `Device.TryPollDeviceFaults` is one `vkGetDeviceFaultReportsKHR` count call answering `VK_TIMEOUT`, and must allocate nothing — `ReadKhrEntries` creates its list only once a count is non-zero and hands back the shared empty array. Driverless: an `[UnmanagedCallersOnly]` fake answers the count call (the `ResultPolicy` shape). The `Device` layer (argument validation, `Monitor.TryEnter`, the real driver call) is covered by `DeviceFaultTests.Poll_NoFault_IsZeroAllocation` and, for a poll contended by another thread, `Poll_ContendedLock_TimeoutZero_ReturnsFalseImmediately`, both on KHR hardware. A host-gated device-level class would be possible; the tests' exact-zero `GC.GetAllocatedBytesForCurrentThread` assertion was chosen as the stronger check. Single capture, .NET 10.0.12 / BenchmarkDotNet on the Ryzen 9 7900X host (StdDev 0.06 ns). |
 
 **The `scoped var rec` workaround is gone (#209).** `CommandRecorder.RenderingPass100Cmds` and the three
 `MeshShader.DrawMeshTasks*` rows used to declare their recorder local `scoped` — before #209 that was the only way to

@@ -191,13 +191,54 @@ public static class VulkanExtensions
     /// do not know the extension, and report the KHR feature struct as
     /// <c>VUID-VkDeviceCreateInfo-pNext-pNext</c> ("unknown
     /// VkStructureType"). The wrapper does not suppress that message.</para>
-    /// <para><c>deviceFaultReportMasked</c> /
-    /// <c>deviceFaultDeviceLostOnMasked</c> are the caller's to set; support
-    /// for them is readable through the same
-    /// <see cref="PhysicalDevice.TryGetFeatures{T}(Utf8Name, out T)"/> query
-    /// of <c>VkPhysicalDeviceFaultFeaturesKHR</c>. The wrapper's read is
-    /// post-loss only; healthy-device polling of
-    /// <c>vkGetDeviceFaultReportsKHR</c> is not wrapped.</para>
+    /// <para><b>Healthy-device polling.</b>
+    /// <see cref="Device.TryPollDeviceFaults"/> reads masked faults (faults
+    /// the driver recovered from without losing the device) when
+    /// <c>deviceFaultReportMasked</c> was enabled. Query support first with
+    /// <c>gpu.TryGetFeatures&lt;VkPhysicalDeviceFaultFeaturesKHR&gt;(KhrDeviceFault, out var f)</c>
+    /// and copy <c>f.deviceFaultReportMasked</c> into the pushed struct.
+    /// <c>deviceFaultDeviceLostOnMasked</c> remains the caller's to
+    /// set.</para>
     /// </remarks>
     public static Utf8Name KhrDeviceFault => Utf8Name.FromLiteral(DeviceExtensionNames.KhrDeviceFault);
+
+    /// <summary>VK_KHR_shader_abort — device-level. With
+    /// <see cref="KhrDeviceFault"/>,
+    /// <see cref="Device.TryGetDeviceFault(out DeviceFaultReport)"/> returns
+    /// the messages of shaders that executed <c>OpAbortKHR</c> in
+    /// <see cref="DeviceFaultReport.ShaderAbortMessages"/>.</summary>
+    /// <remarks>
+    /// <para><b>The enable recipe.</b></para>
+    /// <list type="number">
+    /// <item><description>Add <see cref="KhrDeviceFault"/>, this name and
+    /// <see cref="KhrShaderConstantData"/> to
+    /// <see cref="DeviceDescription.Extensions"/>. The last is a dependency:
+    /// the validation layer reports
+    /// <c>VUID-vkCreateDevice-ppEnabledExtensionNames-01387</c> without
+    /// it.</description></item>
+    /// <item><description>From <see cref="DeviceDescription.ConfigureFeatures"/>,
+    /// push <c>VkPhysicalDeviceFaultFeaturesKHR</c> with
+    /// <c>deviceFault = 1</c> and <c>VkPhysicalDeviceShaderAbortFeaturesKHR</c>
+    /// with <c>shaderAbort = 1</c>, after checking
+    /// <c>gpu.TryGetFeatures&lt;VkPhysicalDeviceShaderAbortFeaturesKHR&gt;(KhrShaderAbort, out …)</c>
+    /// (<see cref="PhysicalDevice.TryGetFeatures{T}(Utf8Name, out T)"/>).</description></item>
+    /// <item><description>Slang's <c>abort(format, args…)</c> emits
+    /// <c>OpAbortKHR</c> (v2026.19); <c>Ahjo.Vulkan.Slang.SlangAbortMessage</c>
+    /// decodes its payloads.</description></item>
+    /// <item><description>The wrapper cannot see the enabled feature, only the
+    /// extension: it chains the abort-message struct on the post-loss
+    /// debug-info read whenever this extension was enabled.</description></item>
+    /// </list>
+    /// </remarks>
+    public static Utf8Name KhrShaderAbort => Utf8Name.FromLiteral(DeviceExtensionNames.KhrShaderAbort);
+
+    /// <summary>VK_KHR_shader_constant_data — device-level. Required by
+    /// <see cref="KhrShaderAbort"/> as a device-creation dependency.</summary>
+    /// <remarks>Gates <b>nothing</b> in the wrapper. It is listed here only so
+    /// the caller can satisfy the dependency. The
+    /// <c>shaderConstantData</c> feature is needed only by shaders that declare
+    /// <c>ConstantDataKHR</c>; Slang's <c>abort</c> does not. The full recipe
+    /// is on <see cref="KhrShaderAbort"/>.</remarks>
+    public static Utf8Name KhrShaderConstantData =>
+        Utf8Name.FromLiteral(DeviceExtensionNames.KhrShaderConstantData);
 }

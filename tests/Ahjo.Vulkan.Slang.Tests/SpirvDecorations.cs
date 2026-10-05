@@ -12,8 +12,11 @@ namespace Ahjo.Vulkan.Slang.Tests;
 /// tests assert against decorations read out of the blob rather than against
 /// numbers reflection reported.</para>
 /// <para>This is a decoration reader, not a SPIR-V parser: it walks the
-/// instruction stream by word count and picks out three opcodes. Anything else
-/// it steps over.</para>
+/// instruction stream by word count and picks out the opcodes it needs — the
+/// naming and decoration opcodes, plus, for
+/// <see cref="ReadAbortMessageLayout"/>, the scalar, vector, array and struct
+/// type opcodes, <c>OpConstant</c> / <c>OpConstantComposite</c> and
+/// <c>OpAbortKHR</c>. Anything else it steps over.</para>
 /// </remarks>
 internal static class SpirvDecorations
 {
@@ -23,9 +26,17 @@ internal static class SpirvDecorations
     private const uint OpName = 5;
     private const uint OpMemberName = 6;
     private const uint OpEntryPoint = 15;
+    private const uint OpTypeInt = 21;
+    private const uint OpTypeFloat = 22;
+    private const uint OpTypeVector = 23;
+    private const uint OpTypeArray = 28;
+    private const uint OpTypeStruct = 30;
+    private const uint OpConstant = 43;
+    private const uint OpConstantComposite = 44;
     private const uint OpVariable = 59;
     private const uint OpDecorate = 71;
     private const uint OpMemberDecorate = 72;
+    private const uint OpAbortKHR = 5121;
 
     private const uint DecorationLocation = 30;
     private const uint DecorationBinding = 33;
@@ -219,6 +230,175 @@ internal static class SpirvDecorations
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// The message type of the module's single <c>OpAbortKHR</c>, as the
+    /// driver will lay it out: member 0's format-string words, and for every
+    /// later member its <c>Offset</c> decoration and scalar shape.
+    /// </summary>
+    /// <remarks>
+    /// <para>This is the oracle the Slang abort decoder is pinned to (spec
+    /// Part C.5): <c>SlangAbortMessage</c> computes offsets from the format
+    /// alone, and only the SPIR-V says what the compiler actually emitted.</para>
+    /// <para>Throws <see cref="InvalidOperationException"/> naming what is
+    /// missing — this is test code, where a shape the reader does not
+    /// understand should fail loudly.</para>
+    /// </remarks>
+    public static (uint[] FormatWords, List<(uint Offset, int Width, bool Float, bool Signed, int Components)> Args)
+        ReadAbortMessageLayout(ReadOnlySpan<uint> words)
+    {
+        var ints = new Dictionary<uint, (int Width, bool Signed)>();
+        var floats = new Dictionary<uint, int>();
+        var vectors = new Dictionary<uint, (uint Component, int Count)>();
+        var arrays = new Dictionary<uint, uint>();
+        var structs = new Dictionary<uint, uint[]>();
+        var constants = new Dictionary<uint, uint>();
+        var composites = new List<(uint Type, uint[] Constituents)>();
+        var offsets = new Dictionary<(uint Type, uint Index), uint>();
+        uint? messageType = null;
+
+        foreach (Instruction instruction in Instructions(words))
+        {
+            ReadOnlySpan<uint> o = instruction.Operands;
+
+            switch (instruction.Opcode)
+            {
+                case OpTypeInt when o.Length >= 3:
+                    ints[o[0]] = ((int)o[1], o[2] != 0);
+
+                    break;
+
+                case OpTypeFloat when o.Length >= 2:
+                    floats[o[0]] = (int)o[1];
+
+                    break;
+
+                case OpTypeVector when o.Length >= 3:
+                    vectors[o[0]] = (o[1], (int)o[2]);
+
+                    break;
+
+                case OpTypeArray when o.Length >= 3:
+                    arrays[o[0]] = o[1];
+
+                    break;
+
+                case OpTypeStruct when o.Length >= 1:
+                    structs[o[0]] = o[1..].ToArray();
+
+                    break;
+
+                case OpConstant when o.Length >= 3:
+                    constants[o[1]] = o[2];
+
+                    break;
+
+                case OpConstantComposite when o.Length >= 2:
+                    composites.Add((o[0], o[2..].ToArray()));
+
+                    break;
+
+                case OpMemberDecorate when o.Length >= 4 && o[2] == DecorationOffset:
+                    offsets[(o[0], o[1])] = o[3];
+
+                    break;
+
+                case OpAbortKHR when o.Length >= 1:
+                    if (messageType is not null)
+                    {
+                        throw new InvalidOperationException("The module has more than one OpAbortKHR.");
+                    }
+
+                    messageType = o[0];
+
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
+        if (messageType is not uint message)
+        {
+            throw new InvalidOperationException("The module has no OpAbortKHR.");
+        }
+
+        if (!structs.TryGetValue(message, out uint[]? members) || members.Length == 0)
+        {
+            throw new InvalidOperationException($"OpAbortKHR's message type %{message} is not an OpTypeStruct with members.");
+        }
+
+        uint arrayType = members[0];
+
+        if (!arrays.TryGetValue(arrayType, out uint element)
+            || !ints.TryGetValue(element, out (int Width, bool Signed) elementInt)
+            || elementInt.Width != 32)
+        {
+            throw new InvalidOperationException($"Member 0 of %{message} is not an OpTypeArray of a 32-bit OpTypeInt.");
+        }
+
+        uint[]? formatIds = null;
+
+        foreach ((uint type, uint[] constituents) in composites)
+        {
+            if (type == arrayType)
+            {
+                formatIds = constituents;
+
+                break;
+            }
+        }
+
+        if (formatIds is null)
+        {
+            throw new InvalidOperationException($"No OpConstantComposite of the format array type %{arrayType}.");
+        }
+
+        var formatWords = new uint[formatIds.Length];
+
+        for (int i = 0; i < formatIds.Length; i++)
+        {
+            if (!constants.TryGetValue(formatIds[i], out formatWords[i]))
+            {
+                throw new InvalidOperationException($"Format word {i} (%{formatIds[i]}) is not an OpConstant.");
+            }
+        }
+
+        var args = new List<(uint, int, bool, bool, int)>();
+
+        for (uint m = 1; m < members.Length; m++)
+        {
+            if (!offsets.TryGetValue((message, m), out uint offset))
+            {
+                throw new InvalidOperationException($"Member {m} of %{message} has no Offset decoration.");
+            }
+
+            uint scalar = members[m];
+            int components = 1;
+
+            if (vectors.TryGetValue(scalar, out (uint Component, int Count) vector))
+            {
+                scalar = vector.Component;
+                components = vector.Count;
+            }
+
+            if (ints.TryGetValue(scalar, out (int Width, bool Signed) integer))
+            {
+                args.Add((offset, integer.Width, false, integer.Signed, components));
+            }
+            else if (floats.TryGetValue(scalar, out int floatWidth))
+            {
+                args.Add((offset, floatWidth, true, true, components));
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    $"Member {m} of %{message} (type %{members[m]}) is not a scalar or vector of OpTypeInt / OpTypeFloat.");
+            }
+        }
+
+        return (formatWords, args);
     }
 
     private static Dictionary<uint, string> ReadNames(ReadOnlySpan<uint> words)

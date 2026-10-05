@@ -30,9 +30,15 @@ namespace Ahjo.Vulkan;
 /// deferred command.</para>
 /// <para><see cref="ExtDeviceFault"/> gates <c>vkGetDeviceFaultInfoEXT</c>,
 /// which is legal only on a lost device. <see cref="KhrDeviceFault"/> gates
-/// <c>vkGetDeviceFaultReportsKHR</c>, which is legal at any time but called by
-/// the wrapper only after loss, and <c>vkGetDeviceFaultDebugInfoKHR</c>, which
-/// is legal only on a lost device.</para>
+/// <c>vkGetDeviceFaultReportsKHR</c>, which is legal at any time and called by
+/// the wrapper after loss and, through <see cref="Device.TryPollDeviceFaults"/>,
+/// on a healthy device, and <c>vkGetDeviceFaultDebugInfoKHR</c>, which is
+/// legal only on a lost device.</para>
+/// <para><see cref="KhrShaderAbort"/> and <see cref="KhrShaderConstantData"/>
+/// gate no entry point. <see cref="KhrShaderAbort"/> gates the chaining of
+/// <c>VkDeviceFaultShaderAbortMessageInfoKHR</c> on the KHR debug-info read
+/// (#245); <see cref="KhrShaderConstantData"/> is its device-creation
+/// dependency.</para>
 /// </remarks>
 internal static class DeviceExtensionNames
 {
@@ -60,4 +66,7 @@ internal static class DeviceExtensionNames
     public static ReadOnlySpan<byte> KhrDeviceFault          => "VK_KHR_device_fault"u8;
     public static ReadOnlySpan<byte> GetDeviceFaultReports   => "vkGetDeviceFaultReportsKHR"u8;
     public static ReadOnlySpan<byte> GetDeviceFaultDebugInfo => "vkGetDeviceFaultDebugInfoKHR"u8;
+
+    public static ReadOnlySpan<byte> KhrShaderAbort        => "VK_KHR_shader_abort"u8;
+    public static ReadOnlySpan<byte> KhrShaderConstantData => "VK_KHR_shader_constant_data"u8;
 }

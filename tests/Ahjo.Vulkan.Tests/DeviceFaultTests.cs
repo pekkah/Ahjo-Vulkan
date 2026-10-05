@@ -23,7 +23,10 @@ namespace Ahjo.Vulkan.Tests;
 /// VUID-vkGetDeviceFaultDebugInfoKHR-device-12383) on hardware that is not
 /// lost. Under validation the 1.4.363 layer would flag it — it tracks loss from
 /// real <c>VK_ERROR_DEVICE_LOST</c> returns and knows nothing of the wrapper's
-/// <c>MarkLost</c> seam. They are the obvious tests to write by mistake.</para>
+/// <c>MarkLost</c> seam. They are the obvious tests to write by mistake. The
+/// same rule (VUID-12383) covers the shader-abort cases (#245): no test calls
+/// <c>ReadKhrDebugInfo</c> with abort chaining on a healthy device; they only
+/// create the device and check what was captured.</para>
 /// <para><b>Also forbidden.</b> No test enables <c>deviceFaultVendorBinary</c>
 /// on an adapter that reports 0 to "prove" the
 /// <see cref="PhysicalDevice.TryGetFeatures{T}(Utf8Name, out T)"/> gate. That
@@ -45,6 +48,10 @@ namespace Ahjo.Vulkan.Tests;
 /// when <see cref="PhysicalDevice.TryGetFeatures{T}(Utf8Name, out T)"/>
 /// reports it — on a host with mixed adapters that runs both the 1 and the 0
 /// branch.</para>
+/// <para><b>Polling (#244).</b> The <see cref="Device.TryPollDeviceFaults"/>
+/// cases call only the reports command, which is legal on a healthy device (it
+/// has no lost-state valid usage), so they run on healthy hardware without
+/// touching the forbidden list above.</para>
 /// </remarks>
 public sealed unsafe class DeviceFaultTests(ITestOutputHelper output)
 {
@@ -57,6 +64,8 @@ public sealed unsafe class DeviceFaultTests(ITestOutputHelper output)
     private const string KhrSkipReason  = "No GPU exposes VK_KHR_device_fault with the deviceFault feature.";
     private const string BothSkipReason =
         "No GPU exposes both VK_EXT_device_fault and VK_KHR_device_fault with the deviceFault feature.";
+    private const string ShaderAbortSkipReason =
+        "No GPU exposes VK_KHR_shader_abort with the shaderAbort feature.";
 
     // ---- [gate:driver] ----
 
@@ -130,6 +139,53 @@ public sealed unsafe class DeviceFaultTests(ITestOutputHelper output)
         // A large but representable span is accepted: no extension ⇒ false.
         Assert.False(device.TryGetDeviceFault(TimeSpan.FromTicks(long.MaxValue / 100), out _));
         Assert.False(device.TryGetDeviceFault(TimeSpan.FromDays(365 * 100), out _));
+    }
+
+    [Fact]
+    public void Poll_NoKhrExtension_ReturnsFalse_EmptyArray()
+    {
+        TestGate.RequireDriver();
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out _);
+
+        Assert.False(device.TryPollDeviceFaults(TimeSpan.Zero, out DeviceFaultEntry[] before));
+        Assert.NotNull(before);
+        Assert.Empty(before);
+
+        // Safe: with no KHR extension enabled there is no pointer to call.
+        device.MarkLost();
+        Assert.False(device.TryPollDeviceFaults(TimeSpan.Zero, out DeviceFaultEntry[] after));
+        Assert.NotNull(after);
+        Assert.Empty(after);
+    }
+
+    [Fact]
+    public void Poll_Disposed_Throws()
+    {
+        TestGate.RequireDriver();
+
+        using var instance = Instance.Create(default);
+        var device = CreateGraphicsDevice(instance, out _);
+        device.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => device.TryPollDeviceFaults(TimeSpan.Zero, out _));
+    }
+
+    [Fact]
+    public void Poll_NegativeInfiniteOrSaturatingTimeout_Throws()
+    {
+        TestGate.RequireDriver();
+
+        using var instance = Instance.Create(default);
+        using var device   = CreateGraphicsDevice(instance, out _);
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => device.TryPollDeviceFaults(TimeSpan.FromMilliseconds(-1), out _));
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => device.TryPollDeviceFaults(Timeout.InfiniteTimeSpan, out _));
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => device.TryPollDeviceFaults(TimeSpan.MaxValue, out _));
     }
 
     // ---- [gate:feature] ----
@@ -235,6 +291,168 @@ public sealed unsafe class DeviceFaultTests(ITestOutputHelper output)
         Assert.False(incomplete);
     }
 
+    [Fact]
+    public void Poll_HealthyKhrDevice_RealDriver_ReturnsFalse()
+    {
+        TestGate.RequireDriver();
+
+        using var instance = Instance.Create(default);
+        using Device? device = TryCreateFaultDevice(instance, ext: false, khr: true, pushFeatures: true, out _);
+        TestGate.RequireDeviceFeature(device is not null, KhrSkipReason);
+
+        bool polled = device!.TryPollDeviceFaults(TimeSpan.Zero, out DeviceFaultEntry[] entries);
+
+        output.WriteLine(
+            $"{GpuName(device)}: TryPollDeviceFaults(TimeSpan.Zero, healthy device) returned {polled}; " +
+            $"entries={entries.Length}, IsLost={device.IsLost}");
+        Assert.False(polled);
+        Assert.NotNull(entries);
+        Assert.Empty(entries);
+        Assert.False(device.IsLost);
+    }
+
+    [Fact]
+    public void Poll_AfterMarkLost_ReturnsFalse_WithoutDriverCall()
+    {
+        TestGate.RequireDriver();
+
+        using var instance = Instance.Create(default);
+        using Device? device = TryCreateFaultDevice(instance, ext: false, khr: true, pushFeatures: true, out _);
+        TestGate.RequireDeviceFeature(device is not null, KhrSkipReason);
+
+        // Safe: the poll's IsLost gate runs before any driver call, and the
+        // reports command would be legal anyway. Never follow this with
+        // TryGetDeviceFault — that is the forbidden test (class remarks).
+        device!.MarkLost();
+        Assert.False(device.TryPollDeviceFaults(TimeSpan.Zero, out DeviceFaultEntry[] entries));
+        Assert.NotNull(entries);
+        Assert.Empty(entries);
+    }
+
+    /// <summary>
+    /// The no-fault poll is the one per-frame-callable device-fault path, so
+    /// it must allocate nothing (#244). The
+    /// <c>BuildAccelerationStructures_OneBuildOneGeometry_IsZeroAllocation</c>
+    /// shape.
+    /// </summary>
+    [Fact]
+    public void Poll_NoFault_IsZeroAllocation()
+    {
+        TestGate.RequireDriver();
+
+        using var instance = Instance.Create(default);
+        using Device? device = TryCreateFaultDevice(instance, ext: false, khr: true, pushFeatures: true, out _);
+        TestGate.RequireDeviceFeature(device is not null, KhrSkipReason);
+        // Without these the poll would return before its lock and driver call,
+        // and a zero delta would prove nothing.
+        Assert.True(device!.Functions.GetDeviceFaultReports != null);
+        Assert.False(device.IsLost);
+
+        // Warm: JIT + tier-up on every path the measured loop touches.
+        for (int i = 0; i < 32; i++)
+            device.TryPollDeviceFaults(TimeSpan.Zero, out _);
+
+        // Two measured passes: a tier-1 -> tier-2 promotion can still fire on
+        // the first measurement-sized loop and charge a one-shot allocation to
+        // this thread. Only the second is asserted on.
+        long before1 = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 128; i++)
+            device.TryPollDeviceFaults(TimeSpan.Zero, out _);
+        _ = GC.GetAllocatedBytesForCurrentThread() - before1;
+
+        long before2 = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 128; i++)
+            device.TryPollDeviceFaults(TimeSpan.Zero, out _);
+        long after2 = GC.GetAllocatedBytesForCurrentThread();
+
+        Assert.Equal(0, after2 - before2);
+        Assert.False(device.IsLost);
+    }
+
+    /// <summary>
+    /// A contended poll with a zero timeout returns at once, and allocates
+    /// nothing (a per-frame poll behind a background poller takes this path).
+    /// The contention must come from another thread: <see cref="Monitor"/> is
+    /// reentrant, so a lock held by the test thread itself would let the poll
+    /// through.
+    /// </summary>
+    [Fact]
+    public void Poll_ContendedLock_TimeoutZero_ReturnsFalseImmediately()
+    {
+        TestGate.RequireDriver();
+
+        using var instance = Instance.Create(default);
+        using Device? device = TryCreateFaultDevice(instance, ext: false, khr: true, pushFeatures: true, out _);
+        TestGate.RequireDeviceFeature(device is not null, KhrSkipReason);
+
+        using var acquired = new ManualResetEventSlim();
+        using var release  = new ManualResetEventSlim();
+        object faultLock = device!.FaultReadLockForTests;
+        var holder = new Thread(() =>
+        {
+            lock (faultLock)
+            {
+                acquired.Set();
+                release.Wait();
+            }
+        });
+        holder.Start();
+        try
+        {
+            acquired.Wait(TestContext.Current.CancellationToken);
+            Assert.False(device.TryPollDeviceFaults(TimeSpan.Zero, out DeviceFaultEntry[] entries));
+            Assert.NotNull(entries);
+            Assert.Empty(entries);
+
+            // Zero allocation on the contended path, the
+            // Poll_NoFault_IsZeroAllocation shape: warm, then two measured
+            // passes, asserting on the second.
+            for (int i = 0; i < 32; i++)
+                device.TryPollDeviceFaults(TimeSpan.Zero, out _);
+
+            long before1 = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 128; i++)
+                device.TryPollDeviceFaults(TimeSpan.Zero, out _);
+            _ = GC.GetAllocatedBytesForCurrentThread() - before1;
+
+            long before2 = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 128; i++)
+                device.TryPollDeviceFaults(TimeSpan.Zero, out _);
+            long after2 = GC.GetAllocatedBytesForCurrentThread();
+
+            Assert.Equal(0, after2 - before2);
+        }
+        finally
+        {
+            // Before the device's using scope ends: Dispose takes the same lock.
+            release.Set();
+            holder.Join();
+        }
+    }
+
+    [Fact]
+    public void ShaderAbort_Enabled_CapturedOnDevice()
+    {
+        TestGate.RequireDriver();
+
+        using var instance = Instance.Create(default);
+        using Device? device = TryCreateShaderAbortDevice(instance, out _);
+        TestGate.RequireDeviceFeature(device is not null, ShaderAbortSkipReason);
+
+        output.WriteLine(
+            $"{GpuName(device!)}: ShaderAbortExtensionEnabled={device!.ShaderAbortExtensionEnabled}, " +
+            $"FaultEntryPoints.ShaderAbortMessages={device.FaultEntryPoints.ShaderAbortMessages}");
+        Assert.True(device.ShaderAbortExtensionEnabled);
+        Assert.True(device.FaultEntryPoints.ShaderAbortMessages);
+        Assert.Equal(DeviceFaultApi.Khr, device.DeviceFaultApi);
+
+        // A plain KHR device (no VK_KHR_shader_abort) reports false for both.
+        using Device? plain = TryCreateFaultDevice(instance, ext: false, khr: true, pushFeatures: true, out _);
+        TestGate.RequireDeviceFeature(plain is not null, KhrSkipReason);
+        Assert.False(plain!.ShaderAbortExtensionEnabled);
+        Assert.False(plain.FaultEntryPoints.ShaderAbortMessages);
+    }
+
     // ---- [gate:validation] + [gate:feature] ----
 
     [Fact]
@@ -321,6 +539,54 @@ public sealed unsafe class DeviceFaultTests(ITestOutputHelper output)
         Assert.True((int)r >= 0, $"vkGetDeviceFaultReportsKHR returned {r}");
         Assert.Equal(VkResult.VK_TIMEOUT, r);
         Assert.Empty(entries);
+        device.Dispose();
+        AssertNoValidationErrors(errors);
+    }
+
+    [Fact]
+    public void Poll_RealDriver_UnderValidation_Clean()
+    {
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer(MinKhrLayer, "The KHR reports call needs a layer that knows VK_KHR_device_fault.");
+
+        var errors = new List<DebugMessage>();
+        using var instance = CreateValidatedInstance(errors);
+        Device? device = TryCreateFaultDevice(instance, ext: false, khr: true, pushFeatures: true, out _);
+        TestGate.RequireDeviceFeature(device is not null, KhrSkipReason);
+
+        bool polled = device!.TryPollDeviceFaults(TimeSpan.Zero, out DeviceFaultEntry[] entries);
+
+        output.WriteLine(
+            $"Validation layer {TestGate.Fmt(VulkanEnvironment.ValidationLayerSpecVersion)}; " +
+            $"{GpuName(device)}: TryPollDeviceFaults(TimeSpan.Zero, healthy device) returned {polled}; " +
+            $"entries={entries.Length}");
+        Assert.False(polled);
+        Assert.Empty(entries);
+        Assert.False(device.IsLost);
+        device.Dispose();
+        AssertNoValidationErrors(errors);
+    }
+
+    /// <summary>
+    /// The shader-abort create chain under the layer: the three extensions
+    /// (the layer enforces the <c>VK_KHR_shader_constant_data</c> dependency
+    /// as VUID-vkCreateDevice-ppEnabledExtensionNames-01387) and both feature
+    /// structs. Create and dispose only — never a debug-info read (VUID-12383).
+    /// </summary>
+    [Fact]
+    public void ShaderAbort_CreatesCleanly_UnderValidation()
+    {
+        TestGate.RequireDriver();
+        TestGate.RequireValidationLayer(MinKhrLayer, "The KHR device-fault and shader-abort feature structs need a layer that knows VK_KHR_device_fault.");
+
+        var errors = new List<DebugMessage>();
+        using var instance = CreateValidatedInstance(errors);
+        Device? device = TryCreateShaderAbortDevice(instance, out _);
+        TestGate.RequireDeviceFeature(device is not null, ShaderAbortSkipReason);
+
+        output.WriteLine(
+            $"Validation layer {TestGate.Fmt(VulkanEnvironment.ValidationLayerSpecVersion)}; device {GpuName(device!)}");
+        Assert.True(device!.ShaderAbortExtensionEnabled);
         device.Dispose();
         AssertNoValidationErrors(errors);
     }
@@ -533,6 +799,77 @@ public sealed unsafe class DeviceFaultTests(ITestOutputHelper output)
                         ref var khrFeatures = ref chain.Push<VkPhysicalDeviceFaultFeaturesKHR>();
                         khrFeatures.deviceFault = 1;
                     }
+                },
+            });
+        }
+        catch (VulkanException ex) when (
+            ex.Result == VkResult.VK_ERROR_EXTENSION_NOT_PRESENT ||
+            ex.Result == VkResult.VK_ERROR_FEATURE_NOT_PRESENT)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Creates a device with <c>VK_KHR_device_fault</c>,
+    /// <c>VK_KHR_shader_abort</c> and its dependency
+    /// <c>VK_KHR_shader_constant_data</c>, pushing
+    /// <c>VkPhysicalDeviceFaultFeaturesKHR</c> (<c>deviceFault = 1</c>) and
+    /// <c>VkPhysicalDeviceShaderAbortFeaturesKHR</c> (<c>shaderAbort = 1</c>) —
+    /// or returns <see langword="null"/> when no GPU on this host can supply
+    /// them. The <see cref="TryCreateFaultDevice"/> shape.
+    /// </summary>
+    private static Device? TryCreateShaderAbortDevice(Instance instance, out uint family)
+    {
+        uint f = uint.MaxValue;
+        PhysicalDevice gpu;
+        try
+        {
+            gpu = instance.PickPhysicalDevice((in PhysicalDeviceInfo info) =>
+            {
+                if (!info.SupportsExtension(DeviceExtensionNames.KhrDeviceFault)) return false;
+                if (!info.SupportsExtension(DeviceExtensionNames.KhrShaderAbort)) return false;
+                if (!info.SupportsExtension(DeviceExtensionNames.KhrShaderConstantData)) return false;
+                for (int i = 0; i < info.QueueFamilies.Length; i++)
+                {
+                    if (info.QueueFamilies[i].SupportsGraphics)
+                    {
+                        f = info.QueueFamilies[i].Index;
+                        return true;
+                    }
+                }
+                return false;
+            });
+        }
+        catch (VulkanException ex) when (ex.Result == VkResult.VK_ERROR_INITIALIZATION_FAILED)
+        {
+            family = 0;
+            return null;
+        }
+
+        family = f;
+        try
+        {
+            return gpu.CreateDevice(new DeviceDescription
+            {
+                Queues     = [new QueueRequest(f, count: 1, priority: 1.0f)],
+                Extensions =
+                [
+                    VulkanExtensions.KhrDeviceFault,
+                    VulkanExtensions.KhrShaderAbort,
+                    VulkanExtensions.KhrShaderConstantData,
+                ],
+                ConfigureFeatures = static (
+                    ref ChainBuilder<VkDeviceCreateInfo> chain,
+                    ref VkPhysicalDeviceFeatures2 _,
+                    ref VkPhysicalDeviceVulkan12Features _,
+                    ref VkPhysicalDeviceVulkan13Features _,
+                    ref VkPhysicalDeviceVulkan14Features _) =>
+                {
+                    ref var fault = ref chain.Push<VkPhysicalDeviceFaultFeaturesKHR>();
+                    fault.deviceFault = 1;
+                    ref var abort = ref chain.Push<VkPhysicalDeviceShaderAbortFeaturesKHR>();
+                    abort.shaderAbort = 1;
                 },
             });
         }

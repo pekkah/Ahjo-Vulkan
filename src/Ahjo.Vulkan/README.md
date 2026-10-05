@@ -110,7 +110,9 @@ AhjoDiagnostics.Sink = (severity, source, message) => myLogger.Log(severity, sou
   for the names it actively wraps (`KhrSurface`, `KhrWin32Surface`,
   `KhrSwapchain`, `ExtMeshShader`, `KhrAccelerationStructure`,
   `KhrRayQuery`, `KhrDeferredHostOperations`, `ExtDeviceFault`,
-  `KhrDeviceFault`).
+  `KhrDeviceFault`, `KhrShaderAbort`, `KhrShaderConstantData`).
+  `Device.TryPollDeviceFaults` reads masked faults on a healthy device
+  (`VK_KHR_device_fault` + `deviceFaultReportMasked`).
 
 Deeper rationale on each layer lives under
 [`docs/design/specs/`](https://github.com/pekkah/Ahjo-Vulkan/tree/main/docs/design/specs)

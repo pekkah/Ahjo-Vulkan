@@ -87,6 +87,19 @@ null-terminated.
 - The integration point with the wrapper is
   `Device.CreateShaderModule(ReadOnlySpan<uint>)` and nothing else. No new
   `Device` overload was added and none should be.
+- **`SlangAbortMessage` is the package's one never-throw API.** It decodes GPU
+  crash data (`DeviceFaultReport.ShaderAbortMessages`, #245) and never calls
+  Slang, so it follows the #242 crash-path posture — `TryDecode` returns
+  `false`, `Describe` always returns text — rather than the
+  diagnostics-as-exceptions rule above, which covers compiler diagnostics only.
+  `SlangAbortLayoutTests` pins its layout to the pinned compiler; on a Slang
+  bump, a failure there means re-probing spec Part C
+  (`docs/design/specs/2026-10-05-issue-244-245-device-fault-khr-design.md`), not
+  editing the expected offsets.
+- **A zero-argument `abort()` kills the process.** It compiles cleanly and then
+  `Spirv(0)` crashes inside `getEntryPointCode` (0xC0000005; upstream
+  shader-slang/slang#13166). Always call `abort` with a format string. There is
+  no test for it, because the test would take the host down.
 - `SlangProgram` can only be constructed from a successful
   `IComponentType::link`. Composition changes the layout — the same module
   reflected alone and inside a composite reports different sets and bindings —
