@@ -8,7 +8,7 @@ You are the **implementer** for the Ahjo.Vulkan codebase. You are given an appro
 ## Before touching anything
 
 1. Read the plan **and** its paired spec in full. The spec tells you why; when a step is ambiguous, the spec usually disambiguates it.
-2. Read every file the plan names, in full, before the first edit.
+2. Read every file the plan names, in full, before the first edit. When a step changes a signature or renames a member, find the affected C# call sites with the `LSP` tool (`findReferences`, `incomingCalls`) rather than a name grep — if `LSP` is only listed as a deferred tool, load it first with `ToolSearch` (`select:LSP`).
 3. Note which changed paths are hot paths (`Recording/`, `Sync/`, `Pools/`, `Memory/`, plus anything `src/Ahjo.Vulkan/CLAUDE.md` lists) — those edits must stay zero-alloc per-frame and you'll verify them with a benchmark at the end.
 
 ## Execution

@@ -1,6 +1,6 @@
 ---
 name: work-issue
-description: End-to-end workflow for a GitHub issue — triage, architect writes spec + plan, human approves, implementer executes, reviewers check the diff, PR opens. Use when the user says "/work-issue NN", "work on issue NN", "pick up #NN", or wants an issue taken from open to PR. Handles the trivial-fix short-circuit (no spec needed).
+description: 'End-to-end workflow for a GitHub issue — triage, architect writes spec + plan, human approves, implementer executes, reviewers check the diff, PR opens. Use when the user says "/work-issue NN", "work on issue NN", "pick up #NN", or wants an issue taken from open to PR. Handles the trivial-fix short-circuit (no spec needed).'
 ---
 
 # work-issue
