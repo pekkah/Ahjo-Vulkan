@@ -20,14 +20,21 @@ internal readonly unsafe struct DeviceFaultEntryPoints
     public readonly delegate* unmanaged[Stdcall]<
         VkDevice_T*, VkDeviceFaultDebugInfoKHR*, VkResult> KhrDebugInfo;
 
+    /// <summary>Whether the KHR debug-info read chains
+    /// <c>VkDeviceFaultShaderAbortMessageInfoKHR</c>: <c>VK_KHR_shader_abort</c>
+    /// was enabled <b>and</b> the debug-info pointer is present (#245).</summary>
+    public readonly bool ShaderAbortMessages;
+
     public DeviceFaultEntryPoints(
         delegate* unmanaged[Stdcall]<VkDevice_T*, VkDeviceFaultCountsEXT*, VkDeviceFaultInfoEXT*, VkResult> ext,
         delegate* unmanaged[Stdcall]<VkDevice_T*, ulong, uint*, VkDeviceFaultInfoKHR*, VkResult> khrReports,
-        delegate* unmanaged[Stdcall]<VkDevice_T*, VkDeviceFaultDebugInfoKHR*, VkResult> khrDebugInfo)
+        delegate* unmanaged[Stdcall]<VkDevice_T*, VkDeviceFaultDebugInfoKHR*, VkResult> khrDebugInfo,
+        bool shaderAbortMessages = false)
     {
-        Ext          = ext;
-        KhrReports   = khrReports;
-        KhrDebugInfo = khrDebugInfo;
+        Ext                 = ext;
+        KhrReports          = khrReports;
+        KhrDebugInfo        = khrDebugInfo;
+        ShaderAbortMessages = shaderAbortMessages && khrDebugInfo != null;
     }
 
     /// <summary>The path a read takes: KHR when both KHR pointers are present,
@@ -48,7 +55,9 @@ internal readonly unsafe struct DeviceFaultEntryPoints
 /// protocol is testable against fake <c>[UnmanagedCallersOnly]</c>
 /// functions — a real device loss cannot be produced portably.</para>
 /// <para>Allocates by design (arrays, strings, the report), once, after device
-/// loss — off every hot path.</para>
+/// loss — off every hot path. The one per-frame-callable piece is a no-fault
+/// <see cref="ReadKhrEntries"/> (through <see cref="Device.TryPollDeviceFaults"/>),
+/// which allocates nothing.</para>
 /// <para><see cref="TryRead"/> must only be reached through
 /// <see cref="Device.TryGetDeviceFault(TimeSpan, out DeviceFaultReport)"/>'s
 /// <see cref="Device.IsLost"/> gate: the EXT info and KHR debug-info commands
@@ -56,6 +65,19 @@ internal readonly unsafe struct DeviceFaultEntryPoints
 /// VUID-vkGetDeviceFaultDebugInfoKHR-device-12383). <see cref="ReadKhrEntries"/>
 /// alone is legal on a healthy device (its command has no lost-state valid
 /// usage), which the hardware test relies on.</para>
+/// <para><b>The KHR read reports the device's fault log</b>
+/// (<see cref="DeviceFaultLog"/>, #244): every entry drained by an earlier
+/// <see cref="Device.TryPollDeviceFaults"/> or read, then the entries this
+/// read drained. The EXT path ignores the log. Repeat KHR reads are therefore
+/// idempotent: a second read drains nothing new and reports the same
+/// entries.</para>
+/// <para><b>Shader-abort messages (#245).</b> When
+/// <see cref="DeviceFaultEntryPoints.ShaderAbortMessages"/> is set, the KHR
+/// debug-info read chains <c>VkDeviceFaultShaderAbortMessageInfoKHR</c> and
+/// parses its (size, payload) framing into
+/// <see cref="DeviceFaultReport.ShaderAbortMessages"/>; otherwise it sends
+/// <c>pNext = null</c>, as the pNext rule requires without
+/// <c>VK_KHR_shader_abort</c>.</para>
 /// <para>Never throws for a driver result and never uses
 /// <c>ThrowIfFailed</c> / <c>ThrowIfErrored</c>: results are branched on by
 /// sign, and failures go to <see cref="AhjoDiagnostics.Sink"/>. A forensic
@@ -91,6 +113,19 @@ internal static unsafe class DeviceFaultReader
     /// count not worth trusting with the allocation.</summary>
     internal const uint MaxVendorBinaryBytes = 64u * 1024 * 1024;
 
+    /// <summary>Upper bound, in bytes, on the shader-abort message buffer one
+    /// read requests (16 MiB): 256 messages at the 64 KiB per-message floor of
+    /// <c>maxShaderAbortMessageSize</c>. Clamped like
+    /// <see cref="MaxVendorBinaryBytes"/>; a size above this is treated as a
+    /// driver count not worth trusting with the allocation.</summary>
+    internal const uint MaxShaderAbortMessageBytes = 16u * 1024 * 1024;
+
+    /// <summary>Upper bound on the shader-abort messages one read parses.
+    /// Without it a garbage or zero-filled buffer would parse into millions of
+    /// empty messages on a path that must not throw
+    /// <see cref="OutOfMemoryException"/>.</summary>
+    internal const int MaxShaderAbortMessages = 1024;
+
     // VK_MAX_DESCRIPTION_SIZE: every device-fault description field is char[256].
     private const int DescriptionSize = 256;
 
@@ -98,6 +133,7 @@ internal static unsafe class DeviceFaultReader
         in DeviceFaultEntryPoints eps,
         VkDevice_T*               device,
         ulong                     timeoutNs,
+        DeviceFaultLog            log,
         [NotNullWhen(true)] out DeviceFaultReport? report)
     {
         report = null;
@@ -120,35 +156,50 @@ internal static unsafe class DeviceFaultReader
             {
                 VkResult r = ReadKhrEntries(eps.KhrReports, device, timeoutNs,
                     out DeviceFaultEntry[] entries, out bool entriesIncomplete);
+                // Drained entries are logged whatever happened: they are gone
+                // from the driver queue, so the log holds the only copy.
+                log.Append(entries);
                 if ((int)r < 0)
                 {
-                    if (entries.Length == 0)
+                    if (log.Count == 0)
                     {
                         AhjoDiagnostics.Write(DiagnosticSeverity.Warning, "Device",
                             $"Device.TryGetDeviceFault: vkGetDeviceFaultReportsKHR returned {r}; no device-fault report is available.");
                         return false;
                     }
 
-                    // The entries are already drained from the driver queue;
-                    // returning false would destroy the only copy.
-                    AhjoDiagnostics.Write(DiagnosticSeverity.Warning, "Device",
-                        $"Device.TryGetDeviceFault: vkGetDeviceFaultReportsKHR returned {r} after {entries.Length} entries were drained; returning a partial report.");
+                    if (entries.Length == 0)
+                    {
+                        // Nothing drained by this read, but earlier polls (or
+                        // an earlier read) logged entries; report those.
+                        AhjoDiagnostics.Write(DiagnosticSeverity.Warning, "Device",
+                            $"Device.TryGetDeviceFault: vkGetDeviceFaultReportsKHR returned {r}; returning {log.Count} previously drained entries.");
+                    }
+                    else
+                    {
+                        // The entries are already drained from the driver queue;
+                        // returning false would destroy the only copy.
+                        AhjoDiagnostics.Write(DiagnosticSeverity.Warning, "Device",
+                            $"Device.TryGetDeviceFault: vkGetDeviceFaultReportsKHR returned {r} after {entries.Length} entries were drained; returning a partial report.");
+                    }
                     entriesIncomplete = true;
                 }
 
-                VkResult d = ReadKhrDebugInfo(eps.KhrDebugInfo, device, out byte[] binary, out bool binaryIncomplete);
+                VkResult d = ReadKhrDebugInfo(eps.KhrDebugInfo, device, eps.ShaderAbortMessages,
+                    out byte[] binary, out byte[][] abortMessages, out bool binaryIncomplete);
                 if ((int)d < 0)
                 {
                     AhjoDiagnostics.Write(DiagnosticSeverity.Warning, "Device",
-                        $"Device.TryGetDeviceFault: vkGetDeviceFaultDebugInfoKHR returned {d}; the report carries no vendor binary.");
+                        $"Device.TryGetDeviceFault: vkGetDeviceFaultDebugInfoKHR returned {d}; the report carries no vendor binary and no shader abort messages.");
                 }
 
                 report = new DeviceFaultReport
                 {
-                    Api          = DeviceFaultApi.Khr,
-                    Entries      = entries,
-                    VendorBinary = binary,
-                    IsIncomplete = entriesIncomplete || binaryIncomplete,
+                    Api                 = DeviceFaultApi.Khr,
+                    Entries             = log.Snapshot(),
+                    VendorBinary        = binary,
+                    ShaderAbortMessages = abortMessages,
+                    IsIncomplete        = entriesIncomplete || binaryIncomplete || log.Dropped,
                 };
                 return true;
             }
@@ -257,7 +308,9 @@ internal static unsafe class DeviceFaultReader
     /// non-<c>VK_INCOMPLETE</c> fill, or a cap (<see cref="MaxKhrEntries"/>,
     /// <see cref="MaxKhrRounds"/>). A
     /// negative result in any round returns it; <paramref name="entries"/>
-    /// then holds what was already drained and is never null.
+    /// then holds what was already drained and is never null. Allocates
+    /// nothing when the first count call reports no entries; a per-frame poll
+    /// depends on this (#244).
     /// </summary>
     internal static VkResult ReadKhrEntries(
         delegate* unmanaged[Stdcall]<VkDevice_T*, ulong, uint*, VkDeviceFaultInfoKHR*, VkResult> fn,
@@ -267,8 +320,10 @@ internal static unsafe class DeviceFaultReader
         out bool               incomplete)
     {
         incomplete = false;
-        var      collected = new List<DeviceFaultEntry>();
-        VkResult last      = VkResult.VK_SUCCESS;
+        // Created only once a count call reports entries, so a no-fault poll
+        // allocates nothing.
+        List<DeviceFaultEntry>? collected = null;
+        VkResult                last      = VkResult.VK_SUCCESS;
 
         for (int round = 0; round < MaxKhrRounds; round++)
         {
@@ -276,12 +331,13 @@ internal static unsafe class DeviceFaultReader
             VkResult r     = fn(device, round == 0 ? timeoutNs : 0, &count, null);
             if ((int)r < 0)
             {
-                entries = collected.ToArray();
+                entries = collected is null ? [] : collected.ToArray();
                 return r;
             }
             last = r;
             if (r == VkResult.VK_TIMEOUT || count == 0) break;
 
+            collected ??= new List<DeviceFaultEntry>();
             uint requested = Math.Min(count, (uint)(MaxKhrEntries - collected.Count));
             var  buffer    = new VkDeviceFaultInfoKHR[requested];
             // A `new T[n]` does not run the generated constructor, and the
@@ -297,7 +353,7 @@ internal static unsafe class DeviceFaultReader
                 r = fn(device, 0, &n, p);
             if ((int)r < 0)
             {
-                entries = collected.ToArray();
+                entries = collected is null ? [] : collected.ToArray();
                 return r;
             }
             last = r;
@@ -321,54 +377,144 @@ internal static unsafe class DeviceFaultReader
             }
         }
 
-        entries = collected.ToArray();
+        entries = collected is null ? [] : collected.ToArray();
         return last;
     }
 
     /// <summary>
-    /// <c>vkGetDeviceFaultDebugInfoKHR</c> size/fill. A zero size returns
-    /// <c>VK_SUCCESS</c> with no fill call. A negative result returns it with
-    /// <paramref name="binary"/> empty.
+    /// <c>vkGetDeviceFaultDebugInfoKHR</c> size/fill. When
+    /// <paramref name="readShaderAbortMessages"/> is set, chains
+    /// <c>VkDeviceFaultShaderAbortMessageInfoKHR</c> on both calls and parses
+    /// the messages (#245); otherwise <c>pNext</c> is null, exactly as before.
+    /// When every queried size is zero, returns <c>VK_SUCCESS</c> with no fill
+    /// call. A negative result returns it with <paramref name="binary"/> and
+    /// <paramref name="shaderAbortMessages"/> empty.
     /// </summary>
     internal static VkResult ReadKhrDebugInfo(
         delegate* unmanaged[Stdcall]<VkDevice_T*, VkDeviceFaultDebugInfoKHR*, VkResult> fn,
-        VkDevice_T* device,
-        out byte[]  binary,
-        out bool    incomplete)
+        VkDevice_T*  device,
+        bool         readShaderAbortMessages,
+        out byte[]   binary,
+        out byte[][] shaderAbortMessages,
+        out bool     incomplete)
     {
-        binary     = [];
-        incomplete = false;
+        binary              = [];
+        shaderAbortMessages = [];
+        incomplete          = false;
 
+        var abort = new VkDeviceFaultShaderAbortMessageInfoKHR
+        {
+            sType           = VkStructureType.VK_STRUCTURE_TYPE_DEVICE_FAULT_SHADER_ABORT_MESSAGE_INFO_KHR,
+            pNext           = null,
+            messageDataSize = 0,
+            pMessageData    = null,
+        };
         var info = new VkDeviceFaultDebugInfoKHR
         {
             sType             = VkStructureType.VK_STRUCTURE_TYPE_DEVICE_FAULT_DEBUG_INFO_KHR,
-            pNext             = null,
+            // Chained only when VK_KHR_shader_abort was enabled: the pNext
+            // validity rule forbids it otherwise, and the layer does not check.
+            pNext             = readShaderAbortMessages ? &abort : null,
             vendorBinarySize  = 0,
             pVendorBinaryData = null,
         };
         VkResult r = fn(device, &info);
         if ((int)r < 0) return r;
-        if (info.vendorBinarySize == 0) return VkResult.VK_SUCCESS;
+        if (info.vendorBinarySize == 0 && (!readShaderAbortMessages || abort.messageDataSize == 0))
+            return VkResult.VK_SUCCESS;
 
-        // Clamp to the cap and write the clamped value back so the size passed
+        // Clamp each size to its cap and write it back so the size passed
         // matches the buffer. A clamp is recorded as incomplete in case the
         // driver answers VK_SUCCESS anyway.
-        bool capped = info.vendorBinarySize > MaxVendorBinaryBytes;
-        uint size   = Math.Min(info.vendorBinarySize, MaxVendorBinaryBytes);
-        var  buffer = new byte[size];
-        info.vendorBinarySize = size;
+        ulong reportedMessageSize = readShaderAbortMessages ? abort.messageDataSize : 0;
+        bool  capped      = info.vendorBinarySize > MaxVendorBinaryBytes
+                         || reportedMessageSize > MaxShaderAbortMessageBytes;
+        uint  vendorSize  = Math.Min(info.vendorBinarySize, MaxVendorBinaryBytes);
+        uint  messageSize = (uint)Math.Min(reportedMessageSize, MaxShaderAbortMessageBytes);
+        info.vendorBinarySize = vendorSize;
+        abort.messageDataSize = messageSize;
 
-        fixed (byte* p = buffer)
+        var vendorBuf  = new byte[vendorSize];
+        // ulong[], not byte[]: the element type guarantees an 8-byte-aligned
+        // pointer, so the (size, payload) pairs at 8-aligned offsets from the
+        // buffer start sit at 8-aligned addresses, as the spec requires.
+        var messageBuf = new ulong[(messageSize + 7) / 8];
+
+        // `fixed` over an empty array yields null, which is exactly the
+        // pointer a zero size wants.
+        fixed (byte*  pVendor  = vendorBuf)
+        fixed (ulong* pMessage = messageBuf)
         {
-            info.pVendorBinaryData = p;
+            info.pVendorBinaryData = pVendor;
+            abort.pMessageData     = pMessage;
+            abort.messageDataSize  = messageSize;
             r = fn(device, &info);
         }
         if ((int)r < 0) return r;
 
-        int written = (int)Math.Min(info.vendorBinarySize, size);
-        binary     = written == buffer.Length ? buffer : buffer.AsSpan(0, written).ToArray();
-        incomplete = r == VkResult.VK_INCOMPLETE || capped;
+        int written = (int)Math.Min(info.vendorBinarySize, vendorSize);
+        binary = written == vendorBuf.Length ? vendorBuf : vendorBuf.AsSpan(0, written).ToArray();
+
+        bool truncated = false;
+        if (readShaderAbortMessages)
+        {
+            // min(): a driver need not write messageDataSize back on a fill.
+            int messageWritten = (int)Math.Min(abort.messageDataSize, messageSize);
+            ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(messageBuf.AsSpan())[..messageWritten];
+            shaderAbortMessages = ParseShaderAbortMessages(bytes, out truncated);
+        }
+
+        // VK_INCOMPLETE does not say which buffer was short; both are trimmed
+        // and the one flag covers either.
+        incomplete = r == VkResult.VK_INCOMPLETE || capped || truncated;
         return r;
+    }
+
+    /// <summary>
+    /// Splits a <c>VkDeviceFaultShaderAbortMessageInfoKHR</c> buffer into its
+    /// payloads: a native-endian 64-bit size, then that many payload bytes,
+    /// with the next size at the next 8-byte-aligned offset from the buffer
+    /// start. A size that overruns the buffer, or more than
+    /// <see cref="MaxShaderAbortMessages"/> messages, stops parsing, keeps the
+    /// prefix and sets <paramref name="truncated"/>. Fewer than 8 trailing
+    /// bytes are padding. Returns the shared empty array when nothing parsed.
+    /// </summary>
+    /// <remarks>
+    /// The framing is the Vulkan spec's (<c>chapters/debugging.adoc</c>,
+    /// "Shader Abort Messages"). The <c>VK_KHR_shader_abort</c> proposal's
+    /// sample readers advance 4 bytes after the 8-byte size; that is wrong,
+    /// and so is its big-endian byte example. The spec chapter is
+    /// authoritative.
+    /// </remarks>
+    internal static byte[][] ParseShaderAbortMessages(ReadOnlySpan<byte> data, out bool truncated)
+    {
+        truncated = false;
+        List<byte[]>? messages = null;
+        int offset = 0;
+        while (data.Length - offset >= 8)
+        {
+            // Native endianness: the spec's "64-bit integer"; every supported
+            // RID is little-endian.
+            ulong size = MemoryMarshal.Read<ulong>(data[offset..]);
+            offset += 8;
+            if (size > (ulong)(data.Length - offset))
+            {
+                truncated = true;
+                break;
+            }
+            if ((messages?.Count ?? 0) >= MaxShaderAbortMessages)
+            {
+                truncated = true;
+                break;
+            }
+            messages ??= new List<byte[]>();
+            messages.Add(data.Slice(offset, (int)size).ToArray());
+            // Checked against the length first, so this cannot overflow.
+            long next = ((long)offset + (long)size + 7) & ~7L;
+            if (next > data.Length) break;
+            offset = (int)next;
+        }
+        return messages is null ? [] : messages.ToArray();
     }
 
     private static DeviceFaultEntry ToManaged(ref VkDeviceFaultInfoKHR e)

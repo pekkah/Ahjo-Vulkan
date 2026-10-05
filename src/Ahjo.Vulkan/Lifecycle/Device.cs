@@ -19,7 +19,12 @@ namespace Ahjo.Vulkan;
 /// <para><b>Thread safety.</b> Disposal is not thread-safe — do not call
 /// <see cref="Dispose"/> concurrently from multiple threads. Vulkan calls
 /// made through the wrapped handle follow the spec's external-sync rules
-/// (the underlying <c>VkDevice</c> is externally synchronizable).</para>
+/// (the underlying <c>VkDevice</c> is externally synchronizable).
+/// <see cref="Dispose"/> waits for an in-flight
+/// <see cref="TryPollDeviceFaults"/> or
+/// <see cref="TryGetDeviceFault(TimeSpan, out DeviceFaultReport)"/>, at most
+/// that call's finite timeout, so the device is never destroyed under a
+/// fault read.</para>
 /// </remarks>
 public sealed unsafe class Device : IDisposable
 {
@@ -37,6 +42,11 @@ public sealed unsafe class Device : IDisposable
     // VkPhysicalDeviceMemoryBudgetPropertiesEXT into a device that will reject
     // it. One bool, set once, so Allocator.Create can ask the real question.
     internal readonly bool                MemoryBudgetExtensionEnabled;
+    // Whether VK_KHR_shader_abort was ENABLED at vkCreateDevice time, captured
+    // the same way: it gates chaining VkDeviceFaultShaderAbortMessageInfoKHR
+    // on the post-loss debug-info read, which the pNext rule forbids without
+    // the extension (#245).
+    internal readonly bool                ShaderAbortExtensionEnabled;
     private  bool                         _allocatorCreated;
     private  bool                         _disposed;
     // Allocator lazy-init runs at most once per Device, so the cost of
@@ -46,7 +56,11 @@ public sealed unsafe class Device : IDisposable
     // Serializes wrapper device-fault reads. KHR reports are drained exactly
     // once, so concurrent readers would each see a disjoint subset; one lock
     // on a cold, post-loss path makes a read see everything not yet drained.
+    // Also guards _faultLog and is taken by Dispose.
     private  readonly object              _faultReadLock = new();
+    // Every KHR fault entry the wrapper has drained, by poll or by crash read
+    // (#244). Accessed only under _faultReadLock.
+    private  readonly DeviceFaultLog      _faultLog = new();
     // Set once when any wrapper call observes VK_ERROR_DEVICE_LOST; never
     // cleared. volatile (not Interlocked) because the flag is monotonic —
     // there is no lost-update hazard, and both race directions are benign:
@@ -74,6 +88,8 @@ public sealed unsafe class Device : IDisposable
         _allocatorDescription = allocatorDescription;
         MemoryBudgetExtensionEnabled =
             PhysicalDevice.ContainsExtension(enabledExtensions, "VK_EXT_memory_budget"u8);
+        ShaderAbortExtensionEnabled =
+            PhysicalDevice.ContainsExtension(enabledExtensions, DeviceExtensionNames.KhrShaderAbort);
         // The span is consumed here and never stored — a ReadOnlySpan field
         // in a class would not compile, which is the enforcement.
         Functions      = new DeviceFunctionTable(handle, enabledExtensions);
@@ -244,12 +260,16 @@ public sealed unsafe class Device : IDisposable
     /// (VUID-vkGetDeviceFaultInfoEXT-device-07336,
     /// VUID-vkGetDeviceFaultDebugInfoKHR-device-12383), and the KHR reports
     /// command drains its queue.</para>
-    /// <para><b>Repeat calls.</b> EXT returns the same report again. KHR
-    /// returns no further entries (each is drained exactly once) but the same
-    /// <see cref="DeviceFaultReport.VendorBinary"/>. Nothing is cached.</para>
+    /// <para><b>Repeat calls.</b> EXT and KHR both return the same report
+    /// again. KHR's <see cref="DeviceFaultReport.Entries"/> is the device's
+    /// fault log (entries drained by earlier <see cref="TryPollDeviceFaults"/>
+    /// calls, then the entries this read drained), capped at 1024; nothing new
+    /// is drained after the first post-loss read.</para>
     /// <para><b>Thread safety.</b> Wrapper callers are serialized by a lock.
     /// Calling the raw <c>vkGetDeviceFaultReportsKHR</c> elsewhere in the
-    /// process splits the KHR queue with this read.</para>
+    /// process splits the KHR queue with this read. A read waits for an
+    /// in-flight <see cref="TryPollDeviceFaults"/>, at most that poll's
+    /// timeout.</para>
     /// <para><b>Multi-device caveat.</b> <see cref="IsLost"/> is over-broad in
     /// a multi-device process (a context-free loss marks every live device),
     /// so the EXT info call and the KHR debug-info call can then reach a
@@ -257,23 +277,13 @@ public sealed unsafe class Device : IDisposable
     /// process.</para>
     /// <para><b>Allocation.</b> Allocates once (arrays, strings, the report),
     /// after loss; not a per-frame path.</para>
-    /// <para>Healthy-device KHR polling (<c>deviceFaultReportMasked</c>) is not
-    /// wrapped.</para>
+    /// <para>Healthy-device KHR polling: see
+    /// <see cref="TryPollDeviceFaults"/>.</para>
     /// </remarks>
     public bool TryGetDeviceFault(TimeSpan timeout, [NotNullWhen(true)] out DeviceFaultReport? report)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        // Rejects Timeout.InfiniteTimeSpan too: ToVulkanTimeout maps negative
-        // spans to "wait forever", the post-loss hang #120 removed.
-        ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
-        // ToVulkanTimeout saturates to UINT64_MAX — Vulkan's "wait forever" —
-        // for any span whose nanosecond count overflows (about 292 years and
-        // up, TimeSpan.MaxValue included). Refuse it for the same reason.
-        ulong timeoutNs = timeout.ToVulkanTimeout();
-        if (timeoutNs == ulong.MaxValue)
-            throw new ArgumentOutOfRangeException(nameof(timeout), timeout,
-                "The timeout converts to UINT64_MAX nanoseconds, which Vulkan treats as an infinite wait; " +
-                "an unbounded wait after device loss is refused. Pass a finite span.");
+        ulong timeoutNs = ToFiniteFaultTimeout(timeout, nameof(timeout));
         report = null;
         var eps = FaultEntryPoints;
         if (eps.Api == DeviceFaultApi.None) return false;
@@ -281,11 +291,142 @@ public sealed unsafe class Device : IDisposable
         // also keeps the draining KHR reports call off healthy devices.
         if (!IsLost) return false;
         lock (_faultReadLock)
-            return DeviceFaultReader.TryRead(in eps, Handle, timeoutNs, out report);
+        {
+            // Dispose takes this lock too: a read that waited for it must not
+            // call into a destroyed device.
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return DeviceFaultReader.TryRead(in eps, Handle, timeoutNs, _faultLog, out report);
+        }
     }
 
-    private DeviceFaultEntryPoints FaultEntryPoints =>
-        new(Functions.GetDeviceFaultInfo, Functions.GetDeviceFaultReports, Functions.GetDeviceFaultDebugInfo);
+    /// <summary>
+    /// Drains fault reports from a <b>healthy</b> device through
+    /// <c>vkGetDeviceFaultReportsKHR</c>: faults the driver recovered from
+    /// without losing the device (masked faults).
+    /// </summary>
+    /// <param name="timeout">Bounds both the wait for another in-flight fault
+    /// read and the driver's wait for a first report; every later driver call
+    /// passes 0. Must be non-negative and finite, as for
+    /// <see cref="TryGetDeviceFault(TimeSpan, out DeviceFaultReport)"/>.
+    /// <see cref="TimeSpan.Zero"/> is the non-blocking per-frame form. The
+    /// lock wait is additionally capped at <see cref="int.MaxValue"/> ms
+    /// (about 24.8 days), the limit of <see cref="Monitor"/>.</param>
+    /// <param name="entries">The drained entries. Never null; empty when the
+    /// method returns <see langword="false"/>.</param>
+    /// <returns><see langword="true"/> when at least one entry was
+    /// drained.</returns>
+    /// <exception cref="ObjectDisposedException">The device was disposed.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeout"/>
+    /// is negative, <see cref="Timeout.InfiniteTimeSpan"/>, or so large that it
+    /// converts to <c>UINT64_MAX</c> nanoseconds, as for
+    /// <see cref="TryGetDeviceFault(TimeSpan, out DeviceFaultReport)"/>.</exception>
+    /// <remarks>
+    /// <para><b>Feature.</b> Masked reports need the
+    /// <c>deviceFaultReportMasked</c> feature. Enable it from
+    /// <see cref="DeviceDescription.ConfigureFeatures"/> after
+    /// <see cref="PhysicalDevice.TryGetFeatures{T}(Utf8Name, out T)"/>
+    /// (<c>TryGetFeatures&lt;VkPhysicalDeviceFaultFeaturesKHR&gt;</c>) reports
+    /// it. Without it a poll only ever times out. The wrapper does not check
+    /// the feature.</para>
+    /// <para><b>Requires</b> <c>VK_KHR_device_fault</c>. Returns
+    /// <see langword="false"/> without a driver call on an EXT-only device
+    /// (<c>VK_EXT_device_fault</c> is lost-only).</para>
+    /// <para><b>After loss</b> it returns <see langword="false"/> without a
+    /// driver call; use
+    /// <see cref="TryGetDeviceFault(TimeSpan, out DeviceFaultReport)"/>. A
+    /// background loop that sees <see langword="false"/> with
+    /// <see cref="IsLost"/> set should exit, because the queue now belongs to
+    /// the crash read. In a multi-device process <see cref="IsLost"/> is
+    /// over-broad (see its remarks), so a healthy sibling stops polling
+    /// too.</para>
+    /// <para><b>One queue.</b> Every drained entry is also kept in the
+    /// device's fault log, so a later
+    /// <see cref="TryGetDeviceFault(TimeSpan, out DeviceFaultReport)"/>
+    /// reports it too, including a device-lost entry a background poller
+    /// drained before the loss was observed.</para>
+    /// <para><b>Shared instances.</b> Entries are shared with later reports;
+    /// treat their arrays as read-only.</para>
+    /// <para><b>Threading.</b> Fault reads are serialized. A contended poll
+    /// returns <see langword="false"/> rather than wait past
+    /// <paramref name="timeout"/>.
+    /// <see cref="TryGetDeviceFault(TimeSpan, out DeviceFaultReport)"/> and
+    /// <see cref="Dispose"/> wait for an in-flight poll. Keep
+    /// background-poller timeouts at or below
+    /// <see cref="DefaultDeviceFaultTimeout"/>, and join the poller before
+    /// <see cref="Dispose"/>.</para>
+    /// <para><b>Allocation.</b> A poll that finds nothing allocates
+    /// nothing.</para>
+    /// </remarks>
+    public bool TryPollDeviceFaults(TimeSpan timeout, out DeviceFaultEntry[] entries)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ulong timeoutNs = ToFiniteFaultTimeout(timeout, nameof(timeout));
+        entries = [];
+        var fn = Functions.GetDeviceFaultReports;
+        if (fn == null) return false;   // no VK_KHR_device_fault; EXT is lost-only
+        if (IsLost) return false;       // the crash read owns the queue after loss; #120
+        // Monitor.TryEnter(object, TimeSpan) throws above int.MaxValue ms
+        // (about 24.8 days), which ToFiniteFaultTimeout accepts: clamp the
+        // lock wait only.
+        TimeSpan lockWait = timeout.TotalMilliseconds > int.MaxValue
+            ? TimeSpan.FromMilliseconds(int.MaxValue) : timeout;
+        bool lockTaken = false;
+        try
+        {
+            Monitor.TryEnter(_faultReadLock, lockWait, ref lockTaken);
+            if (!lockTaken) return false;
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (IsLost) return false;
+            // The cap flag is ignored on purpose: the remainder stays queued
+            // for the next poll.
+            VkResult r = DeviceFaultReader.ReadKhrEntries(fn, Handle, timeoutNs, out entries, out _);
+            _faultLog.Append(entries);
+            if ((int)r < 0)
+            {
+                if (entries.Length == 0)
+                    AhjoDiagnostics.Write(DiagnosticSeverity.Warning, "Device",
+                        $"Device.TryPollDeviceFaults: vkGetDeviceFaultReportsKHR returned {r}; no fault entries were drained.");
+                else
+                    AhjoDiagnostics.Write(DiagnosticSeverity.Warning, "Device",
+                        $"Device.TryPollDeviceFaults: vkGetDeviceFaultReportsKHR returned {r} after {entries.Length} entries were drained; returning them.");
+            }
+            return entries.Length > 0;
+        }
+        finally
+        {
+            if (lockTaken) Monitor.Exit(_faultReadLock);
+        }
+    }
+
+    /// <summary>
+    /// Validates a device-fault timeout and returns its nanoseconds. Throws
+    /// <see cref="ArgumentOutOfRangeException"/> for a negative span
+    /// (<see cref="Timeout.InfiniteTimeSpan"/> included) and for a span that
+    /// saturates to <c>UINT64_MAX</c>.
+    /// </summary>
+    private static ulong ToFiniteFaultTimeout(TimeSpan timeout, string paramName)
+    {
+        // Rejects Timeout.InfiniteTimeSpan too: ToVulkanTimeout maps negative
+        // spans to "wait forever", the post-loss hang #120 removed.
+        ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero, paramName);
+        // ToVulkanTimeout saturates to UINT64_MAX — Vulkan's "wait forever" —
+        // for any span whose nanosecond count overflows (about 292 years and
+        // up, TimeSpan.MaxValue included). Refuse it for the same reason.
+        ulong timeoutNs = timeout.ToVulkanTimeout();
+        if (timeoutNs == ulong.MaxValue)
+            throw new ArgumentOutOfRangeException(paramName, timeout,
+                "The timeout converts to UINT64_MAX nanoseconds, which Vulkan treats as an infinite wait; " +
+                "an unbounded wait on the device-fault path is refused. Pass a finite span.");
+        return timeoutNs;
+    }
+
+    internal DeviceFaultEntryPoints FaultEntryPoints =>
+        new(Functions.GetDeviceFaultInfo, Functions.GetDeviceFaultReports, Functions.GetDeviceFaultDebugInfo,
+            shaderAbortMessages: ShaderAbortExtensionEnabled);
+
+    // Test seam (InternalsVisibleTo): lets DeviceFaultTests hold the fault
+    // lock from another thread.
+    internal object FaultReadLockForTests => _faultReadLock;
 
     /// <summary>
     /// The device's VMA allocator. Created on first access and disposed
@@ -1174,43 +1315,51 @@ public sealed unsafe class Device : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
-        try
+        // Waits for an in-flight fault poll or read (bounded by its finite
+        // timeout) so vkDestroyDevice never runs under a thread inside
+        // vkGetDeviceFaultReportsKHR. Safe from the finalizer: an unreachable
+        // Device has no poller.
+        lock (_faultReadLock)
         {
-            if (Handle != null)
+            if (_disposed) return;
+            try
             {
-                // Best-effort wait-idle before destroy; Dispose mustn't throw on
-                // the success path. A failing wait-idle (lost device, OOM)
-                // already implies the device is going away — destroy still runs.
-                // Surface the VkResult through the sink so a shutdown after a
-                // crash doesn't look like a clean exit in the logs.
-                //
-                // Deliberately unconditional even when IsLost: on a truly lost
-                // device vkDeviceWaitIdle returns DEVICE_LOST in bounded time,
-                // and on a device conservatively marked by the context-free
-                // loss registry (multi-device process) it actually drains —
-                // skipping it would turn the registry's conservatism into a
-                // destroy-while-pending UB.
-                VkResult idleResult = Vk.vkDeviceWaitIdle(Handle);
-                if (idleResult != VkResult.VK_SUCCESS)
-                    AhjoDiagnostics.Write(DiagnosticSeverity.Warning, "Device",
-                        $"Device.Dispose: vkDeviceWaitIdle returned {idleResult}; destroy proceeds anyway.");
-                // Allocator must die before the VkDevice — vmaDestroyAllocator
-                // calls into the device's function table.
-                if (_allocatorCreated) _allocator.Dispose();
-                Vk.vkDestroyDevice(Handle, null);
+                if (Handle != null)
+                {
+                    // Best-effort wait-idle before destroy; Dispose mustn't throw on
+                    // the success path. A failing wait-idle (lost device, OOM)
+                    // already implies the device is going away — destroy still runs.
+                    // Surface the VkResult through the sink so a shutdown after a
+                    // crash doesn't look like a clean exit in the logs.
+                    //
+                    // Deliberately unconditional even when IsLost: on a truly lost
+                    // device vkDeviceWaitIdle returns DEVICE_LOST in bounded time,
+                    // and on a device conservatively marked by the context-free
+                    // loss registry (multi-device process) it actually drains —
+                    // skipping it would turn the registry's conservatism into a
+                    // destroy-while-pending UB.
+                    VkResult idleResult = Vk.vkDeviceWaitIdle(Handle);
+                    if (idleResult != VkResult.VK_SUCCESS)
+                        AhjoDiagnostics.Write(DiagnosticSeverity.Warning, "Device",
+                            $"Device.Dispose: vkDeviceWaitIdle returned {idleResult}; destroy proceeds anyway.");
+                    // Allocator must die before the VkDevice — vmaDestroyAllocator
+                    // calls into the device's function table.
+                    if (_allocatorCreated) _allocator.Dispose();
+                    Vk.vkDestroyDevice(Handle, null);
+                }
             }
-        }
-        finally
-        {
-            // Set the flag and suppress the finalizer in finally so a throw
-            // out of destroy can't leave the handle alive AND have the
-            // finalizer re-enter Dispose to destroy it a second time
-            // (vkDestroyDevice on an already-destroyed handle is UB). The
-            // tradeoff is that a destroy failure leaks the handle for the
-            // rest of the process — preferable to UB.
-            _disposed = true;
-            Unregister();
-            GC.SuppressFinalize(this);
+            finally
+            {
+                // Set the flag and suppress the finalizer in finally so a throw
+                // out of destroy can't leave the handle alive AND have the
+                // finalizer re-enter Dispose to destroy it a second time
+                // (vkDestroyDevice on an already-destroyed handle is UB). The
+                // tradeoff is that a destroy failure leaks the handle for the
+                // rest of the process — preferable to UB.
+                _disposed = true;
+                Unregister();
+                GC.SuppressFinalize(this);
+            }
         }
     }
 

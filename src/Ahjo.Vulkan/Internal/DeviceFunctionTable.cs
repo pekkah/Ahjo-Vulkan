@@ -54,8 +54,9 @@ namespace Ahjo.Vulkan;
 /// <c>VK_EXT_device_fault</c> and <c>VK_KHR_device_fault</c> are the third
 /// and fourth blocks (issue #242). Two of their three pointers (EXT info, KHR
 /// debug-info) are legal only on a lost device; KHR reports is legal at any
-/// time but destructive. The wrapper calls all three only after
-/// <see cref="Device.IsLost"/>.</description></item>
+/// time but destructive. EXT info and KHR debug-info are called only after
+/// <see cref="Device.IsLost"/>; KHR reports is also called on a healthy
+/// device by <see cref="Device.TryPollDeviceFaults"/> (#244).</description></item>
 /// </list>
 /// All pointers are resolved at <see cref="Device"/> construction. Cold-path
 /// and instance-level calls keep using the static <c>[DllImport]</c>s on
@@ -573,7 +574,8 @@ internal readonly unsafe struct DeviceFunctionTable
 
         // VK_KHR_device_fault: the reports query (legal at any time, but
         // destructive) and the debug-info query (legal only on a lost device).
-        // Device.TryGetDeviceFault calls both only after IsLost.
+        // Debug-info is called only after IsLost; reports is also called on a
+        // healthy device by Device.TryPollDeviceFaults (#244).
         if (IsExtensionEnabled(enabledExtensions, DeviceExtensionNames.KhrDeviceFault))
         {
             GetDeviceFaultReports =

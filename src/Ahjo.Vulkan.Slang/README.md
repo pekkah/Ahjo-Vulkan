@@ -688,6 +688,57 @@ Reflection reports the matrix; only the mapping to Vulkan has to give up on it.
 Both are cases where a plausible guess produces a pipeline that builds and then
 mis-binds, which is exactly the class of bug reflection exists to remove.
 
+## Decoding shader-abort messages
+
+A Slang `abort(format, args…)` emits `OpAbortKHR`. When it executes, the device
+is lost, and the message comes back after the loss in
+`DeviceFaultReport.ShaderAbortMessages` (from `Device.TryGetDeviceFault`) — as
+raw payloads, because Vulkan performs no formatting and the layout belongs to
+the shading language. `SlangAbortMessage` decodes Slang's.
+
+**Enabling it.** On the device, follow the recipe on
+`VulkanExtensions.KhrShaderAbort`: enable `KhrDeviceFault`, `KhrShaderAbort` and
+its dependency `KhrShaderConstantData`, and push the `deviceFault` and
+`shaderAbort` features after checking them with `PhysicalDevice.TryGetFeatures`.
+On the session, declare the capability so the default `spirv_1_5` profile is not
+implicitly upgraded with a warning:
+
+```csharp
+using var session = compiler.CreateSession(new SlangSessionDescription
+{
+    Capabilities = [Utf8Name.FromLiteral("spvAbort"u8)],
+});
+```
+
+**In the crash handler**, one call per payload:
+
+```csharp
+if (device.TryGetDeviceFault(out DeviceFaultReport? report))
+{
+    foreach (byte[] p in report.ShaderAbortMessages)
+        log(SlangAbortMessage.Describe(p));   // "bad value: 42 at 0"
+}
+```
+
+`Describe` never throws and never returns null: a payload it cannot decode comes
+back as the format plus the reason, or as a hex dump when it is not a Slang abort
+message at all. `TryDecode` gives structured access — `Format`, `Arguments`
+(kind, payload offset and raw bits of each scalar) and `Text`.
+
+**Specifiers.** C `printf` grammar with `d i u x X f F e E g G` and `%%`; flags
+`- + space 0 #`; decimal width and precision; length `hh h l ll`; and a GLSL-style
+vector prefix `v2`–`v4` before or after the length (`%v3f`, `%llv2u`). The
+payload carries no types, so widths come from the format, with two deliberate
+departures from C: **`%hf` is a 16-bit half** and **`%lf` is a 64-bit double**
+(`%f` is the shader's 32-bit `float`). `%s` is unsupported because Slang refuses
+string arguments.
+
+**The layout is not a Slang contract.** It is what the pinned Slang emits: the
+format's UTF-8 bytes and a NUL, padded to 4 bytes, then each argument in scalar
+layout. `SlangAbortLayoutTests` pins it by compiling real abort shaders and
+comparing the decoder's offsets with the emitted `OpAbortKHR` message type, so a
+Slang bump that changes it fails the suite instead of misdecoding.
+
 ## Lifetimes
 
 `SlangProgram.Spirv(i)` is a view over Slang-owned native memory the program

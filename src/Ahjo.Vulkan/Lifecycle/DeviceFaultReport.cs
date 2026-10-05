@@ -31,10 +31,30 @@ public sealed class DeviceFaultReport
     public byte[] VendorBinary { get; init; } = [];
 
     /// <summary>
+    /// Payloads of <c>OpAbortKHR</c> instructions, in driver order; the first
+    /// is the first abort executed. Never null; empty on the EXT path, when
+    /// <c>VK_KHR_shader_abort</c> was not enabled, or when no shader aborted.
+    /// </summary>
+    /// <remarks>
+    /// <para>Each payload is the shader's message type laid out verbatim.
+    /// Vulkan performs no formatting, so the shading language defines the
+    /// layout. The wrapper parses only the spec-defined (size, payload)
+    /// framing around the payloads.</para>
+    /// <para>Slang v2026.19's <c>abort(format, args…)</c> was observed to emit
+    /// a NUL-terminated UTF-8 format string padded to a 4-byte boundary,
+    /// followed by each scalar argument in scalar layout. That is an
+    /// observation, not a contract. <c>Ahjo.Vulkan.Slang.SlangAbortMessage</c>
+    /// decodes such payloads.</para>
+    /// </remarks>
+    public byte[][] ShaderAbortMessages { get; init; } = [];
+
+    /// <summary>
     /// <see langword="true"/> when the driver had more than was returned: an
     /// EXT or KHR debug-info <c>VK_INCOMPLETE</c>, a KHR drain cap reached
-    /// while more entries were queued, or a KHR drain round that failed after
-    /// some entries had already been drained.
+    /// while more entries were queued, a KHR drain round that failed after
+    /// some entries had already been drained, a fault log that dropped its
+    /// oldest entries, or a shader-abort message buffer that was capped,
+    /// truncated, or malformed.
     /// </summary>
     public bool IsIncomplete { get; init; }
 }
