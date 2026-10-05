@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -59,6 +60,11 @@ public readonly unsafe struct PipelineCache : IVulkanHandle<PipelineCache>, IDis
     /// the second fills it. Cache size grows with the number of
     /// pipelines built; <see cref="ArrayPool{Byte}"/> covers the common
     /// case (a few KB to a few MB) without churning the LOH.
+    /// <para>Concurrent saves of one path resolve to last-writer-wins. On
+    /// Windows, replacing the file is retried for up to 2 seconds while
+    /// another handle holds it (another process saving, a reader, an
+    /// antivirus scan); after that the original exception propagates and
+    /// the previously saved file is left intact.</para>
     /// </remarks>
     public void Save(string path)
     {
@@ -145,15 +151,31 @@ public readonly unsafe struct PipelineCache : IVulkanHandle<PipelineCache>, IDis
         Vk.vkDestroyPipelineCache(DeviceHandle, Handle, null);
     }
 
+    private const int RenameBudgetMilliseconds = 2_000;
+    private const int MaxRenameBackoffMilliseconds = 50;
+    private const int ErrorSharingViolationHResult = unchecked((int)0x80070020);
+
+    // Serializes in-process renames only, and is never held across a backoff
+    // sleep (#237). A process-wide gate unrelated to any handle — not a
+    // handle-keyed side table of the kind #118 removed.
+    private static readonly Lock RenameGate = new();
+
     // Test seam (InternalsVisibleTo): the atomic write is the wrapper's half
     // of #230; a driverless concurrency test drives it directly since Save
-    // needs a live VkPipelineCache handle.
+    // needs a live VkPipelineCache handle. The three-argument overload exists
+    // so tests can drive the rename retry budget without waiting out the
+    // default.
     internal static void WriteAtomic(string path, ReadOnlySpan<byte> bytes)
+        => WriteAtomic(path, bytes, TimeSpan.FromMilliseconds(RenameBudgetMilliseconds));
+
+    internal static void WriteAtomic(string path, ReadOnlySpan<byte> bytes, TimeSpan renameBudget)
     {
         // Write to a per-writer temp sibling, then rename onto the target.
         // The temp name is unique per process + thread, so two concurrent
         // savers of one cache path no longer collide on a fixed sibling —
         // FileShare.None turned the second into an IOException (#230).
+        // On failure the destination is untouched, so the previously
+        // published cache survives.
         string tmp = $"{path}.{Environment.ProcessId}-{Environment.CurrentManagedThreadId}.tmp";
         try
         {
@@ -161,7 +183,7 @@ public readonly unsafe struct PipelineCache : IVulkanHandle<PipelineCache>, IDis
             {
                 if (!bytes.IsEmpty) fs.Write(bytes);
             }
-            PublishByRename(tmp, path);
+            PublishByRename(tmp, path, renameBudget);
         }
         catch
         {
@@ -175,34 +197,60 @@ public readonly unsafe struct PipelineCache : IVulkanHandle<PipelineCache>, IDis
         }
     }
 
-    private static void PublishByRename(string tmp, string path)
+    private static void PublishByRename(string tmp, string path, TimeSpan budget)
     {
         // File.Move(overwrite: true) is the atomic publish step — a
         // MoveFileEx(MOVEFILE_REPLACE_EXISTING) on Windows, rename(2) on
-        // POSIX. Each concurrent saver now owns a distinct temp file (#230),
-        // but on Windows the replace opens the destination briefly, so two
-        // renames onto the same target can still collide
-        // (ERROR_SHARING_VIOLATION / ERROR_ACCESS_DENIED, surfaced as
-        // IOException / UnauthorizedAccessException). That window is
-        // sub-millisecond; a few bounded retries turn the race back into
-        // last-writer-wins rather than a throw. POSIX rename has no such
-        // window and returns on the first attempt.
-        const int maxAttempts = 10;
+        // POSIX. On Windows the replace fails while ANY handle is open on the
+        // destination, whatever its share mode (UnauthorizedAccessException),
+        // or while the temp is held (IOException, ERROR_SHARING_VIOLATION).
+        // POSIX rename(2) has neither failure mode, so nothing is retried
+        // there.
+        //
+        // In-process renames are serialized by RenameGate; that removed every
+        // retry in an 8-writer probe (#237). The time budget covers what a
+        // lock cannot see: other processes, in-process readers
+        // (Device.LoadOrCreatePipelineCache opens the file FileShare.Read),
+        // and scanners. The budget is time-based because Thread.Sleep's real
+        // duration depends on the OS timer tick, so an attempt count does not
+        // determine a duration. A permanent ERROR_ACCESS_DENIED (read-only
+        // file, a directory at the path) cannot be told apart from a
+        // transient one and waits out the budget before throwing.
+        //
+        // The gate covers only File.Move; the sleep runs after the lock
+        // statement has released it. The exception filters run before that
+        // release, so ShouldRetryRename must stay a pure check.
+        long start = Stopwatch.GetTimestamp();
         for (int attempt = 1; ; attempt++)
         {
             try
             {
-                File.Move(tmp, path, overwrite: true);
+                lock (RenameGate)
+                    File.Move(tmp, path, overwrite: true);
                 return;
             }
-            catch (IOException) when (attempt < maxAttempts)
-            {
-                Thread.Sleep(attempt); // brief, growing backoff (1..9 ms).
-            }
-            catch (UnauthorizedAccessException) when (attempt < maxAttempts)
-            {
-                Thread.Sleep(attempt);
-            }
+            catch (UnauthorizedAccessException e) when (ShouldRetryRename(e, start, budget)) { }
+            catch (IOException e) when (ShouldRetryRename(e, start, budget)) { }
+            Thread.Sleep(RenameBackoffMilliseconds(attempt, start, budget));
         }
+    }
+
+    internal static bool IsTransientReplaceFailure(Exception e)
+        => OperatingSystem.IsWindows()
+           && (e is UnauthorizedAccessException
+               || (e is IOException && e.HResult == ErrorSharingViolationHResult));
+
+    private static bool ShouldRetryRename(Exception e, long start, TimeSpan budget)
+        => IsTransientReplaceFailure(e) && Stopwatch.GetElapsedTime(start) < budget;
+
+    private static int RenameBackoffMilliseconds(int attempt, long start, TimeSpan budget)
+    {
+        // Doubling backoff 1, 2, 4, …, capped at MaxRenameBackoffMilliseconds;
+        // the shift count is capped first so it cannot overflow.
+        int delay = Math.Min(1 << Math.Min(attempt - 1, 6), MaxRenameBackoffMilliseconds);
+        double remaining = (budget - Stopwatch.GetElapsedTime(start)).TotalMilliseconds;
+        if (remaining <= 0)
+            return 0;
+        return remaining >= delay ? delay : (int)Math.Ceiling(remaining);
     }
 }
