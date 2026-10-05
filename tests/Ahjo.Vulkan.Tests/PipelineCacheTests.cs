@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using Ahjo.Vulkan.Native;
@@ -161,6 +162,9 @@ public sealed class PipelineCacheTests
         // writers serialize on the rename (last-writer-wins) instead. This is
         // the wrapper's half and needs no Vulkan device — it drives the atomic
         // write directly.
+        // It also guards #237, where the count-bound rename retry ran out under
+        // this contention; it is deterministic in-process because RenameGate
+        // serializes the renames.
         string path = Path.Combine(Path.GetTempPath(), $"ahjo-cache-{Guid.NewGuid():N}.bin");
         string dir  = Path.GetDirectoryName(path)!;
         string name = Path.GetFileName(path);
@@ -213,6 +217,127 @@ public sealed class PipelineCacheTests
             foreach (var stray in Directory.GetFiles(dir, name + ".*.tmp"))
                 File.Delete(stray);
         }
+    }
+
+    [Fact]
+    public void WriteAtomic_DestinationHeldThenReleased_PublishesAfterRelease()
+    {
+        // #237: a handle on the destination (a reader, a scanner, another
+        // process) blocks the Windows replace for as long as it is open. The
+        // time-bound retry must outlast the hold and publish once it ends.
+        TestGate.RequirePlatform(OperatingSystem.IsWindows(),
+            "MoveFileEx refuses to replace an open destination; POSIX rename(2) does not, so there is nothing to wait out.");
+
+        string path = Path.Combine(Path.GetTempPath(), $"ahjo-cache-{Guid.NewGuid():N}.bin");
+        string dir  = Path.GetDirectoryName(path)!;
+        string name = Path.GetFileName(path);
+        FileStream? holder = null;
+        Thread? worker = null;
+        try
+        {
+            byte[] old = new byte[16];
+            Array.Fill(old, (byte)1);
+            byte[] @new = new byte[16];
+            Array.Fill(@new, (byte)2);
+            File.WriteAllBytes(path, old);
+
+            holder = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+            Exception? failure = null;
+            worker = new Thread(() =>
+            {
+                try
+                {
+                    PipelineCache.WriteAtomic(path, @new, TimeSpan.FromSeconds(10));
+                }
+                catch (Exception e)
+                {
+                    failure = e;
+                }
+            });
+            worker.Start();
+
+            // The rename cannot succeed while the holder is open and a 10 s
+            // budget cannot have run out, so the worker must still be
+            // retrying — proof the retry path ran, not a lucky first attempt.
+            Thread.Sleep(200);
+            Assert.True(worker.IsAlive);
+
+            holder.Dispose();
+            Assert.True(worker.Join(TimeSpan.FromSeconds(15)));
+            Assert.Null(failure);
+            Assert.Equal(@new, File.ReadAllBytes(path));
+            Assert.Empty(Directory.GetFiles(dir, name + ".*.tmp"));
+        }
+        finally
+        {
+            // Release the hold and let the worker finish before cleaning up, so
+            // a late rename cannot land after the delete and leave a stray file.
+            holder?.Dispose();
+            worker?.Join(TimeSpan.FromSeconds(15));
+            if (File.Exists(path)) File.Delete(path);
+            foreach (var stray in Directory.GetFiles(dir, name + ".*.tmp"))
+                File.Delete(stray);
+        }
+    }
+
+    [Fact]
+    public void WriteAtomic_DestinationHeldPastBudget_ThrowsAndKeepsPreviousCache()
+    {
+        // #237: a hold that outlasts the budget surfaces the original
+        // exception, and the failed save leaves the previously published cache
+        // byte-for-byte intact with no temp sibling behind.
+        TestGate.RequirePlatform(OperatingSystem.IsWindows(),
+            "MoveFileEx refuses to replace an open destination; POSIX rename(2) does not, so there is nothing to wait out.");
+
+        string path = Path.Combine(Path.GetTempPath(), $"ahjo-cache-{Guid.NewGuid():N}.bin");
+        string dir  = Path.GetDirectoryName(path)!;
+        string name = Path.GetFileName(path);
+        FileStream? holder = null;
+        try
+        {
+            byte[] old = new byte[16];
+            Array.Fill(old, (byte)1);
+            byte[] @new = new byte[16];
+            Array.Fill(@new, (byte)2);
+            File.WriteAllBytes(path, old);
+
+            holder = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+            long t0 = Stopwatch.GetTimestamp();
+            Assert.Throws<UnauthorizedAccessException>(
+                () => PipelineCache.WriteAtomic(path, @new, TimeSpan.FromMilliseconds(100)));
+            Assert.True(Stopwatch.GetElapsedTime(t0) >= TimeSpan.FromMilliseconds(100));
+
+            holder.Dispose();
+            Assert.Equal(old, File.ReadAllBytes(path));
+            Assert.Empty(Directory.GetFiles(dir, name + ".*.tmp"));
+        }
+        finally
+        {
+            holder?.Dispose();
+            if (File.Exists(path)) File.Delete(path);
+            foreach (var stray in Directory.GetFiles(dir, name + ".*.tmp"))
+                File.Delete(stray);
+        }
+    }
+
+    [Fact]
+    public void IsTransientReplaceFailure_RetriesOnlySharingFailuresOnWindows()
+    {
+        bool windows = OperatingSystem.IsWindows();
+
+        // Transient on Windows only: a held destination, a held temp.
+        Assert.Equal(windows, PipelineCache.IsTransientReplaceFailure(new UnauthorizedAccessException()));
+        Assert.Equal(windows, PipelineCache.IsTransientReplaceFailure(new IOException("x", unchecked((int)0x80070020))));
+
+        // Deterministic everywhere: waiting fixes none of these.
+        Assert.False(PipelineCache.IsTransientReplaceFailure(new FileNotFoundException()));
+        Assert.False(PipelineCache.IsTransientReplaceFailure(new DirectoryNotFoundException()));
+        Assert.False(PipelineCache.IsTransientReplaceFailure(new IOException("x", unchecked((int)0x80070070)))); // disk full
+        Assert.False(PipelineCache.IsTransientReplaceFailure(new IOException("x", unchecked((int)0x80070021)))); // lock violation
+        Assert.False(PipelineCache.IsTransientReplaceFailure(new IOException()));
+        Assert.False(PipelineCache.IsTransientReplaceFailure(new InvalidOperationException()));
     }
 
     private static Device CreateGraphicsDevice(Instance instance)
