@@ -128,6 +128,9 @@ jobs:
       && (needs.build-ngx.result == 'success' || needs.build-ngx.result == 'skipped')
     permissions:
       contents: write
+      # Lets this job mint the GitHub OIDC token that NuGet/login trades
+      # for a short-lived nuget.org API key (trusted publishing).
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -386,11 +389,27 @@ jobs:
       # idempotent against an already-published version.
       # `dotnet nuget push *.nupkg` also pushes matching .snupkg files
       # in the same directory automatically.
+      #
+      # No long-lived API key exists. NuGet/login exchanges this run's
+      # GitHub OIDC token for a nuget.org key that lives one hour, which
+      # is why it sits here rather than at the top of the job — the native
+      # matrices and eight packs must not eat into that hour. nuget.org
+      # only honours the exchange for the trusted-publishing policy on the
+      # `pekkah` account, which names this repo and this file: renaming
+      # publish.yml, or moving the push into another workflow, breaks
+      # publishing until the policy is updated to match.
+      - name: NuGet login (OIDC → temporary API key)
+        if: github.event_name != 'workflow_dispatch' || inputs.release == true
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: pekkah
+
       - name: Push to NuGet.org
         if: github.event_name != 'workflow_dispatch' || inputs.release == true
         run: >-
           dotnet nuget push "${{ github.workspace }}/artifacts/*.nupkg"
-          --api-key ${{ secrets.NUGET_KEY }}
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
 
