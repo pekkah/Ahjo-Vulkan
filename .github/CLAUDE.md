@@ -83,4 +83,4 @@ Only `win-x64` and `linux-x64` exist, and that is not the usual "add the lane fi
 
 ## Publishing
 
-`publish.yml` ships preview packages on `push:main` (MinVer-derived pre-release version) and stable packages on `release:published` events. Tag with `v0.x.y` → create a GitHub release → all seven packages publish under that single tag. The publish workflow can override MinVer via `MinVerVersionOverride`.
+`publish.yml` ships preview packages on `push:main` (MinVer-derived pre-release version) and stable packages on `release:published` events. Tag with `v0.x.y` → create a GitHub release → every package publishes under that single tag. The publish workflow can override MinVer via `MinVerVersionOverride`.

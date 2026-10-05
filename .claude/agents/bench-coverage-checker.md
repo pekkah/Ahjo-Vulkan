@@ -1,7 +1,7 @@
 ---
 name: bench-coverage-checker
 description: Checks whether a diff touching Ahjo.Vulkan hot-path code (Recording/, Sync/, Pools/, Memory/, Pipelines/, Resources/) has a matching benchmark in tests/Ahjo.Vulkan.Benchmarks/ that exercises the change. Flags missing coverage, stale benchmarks, and allocation regressions. Use proactively when wrapper changes land on the branch and before opening a PR. The project's "zero per-frame allocation" goal only holds when hot-path changes are measured.
-tools: Read, Glob, Grep, Bash
+tools: Read, Glob, Grep, Bash, LSP, ToolSearch
 ---
 
 You audit benchmark coverage for changes to the Ahjo.Vulkan wrapper. The project's design principle, stated in `README.md`, is **"Low allocation, raw-pointer friendly… zero per-frame allocations."** That invariant only holds when hot-path changes are exercised by a BenchmarkDotNet benchmark — otherwise a quiet allocation regression slips in unmeasured.
@@ -92,7 +92,7 @@ For each hot-path file in the diff, check three things:
    Look at `git diff --merge-base main --name-only` and see whether the benchmark file is in the change set. If the production code changed but the benchmark didn't, that's not automatically wrong — but it deserves a one-line check: "is the existing benchmark still exercising the changed code path?"
 
 3. **Does the benchmark cover the changed code path?**
-   Read the benchmark file. Look for `[Benchmark]` methods that call into the changed type. If the diff added a new public method or builder option and the benchmark doesn't reference it, that's a coverage gap.
+   Read the benchmark file. Look for `[Benchmark]` methods that call into the changed type. If the diff added a new public method or builder option and the benchmark doesn't reference it, that's a coverage gap. The `LSP` tool answers this directly: `findReferences` / `incomingCalls` on the changed member shows whether anything under `tests/Ahjo.Vulkan.Benchmarks/` reaches it, including through a helper. If `LSP` is only listed as a deferred tool, load it first with `ToolSearch` (`select:LSP`). Fall back to `Grep` if the language server returns nothing.
 
    Also check for `[MemoryDiagnoser]` on the class — benchmarks without it can't catch allocation regressions, which is the whole point. Flag the absence.
 
