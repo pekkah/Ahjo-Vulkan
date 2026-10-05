@@ -84,3 +84,5 @@ Only `win-x64` and `linux-x64` exist, and that is not the usual "add the lane fi
 ## Publishing
 
 `publish.yml` ships preview packages on `push:main` (MinVer-derived pre-release version) and stable packages on `release:published` events. Tag with `v0.x.y` → create a GitHub release → every package publishes under that single tag. The publish workflow can override MinVer via `MinVerVersionOverride`.
+
+There is no `NUGET_KEY` secret: the push authenticates through nuget.org **trusted publishing**. `NuGet/login` trades the run's GitHub OIDC token for a one-hour API key, and nuget.org honours that only for the policy on the `pekkah` account naming `pekkah/Ahjo-Vulkan` + `publish.yml`. The policy lives on nuget.org, not in this repo — so renaming `publish.yml`, moving the push step to another workflow, or adding a ninth package ID fails at publish time, not in review. A new ID needs the policy widened first: it is scoped to new versions of the existing `Ahjo.Vulkan*` packages, so matching the glob is not enough.
