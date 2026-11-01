@@ -90,6 +90,7 @@ public unsafe ref struct GraphicsPipelineBuilder
     private float              _depthBiasConstantFactor;
     private float              _depthBiasSlopeFactor;
     private float              _depthBiasClamp;
+    private bool               _depthClampEnable;
 
     // Multisample.
     private VkSampleCountFlagBits _samples;
@@ -399,6 +400,30 @@ public unsafe ref struct GraphicsPipelineBuilder
         _depthBiasConstantFactor = constantFactor;
         _depthBiasSlopeFactor    = slopeFactor;
         _depthBiasClamp          = clamp;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets <c>depthClampEnable</c> on the rasterizer: fragments outside the
+    /// viewport's depth range have their depth clamped to it, and primitives
+    /// are no longer clipped against the near and far planes. Default-unset
+    /// behaviour leaves <c>depthClampEnable = false</c> on every pipeline that
+    /// doesn't call this — existing pipelines see no change.
+    /// </summary>
+    /// <remarks>
+    /// <para>Typical engine use: a shadow raster, so that a caster nearer the
+    /// light than the depth window still writes depth at the window's near edge
+    /// instead of being clipped and leaking light.</para>
+    /// <para>Requires the <c>depthClamp</c> device feature
+    /// (VUID-VkPipelineRasterizationStateCreateInfo-depthClampEnable-00782).
+    /// <see cref="PhysicalDevice.CreateDevice"/> enables it whenever the device
+    /// advertises it. The builder cannot check this, so refuse an unsupported
+    /// device at pick time: <see cref="PhysicalDeviceInfo.Features"/><c>.depthClamp</c>
+    /// is non-zero when it is advertised.</para>
+    /// </remarks>
+    public GraphicsPipelineBuilder WithDepthClamp(bool enable = true)
+    {
+        _depthClampEnable = enable;
         return this;
     }
 
@@ -767,7 +792,7 @@ public unsafe ref struct GraphicsPipelineBuilder
             var rasterization = new VkPipelineRasterizationStateCreateInfo
             {
                 sType                   = VkStructureType.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-                depthClampEnable        = 0,
+                depthClampEnable        = _depthClampEnable ? 1u : 0u,
                 rasterizerDiscardEnable = 0,
                 polygonMode             = _polygonMode,
                 cullMode                = (uint)_cullMode,
