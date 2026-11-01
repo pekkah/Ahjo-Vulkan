@@ -153,6 +153,14 @@ public sealed class DepthClampTests
                     in download,
                     BufferImageCopy.WholeImage(in image));
 
+                // A fence wait does not make device writes visible to the host.
+                // Without this and Invalidate below, a stale read of zeros would
+                // pass the clipped tests falsely.
+                BufferBarrier toHost = BufferBarrier.For(in download,
+                    srcStage: Stage.AllTransfer, srcAccess: Access.TransferWrite,
+                    dstStage: Stage.Host,        dstAccess: Access.HostRead);
+                rec.PipelineBarrier(default, new ReadOnlySpan<BufferBarrier>(in toHost), default);
+
                 Queue queue = device.GetQueue(family, queueIndex: 0);
                 queue.Submit2(ref rec, in fence);
             }
@@ -166,6 +174,7 @@ public sealed class DepthClampTests
             Assert.True(errors.Count == 0,
                 "Validation errors recorded: " + string.Join("; ", errors.ConvertAll(e => e.Message)));
 
+        download.Invalidate();
         ReadOnlySpan<byte> pixels = download.AsReadOnlySpan<byte>();
         return new RenderResult(
             Center: pixels[(int)((H / 2 * W + W / 2) * 4)],

@@ -415,7 +415,7 @@ public unsafe ref struct GraphicsPipelineBuilder
     /// light than the depth window still writes depth at the window's near edge
     /// instead of being clipped and leaking light.</para>
     /// <para>Requires the <c>depthClamp</c> device feature
-    /// (VUID-VkPipelineRasterizationStateCreateInfo-depthClamp-00782).
+    /// (VUID-VkPipelineRasterizationStateCreateInfo-depthClampEnable-00782).
     /// <see cref="PhysicalDevice.CreateDevice"/> enables it whenever the device
     /// advertises it. The builder cannot check this, so refuse an unsupported
     /// device at pick time: <see cref="PhysicalDeviceInfo.Features"/><c>.depthClamp</c>
