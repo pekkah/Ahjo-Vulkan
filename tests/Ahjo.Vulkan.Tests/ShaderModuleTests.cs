@@ -102,17 +102,12 @@ public sealed class ShaderModuleTests
     {
         TestGate.RequireDriver();
 
-        // The csproj's CompileShaders target invokes glslc on every
-        // Shaders/*.{vert,frag,comp} input and drops the output as
-        // Shaders/<name>.spv next to the test DLL. With ContinueOnError =
-        // WarnAndContinue the build still succeeds when glslc isn't on
-        // PATH, leaving the .spv missing — skip cleanly here so the rest
-        // of the suite still runs on hosts without the Vulkan SDK.
+        // The shared SlangShader step (tools/msbuild/Ahjo.Vulkan.SlangShaders.targets)
+        // compiles Shaders/triangle.{vert,frag} with the pinned slangc and
+        // fails the build if it cannot, so the .spv is always there.
         string shadersDir = Path.Combine(AppContext.BaseDirectory, "Shaders");
         string vertSpv    = Path.Combine(shadersDir, "triangle.vert.spv");
         string fragSpv    = Path.Combine(shadersDir, "triangle.frag.spv");
-        TestGate.RequireSpirv(vertSpv);
-        TestGate.RequireSpirv(fragSpv);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);

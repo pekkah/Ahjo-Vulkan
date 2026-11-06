@@ -7,8 +7,8 @@
 // of the first line of this file, and this file is what proves any of it was
 // right.
 //
-// Slang rather than GLSL: ray query in GLSL needs GL_EXT_ray_query and a glslc
-// invocation, and the repository is moving off glslc. Ahjo.Vulkan.Slang
+// Slang rather than GLSL: the repository's shaders are Slang, and ray query in
+// GLSL would need GL_EXT_ray_query on top. Ahjo.Vulkan.Slang
 // compiles this at run time with `spvRayQueryKHR` declared as a target
 // capability, so the compile is warning-free.
 

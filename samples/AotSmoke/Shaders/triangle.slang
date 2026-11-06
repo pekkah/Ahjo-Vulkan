@@ -1,7 +1,6 @@
-// The Slang equivalent of ../../HeadlessTriangle/Shaders/triangle.{vert,frag},
-// which this sample also links (see AotSmoke.csproj). Same hard-coded NDC
-// triangle, same per-vertex colours, same interpolation — so the PNG this
-// smoke run writes is the one HeadlessTriangle writes.
+// The Slang equivalent of ../../HeadlessTriangle/Shaders/triangle.slang. Same
+// hard-coded NDC triangle, same per-vertex colours, same interpolation — so
+// the PNG this smoke run writes is the one HeadlessTriangle writes.
 //
 // It exists so `dotnet publish -p:PublishAot=true` covers Ahjo.Vulkan.Slang
 // and its binding: compiling a shader at run time is the one thing in this

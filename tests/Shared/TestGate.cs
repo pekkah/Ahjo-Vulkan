@@ -54,12 +54,6 @@ internal static class TestGate
     internal static string Fmt(uint version)
         => $"{(version >> 22) & 0x7Fu}.{(version >> 12) & 0x3FFu}.{version & 0xFFFu}";
 
-    /// <summary>Toolchain gap: the build could not compile this shader because <c>glslc</c> was absent.</summary>
-    public static void RequireSpirv(string spvPath)
-        => Assert.SkipUnless(
-            File.Exists(spvPath),
-            $"[gate:spirv] Compiled shader missing: {spvPath} (glslc not on PATH at build time).");
-
     /// <summary>
     /// Correct and permanent: this test targets an OS, window system or
     /// instance extension the host does not have.

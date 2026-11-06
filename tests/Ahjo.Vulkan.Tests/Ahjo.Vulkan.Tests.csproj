@@ -35,60 +35,14 @@
   </ItemGroup>
 
   <!--
-    Compile every .vert/.frag/.comp shader in Shaders/ to .spv via glslc
-    before the build copies test content. The output lands next to the
-    test DLL as "Shaders/<name>.spv" so SpirvBlob.Load(path) can find it
-    relative to the binary directory.
-
-    Skipped (with a build message) when glslc isn't on PATH so the suite
-    still builds in environments without the Vulkan SDK — the tests
-    that need real SPIR-V skip themselves at runtime.
+    Compiled by the shared step (tools/msbuild/Ahjo.Vulkan.SlangShaders.targets).
+    The GLSL stays GLSL on purpose (spec A5: translating the gl_VertexIndex
+    fixtures to Slang would add DrawParameters).
   -->
   <ItemGroup>
-    <_ShaderSource Include="Shaders\*.vert;Shaders\*.frag;Shaders\*.comp" />
+    <SlangShader Include="Shaders\*.vert;Shaders\*.frag;Shaders\*.comp" />
+    <SlangShader Include="Shaders\mesh_tri.slang" EntryPoint="meshMain" OutputName="mesh_tri.mesh.spv" />
+    <SlangShader Include="Shaders\mesh_tri.slang" EntryPoint="taskMain" OutputName="mesh_tri.task.spv" />
   </ItemGroup>
-
-  <Target Name="CompileShaders" AfterTargets="Build" Inputs="@(_ShaderSource)" Outputs="@(_ShaderSource->'$(OutputPath)Shaders\%(Filename)%(Extension).spv')">
-    <PropertyGroup>
-      <_GlslcExe Condition="'$(_GlslcExe)' == '' and '$(VULKAN_SDK)' != ''">$(VULKAN_SDK)\Bin\glslc.exe</_GlslcExe>
-      <_GlslcExe Condition="'$(_GlslcExe)' == ''">glslc</_GlslcExe>
-    </PropertyGroup>
-    <MakeDir Directories="$(OutputPath)Shaders" />
-    <Exec Command="&quot;$(_GlslcExe)&quot; &quot;%(_ShaderSource.FullPath)&quot; -o &quot;$(OutputPath)Shaders\%(_ShaderSource.Filename)%(_ShaderSource.Extension).spv&quot;"
-          IgnoreExitCode="false"
-          ContinueOnError="WarnAndContinue" />
-  </Target>
-
-
-  <!--
-    Mesh-shading fixtures compile through a SECOND target, not the one above.
-    GL_EXT_mesh_shader needs SPIR-V 1.4, so these need an explicit
-    target-env flag; the existing CompileShaders target passes none (so it
-    defaults to vulkan1.0) and must keep doing so, or every pre-existing .spv
-    output changes.
-
-    vulkan1.2 (SPIR-V 1.5), not vulkan1.3: at vulkan1.3 glslang emits
-    OpExecutionModeId LocalSizeId for the workgroup size, which
-    VUID-RuntimeSpirv-LocalSizeId-06434 makes conditional on the maintenance4
-    feature. That would force every consumer of these fixtures to enable a
-    feature unrelated to mesh shading. vulkan1.2 emits plain OpExecutionMode
-    LocalSize and clears the SPIR-V 1.4 floor GL_EXT_mesh_shader actually
-    needs, so the fixtures require nothing beyond VK_EXT_mesh_shader itself. Same glslc resolution and same
-    ContinueOnError="WarnAndContinue" skip-when-missing behavior.
-  -->
-  <ItemGroup>
-    <_MeshShaderSource Include="Shaders\*.mesh;Shaders\*.task" />
-  </ItemGroup>
-
-  <Target Name="CompileMeshShaders" AfterTargets="Build" Inputs="@(_MeshShaderSource)" Outputs="@(_MeshShaderSource->'$(OutputPath)Shaders\%(Filename)%(Extension).spv')">
-    <PropertyGroup>
-      <_GlslcExe Condition="'$(_GlslcExe)' == '' and '$(VULKAN_SDK)' != ''">$(VULKAN_SDK)\Bin\glslc.exe</_GlslcExe>
-      <_GlslcExe Condition="'$(_GlslcExe)' == ''">glslc</_GlslcExe>
-    </PropertyGroup>
-    <MakeDir Directories="$(OutputPath)Shaders" />
-    <Exec Command="&quot;$(_GlslcExe)&quot; --target-env=vulkan1.2 &quot;%(_MeshShaderSource.FullPath)&quot; -o &quot;$(OutputPath)Shaders\%(_MeshShaderSource.Filename)%(_MeshShaderSource.Extension).spv&quot;"
-          IgnoreExitCode="false"
-          ContinueOnError="WarnAndContinue" />
-  </Target>
 
 </Project>

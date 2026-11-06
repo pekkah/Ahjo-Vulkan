@@ -74,11 +74,19 @@ jobs:
       #
       # The smoke tests run on a hit as well as a miss. A cached binary that
       # no longer loads is exactly the thing worth finding out about.
+      #
+      # native/slang/tool/<rid>/ (the build-time slangc, #171) is cached only
+      # so that a hit does not re-download: FetchSlang re-fetches when either
+      # directory is missing. It is not uploaded (the upload path below is
+      # unchanged) and not tested here. The path list must stay identical to
+      # ci.yml's Slang cache, which shares this key.
       - name: Cache staged Slang binaries
         id: cache-slang
         uses: actions/cache@v6
         with:
-          path: native/slang/staged/${{ matrix.rid }}
+          path: |
+            native/slang/staged/${{ matrix.rid }}
+            native/slang/tool/${{ matrix.rid }}
           key: slang-${{ matrix.rid }}-${{ hashFiles('Directory.Build.props', 'src/Ahjo.Vulkan.Slang.Native/Ahjo.Vulkan.Slang.Native.csproj', '.github/workflows/build-slang-native.yml') }}
 
       - name: Setup .NET

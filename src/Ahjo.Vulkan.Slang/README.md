@@ -762,10 +762,11 @@ any reflection or dynamic-codegen creep on the compile path fails the publish.
 
 ## What this package does not do yet
 
-The MSBuild task that would replace the `glslc` invocations still scattered
-across this repository's samples — a follow-up to
-[issue #166](https://github.com/pekkah/Ahjo-Vulkan/issues/166), and what finally
-lets the CI coverage summary stop printing "NOT PROVEN" for SPIR-V gates.
+Build-time compilation. This repository's samples and tests now compile their
+shaders at build time with the pinned `slangc`, through a repo-internal MSBuild
+step ([#171](https://github.com/pekkah/Ahjo-Vulkan/issues/171)). That step is
+**not** part of this package: consumers who want build-time compilation should
+run `slangc` the same way, or use `SlangCompiler` at run time.
 
 There is also no permutation or variant-cache API, and no `Specialize` — see
 "Specializing an interface-typed `ParameterBlock`" above for why the latter is a

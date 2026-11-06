@@ -23,56 +23,16 @@
   </ItemGroup>
 
   <!--
-    GraphicsPipelineBuilderBenchmarks needs a real vert + frag VkShaderModule
-    pair; reuse the test project's triangle shaders rather than duplicating
-    the .vert/.frag sources here. Compiles via the same glslc fallback the
-    test csproj uses, with the same skip-when-missing behavior.
+    The benchmarks need real vert + frag, compute and mesh modules; they
+    reuse the test project's shader sources rather than duplicating them
+    here. Compiled by the shared step
+    (tools/msbuild/Ahjo.Vulkan.SlangShaders.targets), same items as the
+    test csproj.
   -->
   <ItemGroup>
-    <_ShaderSource Include="..\Ahjo.Vulkan.Tests\Shaders\triangle.vert;..\Ahjo.Vulkan.Tests\Shaders\triangle.frag;..\Ahjo.Vulkan.Tests\Shaders\spec_fill.comp" />
+    <SlangShader Include="..\Ahjo.Vulkan.Tests\Shaders\triangle.vert;..\Ahjo.Vulkan.Tests\Shaders\triangle.frag;..\Ahjo.Vulkan.Tests\Shaders\spec_fill.comp" />
+    <SlangShader Include="..\Ahjo.Vulkan.Tests\Shaders\mesh_tri.slang" EntryPoint="meshMain" OutputName="mesh_tri.mesh.spv" />
+    <SlangShader Include="..\Ahjo.Vulkan.Tests\Shaders\mesh_tri.slang" EntryPoint="taskMain" OutputName="mesh_tri.task.spv" />
   </ItemGroup>
-
-  <Target Name="CompileShaders" AfterTargets="Build" Inputs="@(_ShaderSource)" Outputs="@(_ShaderSource->'$(OutputPath)Shaders\%(Filename)%(Extension).spv')">
-    <PropertyGroup>
-      <_GlslcExe Condition="'$(_GlslcExe)' == '' and '$(VULKAN_SDK)' != ''">$(VULKAN_SDK)\Bin\glslc.exe</_GlslcExe>
-      <_GlslcExe Condition="'$(_GlslcExe)' == ''">glslc</_GlslcExe>
-    </PropertyGroup>
-    <MakeDir Directories="$(OutputPath)Shaders" />
-    <Exec Command="&quot;$(_GlslcExe)&quot; &quot;%(_ShaderSource.FullPath)&quot; -o &quot;$(OutputPath)Shaders\%(_ShaderSource.Filename)%(_ShaderSource.Extension).spv&quot;"
-          IgnoreExitCode="false"
-          ContinueOnError="WarnAndContinue" />
-  </Target>
-
-
-  <!--
-    Mesh-shading fixtures compile through a SECOND target, not the one above.
-    GL_EXT_mesh_shader needs SPIR-V 1.4, so these need an explicit
-    target-env flag; the existing CompileShaders target passes none (so it
-    defaults to vulkan1.0) and must keep doing so, or every pre-existing .spv
-    output changes.
-
-    vulkan1.2 (SPIR-V 1.5), not vulkan1.3: at vulkan1.3 glslang emits
-    OpExecutionModeId LocalSizeId for the workgroup size, which
-    VUID-RuntimeSpirv-LocalSizeId-06434 makes conditional on the maintenance4
-    feature. That would force every consumer of these fixtures to enable a
-    feature unrelated to mesh shading. vulkan1.2 emits plain OpExecutionMode
-    LocalSize and clears the SPIR-V 1.4 floor GL_EXT_mesh_shader actually
-    needs, so the fixtures require nothing beyond VK_EXT_mesh_shader itself. Same glslc resolution and same
-    ContinueOnError="WarnAndContinue" skip-when-missing behavior.
-  -->
-  <ItemGroup>
-    <_MeshShaderSource Include="..\Ahjo.Vulkan.Tests\Shaders\mesh_tri.mesh;..\Ahjo.Vulkan.Tests\Shaders\mesh_tri.task" />
-  </ItemGroup>
-
-  <Target Name="CompileMeshShaders" AfterTargets="Build" Inputs="@(_MeshShaderSource)" Outputs="@(_MeshShaderSource->'$(OutputPath)Shaders\%(Filename)%(Extension).spv')">
-    <PropertyGroup>
-      <_GlslcExe Condition="'$(_GlslcExe)' == '' and '$(VULKAN_SDK)' != ''">$(VULKAN_SDK)\Bin\glslc.exe</_GlslcExe>
-      <_GlslcExe Condition="'$(_GlslcExe)' == ''">glslc</_GlslcExe>
-    </PropertyGroup>
-    <MakeDir Directories="$(OutputPath)Shaders" />
-    <Exec Command="&quot;$(_GlslcExe)&quot; --target-env=vulkan1.2 &quot;%(_MeshShaderSource.FullPath)&quot; -o &quot;$(OutputPath)Shaders\%(_MeshShaderSource.Filename)%(_MeshShaderSource.Extension).spv&quot;"
-          IgnoreExitCode="false"
-          ContinueOnError="WarnAndContinue" />
-  </Target>
 
 </Project>

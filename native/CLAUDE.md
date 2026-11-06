@@ -5,6 +5,7 @@
 - `ktx/staged/<rid>/` — the built libktx binary per RID; both the CI cache key and the release artifact.
 - `slang/downloaded/` — the pinned Slang release archive plus its extraction scratch. Same rule; the archive's SHA-256 is verified against `Directory.Build.props` before anything is extracted.
 - `slang/staged/<rid>/` — the shipped Slang binaries per RID, copied out of that archive (on Linux, renamed — the archive's `libslang.so` is a symlink and a nupkg cannot carry one). Both the CI cache key and the release artifact.
+- `slang/tool/<rid>/` — the build-time `slangc` (plus the libraries it loads) per RID, copied out of the same archive by `StageSlangCompiler` with a `slangc.version` stamp. The samples and tests compile their shaders with it (#171). Never packed, never uploaded; cached in CI next to `slang/staged/<rid>/` only so a cache hit does not re-download. See `src/Ahjo.Vulkan.Slang.Native/CLAUDE.md`.
 - `slang/include/` — the three headers `tools/generate-slang.rsp` parses. Staged from the archive but **committed**: they are the generator input of record, so a version bump shows the API diff before the generated output is re-derived from it.
 - `slang/SLANG-LICENSE.txt` — Slang's Apache-2.0 WITH LLVM-exception text, copied out of the archive and packed into the nupkg. Committed for the same reason: the publish job packs from downloaded artifacts and never runs the fetch.
 - `vma/` — the VMA implementation translation unit + `CMakeLists.txt` (hand-maintained, edits allowed).

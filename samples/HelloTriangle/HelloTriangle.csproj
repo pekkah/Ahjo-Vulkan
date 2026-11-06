@@ -20,18 +20,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <_ShaderSource Include="Shaders\*.vert;Shaders\*.frag" />
+    <SlangShader Include="Shaders\triangle.slang" EntryPoint="vertexMain"   OutputName="triangle.vert.spv" />
+    <SlangShader Include="Shaders\triangle.slang" EntryPoint="fragmentMain" OutputName="triangle.frag.spv" />
   </ItemGroup>
-
-  <Target Name="CompileShaders" AfterTargets="Build" Inputs="@(_ShaderSource)" Outputs="@(_ShaderSource->'$(OutputPath)Shaders\%(Filename)%(Extension).spv')">
-    <PropertyGroup>
-      <_GlslcExe Condition="'$(_GlslcExe)' == '' and '$(VULKAN_SDK)' != ''">$(VULKAN_SDK)\Bin\glslc.exe</_GlslcExe>
-      <_GlslcExe Condition="'$(_GlslcExe)' == ''">glslc</_GlslcExe>
-    </PropertyGroup>
-    <MakeDir Directories="$(OutputPath)Shaders" />
-    <Exec Command="&quot;$(_GlslcExe)&quot; &quot;%(_ShaderSource.FullPath)&quot; -o &quot;$(OutputPath)Shaders\%(_ShaderSource.Filename)%(_ShaderSource.Extension).spv&quot;"
-          IgnoreExitCode="false"
-          ContinueOnError="WarnAndContinue" />
-  </Target>
 
 </Project>

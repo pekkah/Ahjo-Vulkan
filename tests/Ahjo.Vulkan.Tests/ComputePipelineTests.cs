@@ -30,7 +30,6 @@ public sealed class ComputePipelineTests
     public void Builder_MissingLayout_Throws()
     {
         TestGate.RequireDriver();
-        TestGate.RequireSpirv(FillSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -47,7 +46,6 @@ public sealed class ComputePipelineTests
     public void Builder_FillShader_Build_RoundTrips()
     {
         TestGate.RequireDriver();
-        TestGate.RequireSpirv(FillSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -91,7 +89,6 @@ public sealed class ComputePipelineTests
     public void Builder_CustomEntryPoint_Build_FailsForNonexistent()
     {
         TestGate.RequireDriver();
-        TestGate.RequireSpirv(FillSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);

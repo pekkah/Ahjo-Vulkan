@@ -36,7 +36,6 @@ public sealed unsafe class CommandRecorderTests
         TestGate.RequireDriver();
         TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
-        TestGate.RequireSpirv(FillSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -129,7 +128,6 @@ public sealed unsafe class CommandRecorderTests
         TestGate.RequireDriver();
         TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
-        TestGate.RequireSpirv(FillSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -238,8 +236,6 @@ public sealed unsafe class CommandRecorderTests
         // HelloTriangle's job (#25 follow-on); this just proves the wrapper
         // dispatches the right vkCmd* and accepts our parameter shapes.
         TestGate.RequireDriver();
-        TestGate.RequireSpirv(VertSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -354,8 +350,6 @@ public sealed unsafe class CommandRecorderTests
         TestGate.RequireDriver();
         TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
-        TestGate.RequireSpirv(VertSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         // Closes acceptance #1 of issue #45. triangle.vert hard-codes positions
         // by gl_VertexIndex, so an index buffer of [0,1,2] paired with
@@ -483,8 +477,6 @@ public sealed unsafe class CommandRecorderTests
         TestGate.RequireDriver();
         TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
-        TestGate.RequireSpirv(VertSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         // Closes acceptance #2 of issue #45. The indirect buffer is
         // device-local — host has no mapping; the only way data lands in it
@@ -655,8 +647,6 @@ public sealed unsafe class CommandRecorderTests
     public void GraphicsRecording_BeginEndRender_NoValidationErrors()
     {
         TestGate.RequireDriver();
-        TestGate.RequireSpirv(VertSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -911,8 +901,6 @@ public sealed unsafe class CommandRecorderTests
         TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
         TestGate.RequireValidationLayer();
-        TestGate.RequireSpirv(VertSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         var errors = new List<DebugMessage>();
         using var instance = Instance.Create(new InstanceDescription
@@ -1027,8 +1015,6 @@ public sealed unsafe class CommandRecorderTests
         TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
         TestGate.RequireValidationLayer();
-        TestGate.RequireSpirv(VertSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         var errors = new List<DebugMessage>();
         using var instance = Instance.Create(new InstanceDescription

@@ -475,8 +475,6 @@ public sealed unsafe class MeshShaderTests
     {
         TestGate.RequireDriver();
         TestGate.RequireValidationLayer();
-        TestGate.RequireSpirv(MeshSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         var errors = new List<DebugMessage>();
         using var instance = CreateValidatedInstance(errors);
@@ -515,9 +513,6 @@ public sealed unsafe class MeshShaderTests
     {
         TestGate.RequireDriver();
         TestGate.RequireValidationLayer();
-        TestGate.RequireSpirv(MeshSpvPath);
-        TestGate.RequireSpirv(TaskSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         var errors = new List<DebugMessage>();
         using var instance = CreateValidatedInstance(errors);
@@ -547,8 +542,9 @@ public sealed unsafe class MeshShaderTests
 
     /// <summary>
     /// Entry-point override + specialization constant round-trip into a
-    /// successful build: <c>mesh_tri.mesh</c> declares
-    /// <c>layout(constant_id = 0) const float uScale</c>, so the map entry
+    /// successful build: <c>mesh_tri.slang</c>'s <c>meshMain</c> (compiled to
+    /// <c>mesh_tri.mesh.spv</c>) declares
+    /// <c>[vk::constant_id(0)] const float uScale</c>, so the map entry
     /// binds to a constant that really exists in the module. Under the
     /// validation layer, because a mis-wired <c>pSpecializationInfo</c> — an
     /// entry whose offset/size runs past the supplied data, or one naming a
@@ -560,8 +556,6 @@ public sealed unsafe class MeshShaderTests
     {
         TestGate.RequireDriver();
         TestGate.RequireValidationLayer();
-        TestGate.RequireSpirv(MeshSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         var errors = new List<DebugMessage>();
         using var instance = CreateValidatedInstance(errors);
@@ -601,8 +595,6 @@ public sealed unsafe class MeshShaderTests
     {
         TestGate.RequireDriver();
         TestGate.RequireValidationLayer();
-        TestGate.RequireSpirv(MeshSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         var errors = new List<DebugMessage>();
         using var instance = CreateValidatedInstance(errors);
@@ -656,9 +648,6 @@ public sealed unsafe class MeshShaderTests
     public void MeshPipeline_Build_IsZeroAllocation()
     {
         TestGate.RequireDriver();
-        TestGate.RequireSpirv(MeshSpvPath);
-        TestGate.RequireSpirv(TaskSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using Device? device = TryCreateMeshDevice(instance, out _, requireTaskShader: true);
@@ -744,9 +733,6 @@ public sealed unsafe class MeshShaderTests
         TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
         TestGate.RequireValidationLayer();
-        TestGate.RequireSpirv(MeshSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
-        if (withTaskStage) TestGate.RequireSpirv(TaskSpvPath);
 
         var errors = new List<DebugMessage>();
         using var instance = CreateValidatedInstance(errors);

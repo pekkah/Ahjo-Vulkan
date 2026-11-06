@@ -34,7 +34,7 @@ win-x64 + linux-x64, defined ONCE in `build-slang-native.yml`, called by both `c
 
 The difference from the other native lanes is that nothing is compiled here: the binary is upstream's own release artifact, pinned by tag *and* by SHA-256 in `Directory.Build.props`. The checksum tells you the bytes are the ones we pinned; only the smoke suite tells you they load and compile a shader on this runner. That is why the tests are not optional and why they run on a cache hit too.
 
-It provisions no ICD and no loader on purpose, and `AHJO_VULKAN_TIER` stays unset: Slang compiles shader text to SPIR-V bytes and the package does not even reference `Ahjo.Vulkan.Native`. If a test in this suite ever needs a Vulkan device, something got linked in that the package's contract says isn't there. The staged binaries under `native/slang/staged/<rid>/` are both the cache key and the artifact.
+It provisions no ICD and no loader on purpose, and `AHJO_VULKAN_TIER` stays unset: Slang compiles shader text to SPIR-V bytes and the package does not even reference `Ahjo.Vulkan.Native`. If a test in this suite ever needs a Vulkan device, something got linked in that the package's contract says isn't there. The staged binaries under `native/slang/staged/<rid>/` are both the cache key and the artifact. The lane also caches `native/slang/tool/<rid>/` (the build-time `slangc`, #171) so that a hit does not re-download; it does not upload or test it.
 
 It is a build-artifact check, not wrapper coverage. **Don't grow it** — wrapper-level Slang tests belong in the Windows `build-test` job with the rest of the wrapper suite.
 

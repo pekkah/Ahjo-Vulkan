@@ -61,7 +61,6 @@ public sealed unsafe class DescriptorWriteTests
         TestGate.RequireDriver();
         TestGate.RequireHardwareDriver(
             "Software ICD (Mesa lavapipe): vkQueueSubmit2 SIGSEGVs during command-buffer execution.");
-        TestGate.RequireSpirv(FillSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);

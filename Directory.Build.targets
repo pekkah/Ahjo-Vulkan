@@ -1,0 +1,4 @@
+<Project>
+  <!-- Shared shader build step (#171). Inert in any project without SlangShader items. -->
+  <Import Project="$(MSBuildThisFileDirectory)tools\msbuild\Ahjo.Vulkan.SlangShaders.targets" />
+</Project>

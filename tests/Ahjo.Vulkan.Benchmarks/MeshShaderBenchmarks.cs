@@ -37,9 +37,9 @@ public unsafe class MeshShaderBenchmarks
     private const uint Extent         = 64;
 
     /// <summary>
-    /// Matches <c>mesh_tri.mesh</c>'s <c>layout(constant_id = 0) const float
+    /// Matches <c>mesh_tri.slang</c>'s <c>[vk::constant_id(0)] const float
     /// uScale</c>. The same struct is also bound to the task stage in
-    /// <see cref="Build_MeshPipeline_WithSpecialization"/>: <c>mesh_tri.task</c>
+    /// <see cref="Build_MeshPipeline_WithSpecialization"/>: <c>taskMain</c>
     /// declares no spec constants, and the Vulkan spec makes a map entry whose
     /// <c>constantID</c> the shader does not use a no-op — which is what lets
     /// the benchmark exercise <b>both</b> extra <c>fixed</c> statements from
@@ -72,16 +72,16 @@ public unsafe class MeshShaderBenchmarks
     public void Setup()
     {
         // Fail with an actionable message rather than a bare
-        // FileNotFoundException from SpirvBlob.Load: CompileMeshShaders runs
-        // with ContinueOnError="WarnAndContinue", so a host without glslc
-        // builds green and produces no .spv at all.
+        // FileNotFoundException from SpirvBlob.Load. The SlangShader build
+        // step fails the build when it cannot compile these, so a missing
+        // file means a stale or partial output directory.
         string shadersDir = Path.Combine(AppContext.BaseDirectory, "Shaders");
         foreach (string name in (string[])["mesh_tri.mesh.spv", "mesh_tri.task.spv", "triangle.frag.spv"])
         {
             if (!File.Exists(Path.Combine(shadersDir, name)))
                 throw new FileNotFoundException(
                     $"MeshShaderBenchmarks needs compiled shaders at {shadersDir} (missing {name}). " +
-                    "Build the benchmark project once with the Vulkan SDK on PATH (or VULKAN_SDK env var set) so glslc compiles them.");
+                    "It is produced by the SlangShader build step; rebuild the benchmark project and check its build log for AHJOSLANG errors.");
         }
 
         _instance = Instance.Create(default);

@@ -75,7 +75,6 @@ public sealed unsafe class DescriptorTemplateTests
     public void Template_Update_RoundTrips_StorageBufferDispatch()
     {
         TestGate.RequireDriver();
-        TestGate.RequireSpirv(FillSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);

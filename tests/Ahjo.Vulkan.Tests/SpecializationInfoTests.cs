@@ -164,7 +164,6 @@ public sealed class SpecializationInfoTests
     public void Builder_SpecializesLocalSizeAtRuntime()
     {
         TestGate.RequireDriver();
-        TestGate.RequireSpirv(SpecFillSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance, out uint family);
@@ -297,6 +296,20 @@ public sealed class SpecializationInfoTests
         return gpu.CreateDevice(new DeviceDescription
         {
             Queues = [new QueueRequest(f, count: 1, priority: 1.0f)],
+
+            // spec_fill.comp's spec-constant workgroup size compiles to
+            // OpExecutionModeId LocalSizeId under Slang (spec E6);
+            // VUID-RuntimeSpirv-LocalSizeId-06434 requires maintenance4, which
+            // is mandatory in Vulkan 1.3.
+            ConfigureFeatures = static (
+                ref ChainBuilder<VkDeviceCreateInfo> _,
+                ref VkPhysicalDeviceFeatures2        _,
+                ref VkPhysicalDeviceVulkan12Features _,
+                ref VkPhysicalDeviceVulkan13Features f13,
+                ref VkPhysicalDeviceVulkan14Features _) =>
+            {
+                f13.maintenance4 = 1;
+            },
         });
     }
 }
