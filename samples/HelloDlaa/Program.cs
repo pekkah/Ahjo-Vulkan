@@ -125,7 +125,7 @@ internal static unsafe class Program
         {
             try
             {
-                if (!NgxSupport.TryGetInstanceExtensions(in ngxDescription, out ngxInstanceExts)
+                if (!NgxSupport.TryGetInstanceExtensions(NgxFeature.SuperResolution, in ngxDescription, out ngxInstanceExts)
                     && !TryContinueWithoutNgx(in options, "NGX could not report the instance extensions DLSS requires.", out int code))
                 {
                     return code;
@@ -190,7 +190,7 @@ internal static unsafe class Program
 
             // ---- 8. NGX device extensions. -------------------------------
             NgxExtensionSet? ngxDeviceExts = null;
-            if (wantsNgx && !NgxSupport.TryGetDeviceExtensions(gpu, in ngxDescription, out ngxDeviceExts))
+            if (wantsNgx && !NgxSupport.TryGetDeviceExtensions(NgxFeature.SuperResolution, gpu, in ngxDescription, out ngxDeviceExts))
             {
                 if (!TryContinueWithoutNgx(in options,
                         "NGX could not report the device extensions DLSS requires on this GPU.", out int code))

@@ -5,7 +5,7 @@ namespace Ahjo.Vulkan.Ngx;
 /// <summary>
 /// What NGX says this host needs in order to run DLSS, and whether it has it.
 /// Projection of <c>NVSDK_NGX_FeatureRequirement</c>, from
-/// <see cref="NgxSupport.TryGetSuperSamplingRequirements"/>.
+/// <see cref="NgxSupport.TryGetRequirements"/>.
 /// </summary>
 /// <remarks>
 /// Useful for a settings screen that wants to say <i>why</i> DLSS is greyed

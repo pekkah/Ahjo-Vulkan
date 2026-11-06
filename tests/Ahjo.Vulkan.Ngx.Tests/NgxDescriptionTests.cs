@@ -73,6 +73,37 @@ public sealed class NgxDescriptionTests
         Assert.Contains("DlssSearchPaths[0]", ex.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void RequiredFeatures_DefaultsToSuperResolution()
+    {
+        // Through the explicit parameterless constructor, which is what runs
+        // the initializer (CS8983).
+        Assert.Equal(NgxFeatures.SuperResolution, new NgxDescription().RequiredFeatures);
+        Assert.Equal(NgxFeatures.SuperResolution, Valid.RequiredFeatures);
+    }
+
+    [Fact]
+    public void RequiredFeaturesNone_Throws()
+    {
+        var description = Valid with { RequiredFeatures = NgxFeatures.None };
+        ArgumentException ex = AssertThrowsOnValidate(description);
+        Assert.Equal("RequiredFeatures", ex.ParamName);
+    }
+
+    [Fact]
+    public void RequiredFeaturesUndefinedBit_Throws()
+    {
+        var description = Valid with { RequiredFeatures = (NgxFeatures)8 };
+        ArgumentException ex = AssertThrowsOnValidate(description);
+        Assert.Equal("RequiredFeatures", ex.ParamName);
+    }
+
+    [Fact]
+    public void RequiredFeaturesBoth_Validates()
+    {
+        (Valid with { RequiredFeatures = NgxFeatures.SuperResolution | NgxFeatures.FrameGeneration }).Validate();
+    }
+
     /// <summary>
     /// Drives <c>NgxDescription.Validate</c> directly. Every public entry point
     /// — <see cref="NgxContext.Create"/> and all four

@@ -286,8 +286,8 @@ native/slang/tool/
 # NVIDIA DLSS (NGX) SDK files fetched per-file by tools/setup-ngx.ps1 at the
 # NgxVersion tag and verified against native/ngx/pins.sha256 (committed).
 # Headers staged at native/ngx/include/ and NGX-LICENSE.txt are committed;
-# the static client libs and the nvngx_dlss feature DLLs under staged/ are
-# not — the DLL is consumer-supplied by decision (#214) and must never land
+# the static client libs and the nvngx_dlss + nvngx_dlssg feature DLLs under
+# staged/ are not — the DLLs are consumer-supplied by decision (#214) and must never land
 # in git or a package. Keep these out of any native/**/lib/ path: the
 # "!native/**/lib/**/*.dll" rule above would un-ignore them.
 native/ngx/downloaded/

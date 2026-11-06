@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Ahjo.Vulkan.Ngx.Native;
 using Ahjo.Vulkan.Testing;
 
@@ -26,10 +27,11 @@ namespace Ahjo.Vulkan.Ngx.Tests;
 /// failure.</para>
 /// <para>No reflection anywhere — the subject is AOT-clean code.</para>
 /// </remarks>
-internal static class NgxTestEnvironment
+internal static unsafe class NgxTestEnvironment
 {
     private static readonly Lazy<bool> _shimPresent = new(ProbeShim);
     private static readonly Lazy<bool> _dlssAvailable = new(ProbeDlss);
+    private static readonly Lazy<bool> _frameGenerationAvailable = new(ProbeFrameGeneration);
 
     /// <summary>The <c>ahjo_ngx</c> shim loaded.</summary>
     public static bool ShimPresent => _shimPresent.Value;
@@ -37,6 +39,16 @@ internal static class NgxTestEnvironment
     /// <summary>The shim loaded, a device exists, and NGX reports DLSS Super
     /// Resolution supported on it.</summary>
     public static bool IsDlssAvailable => _dlssAvailable.Value;
+
+    /// <summary>
+    /// <see cref="IsDlssAvailable"/>, and a context created on a device with
+    /// the Super Resolution <b>and</b> Frame Generation extension unions —
+    /// requiring only Super Resolution — reports
+    /// <see cref="NgxContext.IsFrameGenerationAvailable"/>. Needs an RTX
+    /// 40-series or newer GPU and a staged <c>nvngx_dlssg.dll</c>.
+    /// <c>[gate:feature]</c>.
+    /// </summary>
+    public static bool IsFrameGenerationAvailable => _frameGenerationAvailable.Value;
 
     /// <summary>
     /// A description every test in this suite can use. The project ID is this
@@ -87,7 +99,7 @@ internal static class NgxTestEnvironment
     public static Instance CreateInstance(out NgxExtensionSet? required)
     {
         NgxDescription description = Description;
-        NgxSupport.TryGetInstanceExtensions(in description, out required);
+        NgxSupport.TryGetInstanceExtensions(NgxFeature.SuperResolution, in description, out required);
 
         var instanceDescription = new InstanceDescription
         {
@@ -114,6 +126,46 @@ internal static class NgxTestEnvironment
     /// thing it gates is not a gate.
     /// </remarks>
     public static Device CreateDevice(Instance instance, out uint graphicsFamily)
+        => CreateDevice(instance, NgxFeatures.SuperResolution, out graphicsFamily);
+
+    /// <summary>
+    /// Creates an <see cref="Instance"/> carrying the <b>union</b> of the
+    /// instance extensions NGX requires for every feature in
+    /// <paramref name="features"/> — the documented init order for a consumer
+    /// using more than one feature (<see cref="NgxSupport"/> remarks).
+    /// </summary>
+    public static Instance CreateInstance(NgxFeatures features)
+    {
+        NgxDescription description = Description;
+        NgxExtensionSet? superResolution = null, frameGeneration = null;
+        try
+        {
+            if ((features & NgxFeatures.SuperResolution) != 0)
+                NgxSupport.TryGetInstanceExtensions(NgxFeature.SuperResolution, in description, out superResolution);
+            if ((features & NgxFeatures.FrameGeneration) != 0)
+                NgxSupport.TryGetInstanceExtensions(NgxFeature.FrameGeneration, in description, out frameGeneration);
+
+            var instanceDescription = new InstanceDescription
+            {
+                Extensions       = Union(superResolution, frameGeneration),
+                EnableValidation = VulkanEnvironment.HasValidationLayer,
+            };
+            return Instance.Create(in instanceDescription);
+        }
+        finally
+        {
+            // vkCreateInstance copied the names.
+            superResolution?.Dispose();
+            frameGeneration?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// <see cref="CreateDevice(Instance, out uint)"/> with the <b>union</b> of
+    /// the device extensions NGX requires for every feature in
+    /// <paramref name="features"/>.
+    /// </summary>
+    public static Device CreateDevice(Instance instance, NgxFeatures features, out uint graphicsFamily)
     {
         uint family = uint.MaxValue;
         PhysicalDevice gpu = instance.PickPhysicalDevice((in PhysicalDeviceInfo info) =>
@@ -132,20 +184,95 @@ internal static class NgxTestEnvironment
         graphicsFamily = family;
 
         NgxDescription description = Description;
-        NgxSupport.TryGetDeviceExtensions(gpu, in description, out NgxExtensionSet? deviceExtensions);
+        NgxExtensionSet? superResolution = null, frameGeneration = null;
         try
         {
+            if ((features & NgxFeatures.SuperResolution) != 0)
+                NgxSupport.TryGetDeviceExtensions(NgxFeature.SuperResolution, gpu, in description, out superResolution);
+            if ((features & NgxFeatures.FrameGeneration) != 0)
+                NgxSupport.TryGetDeviceExtensions(NgxFeature.FrameGeneration, gpu, in description, out frameGeneration);
+
             var deviceDescription = new DeviceDescription
             {
                 Queues     = [new QueueRequest(family, count: 1, priority: 1.0f)],
-                Extensions = deviceExtensions is null ? default : deviceExtensions.Names,
+                Extensions = Union(superResolution, frameGeneration),
             };
             return gpu.CreateDevice(in deviceDescription);
         }
         finally
         {
-            deviceExtensions?.Dispose();   // vkCreateDevice copied the names
+            // vkCreateDevice copied the names.
+            superResolution?.Dispose();
+            frameGeneration?.Dispose();
         }
+    }
+
+    /// <summary>
+    /// The names of both sets, each once, first-seen order. The returned
+    /// <see cref="Utf8Name"/>s point into the sets, so both must outlive the
+    /// create call that reads them.
+    /// </summary>
+    private static Utf8Name[] Union(NgxExtensionSet? first, NgxExtensionSet? second)
+    {
+        var names = new List<Utf8Name>();
+        Add(first);
+        Add(second);
+        return [.. names];
+
+        void Add(NgxExtensionSet? set)
+        {
+            if (set is null) return;
+            for (int i = 0; i < set.Count; i++)
+            {
+                Utf8Name candidate = set.Names[i];
+                ReadOnlySpan<byte> text = MemoryMarshal.CreateReadOnlySpanFromNullTerminated((byte*)candidate.Ptr);
+
+                bool seen = false;
+                foreach (Utf8Name existing in names)
+                {
+                    if (text.SequenceEqual(MemoryMarshal.CreateReadOnlySpanFromNullTerminated((byte*)existing.Ptr)))
+                    {
+                        seen = true;
+                        break;
+                    }
+                }
+
+                if (!seen) names.Add(candidate);
+            }
+        }
+    }
+
+    private static bool ProbeFrameGeneration()
+    {
+        // The SR gate first: it is what proves an NVIDIA adapter, a creatable
+        // device and a staged nvngx_dlss.dll, and the context below requires
+        // Super Resolution.
+        if (!IsDlssAvailable) return false;
+
+        try
+        {
+            // The same two factories the gated tests use, with both unions.
+            using Instance instance = CreateInstance(NgxFeatures.SuperResolution | NgxFeatures.FrameGeneration);
+            using Device device = CreateDevice(instance, NgxFeatures.SuperResolution | NgxFeatures.FrameGeneration, out _);
+
+            NgxDescription description = Description;   // RequiredFeatures = SuperResolution
+            using NgxContext ngx = NgxContext.Create(device, in description);
+            return ngx.IsFrameGenerationAvailable;
+        }
+        catch (VulkanException)
+        {
+            return false;
+        }
+        catch (NgxFeatureLibraryNotFoundException)
+        {
+            return false;
+        }
+        catch (NgxDriverTooOldException)
+        {
+            return false;
+        }
+        // Not catching the NgxException base type, for the reason ProbeDlss
+        // gives.
     }
 
     private static bool ProbeDlss()
@@ -159,7 +286,7 @@ internal static class NgxTestEnvironment
 
             PhysicalDevice gpu = instance.PickPhysicalDevice(static (in PhysicalDeviceInfo _) => true);
             NgxDescription description = Description;
-            if (!NgxSupport.IsSuperSamplingSupported(gpu, in description))
+            if (!NgxSupport.IsSupported(NgxFeature.SuperResolution, gpu, in description))
                 return false;
 
             // NGX answering "supported" is necessary and NOT sufficient, and

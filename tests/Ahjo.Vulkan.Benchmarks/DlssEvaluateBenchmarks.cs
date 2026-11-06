@@ -74,7 +74,7 @@ public unsafe class DlssEvaluateBenchmarks
         // Both extension lists are mandatory, not advisory: without the
         // instance ones NGX access-violates, without the device ones DLSS
         // reports unavailable. See NgxSupport's remarks.
-        if (!NgxSupport.TryGetInstanceExtensions(in description, out NgxExtensionSet? instanceExtensions))
+        if (!NgxSupport.TryGetInstanceExtensions(NgxFeature.SuperResolution, in description, out NgxExtensionSet? instanceExtensions))
         {
             throw new InvalidOperationException(
                 "NGX could not report its required instance extensions. The ahjo_ngx shim is probably not staged — " +
@@ -101,14 +101,14 @@ public unsafe class DlssEvaluateBenchmarks
             return false;
         });
 
-        if (!NgxSupport.IsSuperSamplingSupported(gpu, in description))
+        if (!NgxSupport.IsSupported(NgxFeature.SuperResolution, gpu, in description))
         {
             throw new InvalidOperationException(
                 "DLSS Super Resolution is not supported on this GPU/driver. DlssEvaluateBenchmarks needs an NVIDIA GPU " +
                 "with a DLSS-capable driver; there is no software fallback.");
         }
 
-        NgxSupport.TryGetDeviceExtensions(gpu, in description, out NgxExtensionSet? deviceExtensions);
+        NgxSupport.TryGetDeviceExtensions(NgxFeature.SuperResolution, gpu, in description, out NgxExtensionSet? deviceExtensions);
         using (deviceExtensions)
         {
             var deviceDescription = new DeviceDescription

@@ -6,14 +6,15 @@
  *   1. It is the shim's own header, declaring the seven ahjo_ngx_* functions
  *      native/ngx/src/ahjo_ngx.cpp defines.
  *   2. It is the parse root of tools/generate-ngx.rsp. ClangSharp reads this
- *      file, follows the two includes below, and emits
+ *      file, follows the three includes below, and emits
  *      src/Ahjo.Vulkan.Ngx.Native/Generated/ from what it finds.
  *
  * INCLUDE ORDER MATTERS. The NGX headers do not include Vulkan themselves -
  * nvsdk_ngx_vk.h:69-77 includes only the three nvsdk_ngx_* headers - yet its
  * signatures name VkInstance, VkDevice, VkExtensionProperties and friends. So
  * <vulkan/vulkan.h> has to come first, here, for both the compile and the
- * parse. Do not reorder these two lines.
+ * parse. Do not reorder the first two lines; the dlssg include must follow
+ * them (see THE DLSS-G INCLUDE below).
  *
  * WHY A SHIM AT ALL. The NGX SDK ships a static client library, not a DLL, so
  * something has to link it into a shared library before .NET can P/Invoke
@@ -41,6 +42,12 @@
  * seven declarations below do carry AHJO_NGX_API, but on MSVC that expands to
  * nothing — it exists for GCC/Clang, where a version script alone cannot
  * export a symbol this TU compiled as hidden. See the macro's own comment.
+ *
+ * THE DLSS-G INCLUDE. nvsdk_ngx_defs_dlssg.h is included after nvsdk_ngx_vk.h
+ * only so that tools/generate-ngx.rsp's traversal reaches the Frame Generation
+ * parameter names ("DLSSG.*", "FrameGeneration.*") and its three enums
+ * (issue #253). It declares only enums, macros and typedefs, so it changes no
+ * export of this shim.
  */
 
 #ifndef AHJO_NGX_H
@@ -48,6 +55,7 @@
 
 #include <vulkan/vulkan.h>
 #include "nvsdk_ngx_vk.h"
+#include "nvsdk_ngx_defs_dlssg.h"
 
 #ifdef __cplusplus
 extern "C" {

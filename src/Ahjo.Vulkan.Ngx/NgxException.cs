@@ -26,21 +26,45 @@ public class NgxException : Exception
 }
 
 /// <summary>
-/// DLSS is unavailable because NVIDIA's feature library
-/// (<c>nvngx_dlss.dll</c> / <c>libnvidia-ngx-dlss.so.&lt;version&gt;</c>) was not
-/// found. That file is <b>not</b> shipped by <c>Ahjo.Vulkan.Ngx</c> — the
-/// application supplies it from NVIDIA's DLSS SDK (issue #214).
+/// An NGX feature is unavailable because an NVIDIA feature library
+/// (<c>nvngx_dlss.dll</c> or <c>nvngx_dlssg.dll</c>; on Linux
+/// <c>libnvidia-ngx-dlss.so.&lt;version&gt;</c> or
+/// <c>libnvidia-ngx-dlssg.so.&lt;version&gt;</c>) was not found. Those files
+/// are <b>not</b> shipped by <c>Ahjo.Vulkan.Ngx</c> — the application supplies
+/// them from NVIDIA's DLSS SDK (issue #214).
 /// </summary>
 /// <remarks>
-/// The message lists every directory that was searched. This is deliberately a
-/// distinct type: it is the one NGX failure with a purely deployment-shaped
-/// fix, and the wrapper never falls back silently when it happens.
+/// The message lists every directory that was searched, and
+/// <see cref="SearchedDirectories"/> carries the same list in order. This is
+/// deliberately a distinct type: it is the one NGX failure with a purely
+/// deployment-shaped fix, and the wrapper never falls back silently when it
+/// happens.
 /// </remarks>
 public sealed class NgxFeatureLibraryNotFoundException : NgxException
 {
-    public NgxFeatureLibraryNotFoundException(NVSDK_NGX_Result result, string message)
+    /// <summary>The feature whose library was not found.</summary>
+    public NgxFeature Feature { get; }
+
+    /// <summary>The file NGX looked for, e.g. <c>nvngx_dlssg.dll</c>.</summary>
+    public string ExpectedFile { get; }
+
+    /// <summary>Every directory searched, in order: the application directory
+    /// first, then each <see cref="NgxDescription.DlssSearchPaths"/> entry.</summary>
+    public IReadOnlyList<string> SearchedDirectories { get; }
+
+    public NgxFeatureLibraryNotFoundException(
+        NVSDK_NGX_Result result,
+        NgxFeature feature,
+        string expectedFile,
+        IReadOnlyList<string> searchedDirectories,
+        string message)
         : base(result, message)
     {
+        ArgumentNullException.ThrowIfNull(expectedFile);
+        ArgumentNullException.ThrowIfNull(searchedDirectories);
+        Feature             = feature;
+        ExpectedFile        = expectedFile;
+        SearchedDirectories = searchedDirectories;
     }
 }
 

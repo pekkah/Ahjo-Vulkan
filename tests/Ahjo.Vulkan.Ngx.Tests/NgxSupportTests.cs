@@ -22,6 +22,27 @@ namespace Ahjo.Vulkan.Ngx.Tests;
 /// </remarks>
 public sealed unsafe class NgxSupportTests
 {
+    /// <summary>
+    /// An undefined <see cref="NgxFeature"/> is rejected before anything else
+    /// is looked at — no shim, no device — so a <see langword="null"/>
+    /// physical device is fine here.
+    /// </summary>
+    [Fact]
+    public void UndefinedFeature_ThrowsForAllFourQueries()
+    {
+        const NgxFeature undefined = (NgxFeature)7;
+        NgxDescription description = NgxTestEnvironment.Description;
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => NgxSupport.TryGetInstanceExtensions(undefined, in description, out _));
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => NgxSupport.TryGetDeviceExtensions(undefined, null!, in description, out _));
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => NgxSupport.TryGetRequirements(undefined, null!, in description, out _));
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => NgxSupport.IsSupported(undefined, null!, in description));
+    }
+
     [Fact]
     public void TryGetInstanceExtensions_ReturnsAPlausibleSet()
     {
@@ -30,7 +51,7 @@ public sealed unsafe class NgxSupportTests
             "ahjo_ngx shim not staged — DLSS is opt-in; run ./tools/setup-ngx.ps1.");
 
         NgxDescription description = NgxTestEnvironment.Description;
-        Assert.True(NgxSupport.TryGetInstanceExtensions(in description, out NgxExtensionSet? extensions));
+        Assert.True(NgxSupport.TryGetInstanceExtensions(NgxFeature.SuperResolution, in description, out NgxExtensionSet? extensions));
 
         using (extensions)
         {

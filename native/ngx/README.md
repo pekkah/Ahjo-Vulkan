@@ -21,16 +21,18 @@ DLLs), verifies every file against `pins.sha256`, and stages:
 | `NGX-LICENSE.txt` | yes | NVIDIA RTX SDKs licence, packed beside the shim later |
 | `pins.sha256` | yes | SHA-256 per fetched file at the pinned tag |
 | `staged/<rid>/nvsdk_ngx_s*.lib`, `libnvsdk_ngx.a` | no | static NGX client library the shim links |
-| `staged/<rid>/rel/` | no | production feature DLL (`nvngx_dlss.dll` / `libnvidia-ngx-dlss.so.*`) |
-| `staged/<rid>/dev/` | no | watermarked development DLL with the debug overlay; never ship |
-| `doc/` | no | programming guide PDF (`-IncludeDocs`) |
+| `staged/<rid>/rel/` | no | production feature DLLs: Super Resolution (`nvngx_dlss.dll` / `libnvidia-ngx-dlss.so.*`) and Frame Generation (`nvngx_dlssg.dll` / `libnvidia-ngx-dlssg.so.*`) |
+| `staged/<rid>/dev/` | no | watermarked development DLLs with the debug overlay; never ship |
+| `doc/` | no | DLSS and DLSS-FG programming guides, RTX UI Developer Guidelines (PDFs, `-IncludeDocs`) |
 | `downloaded/<tag>/` | no | raw download cache mirroring upstream paths |
 
-## The feature DLL is not part of any package
+## The feature DLLs are not part of any package
 
 By decision (#214) the Ahjo packages ship wrapper code and the shim only. An
-application that uses DLSS obtains `nvngx_dlss.dll` from NVIDIA itself and ships
-it beside its executable (or points `NgxDescription.DlssSearchPaths` at it). The
+application that uses DLSS obtains `nvngx_dlss.dll` (and, for Frame Generation,
+`nvngx_dlssg.dll`) from NVIDIA itself and ships them beside its executable (or
+points `NgxDescription.DlssSearchPaths` at them). Neither is ever committed or
+packed. The
 copies under `staged/` exist so this repo's samples and tests can run on a
 developer's NVIDIA GPU; they are git-ignored and must stay that way.
 
