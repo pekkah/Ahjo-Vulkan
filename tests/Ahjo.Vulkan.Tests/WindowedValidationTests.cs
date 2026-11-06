@@ -228,9 +228,7 @@ public sealed unsafe class WindowedValidationTests
             rec.PipelineBarrier(SwapchainLowLatencyTests.Host.PresentBarrier(swap, imageIndex));
             var wait   = new SemaphoreSubmit(acquired, Stage.ColorAttachmentOutput);
             var signal = new SemaphoreSubmit(swap.GetRenderingDoneFor(imageIndex), Stage.AllGraphics);
-            // Heap arrays: Queue.Submit2's span parameters are not `scoped`, so a
-            // stack span cannot reach them alongside `ref CommandRecorder` (CS8350).
-            host.Queue.Submit2(ref rec, default(Fence), new[] { wait }, new[] { signal });
+            host.Queue.Submit2(ref rec, default(Fence), [wait], [signal]);
         }
         finally { rec.Dispose(); }
         return imageIndex;
