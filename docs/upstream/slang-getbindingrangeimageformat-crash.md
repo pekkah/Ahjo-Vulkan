@@ -20,10 +20,11 @@
 > (existential element *size* under-reported), which is a different defect in a
 > different accessor.
 >
-> **There is, however, an open PR that fixes this incidentally — see
-> "Prior art upstream" below. Read that section before filing: it changes the
-> ask from "here is a one-line fix" to "please land #11344, or apply the
-> one-liner meanwhile, and add a regression test either way."**
+> **Read "Prior art upstream" below before filing.** A PR that fixed this
+> incidentally (#11344) was closed unmerged. Its takeover (#13537) merged
+> without the null guard, and the crash is still present in `v2026.21`
+> (re-run 2026-11-06). The ask is therefore "here is a one-line fix, plus the
+> regression test that would have caught the guard being dropped".
 
 ---
 
@@ -110,6 +111,28 @@ A regression test would fit naturally alongside
 only exercises ranges that do have a leaf variable.
 
 ## Prior art upstream
+
+> **Update 2026-11-06 — the in-flight fix described below did not land.**
+>
+> - #11344 was closed unmerged on 2026-10-09.
+> - It was taken over as
+>   [#13537](https://github.com/shader-slang/slang/pull/13537), "Add texture
+>   format descriptor types (takeover of #11344, merged with master)". That PR
+>   merged on 2026-10-15 and is contained in `v2026.21`.
+> - The null guard did **not** survive the takeover. In `v2026.21`,
+>   `slang-reflection-api.cpp:2833-2834` is still
+>   `auto leafVar = bindingRange.leafVariable;` followed by
+>   `leafVar->findModifier<FormatAttribute>()` with no null check. The same
+>   lines are on `master` at `6d43c8d88f` (2026-11-06).
+> - The repro still crashes against the official `v2026.21` binaries:
+>   - win-x64: `0xC0000005`, 3/3;
+>   - linux-x64: SIGSEGV, exit 139, 3/3. `gdb` frame 0 is again
+>     `spReflectionTypeLayout_getBindingRangeImageFormat`, in
+>     `libslang-compiler.so.0.2026.21`.
+>
+> Points 1 and 2 under "Why this does not retire our guard" are now stronger
+> than they read. Point 3 has already happened: the guard was lost in a respin,
+> and no test noticed.
 
 Searched 2026-08-03. **No issue reports this crash**, but an open PR already
 fixes it as a side effect of unrelated work.
