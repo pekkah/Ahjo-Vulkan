@@ -147,6 +147,45 @@ null-terminated.
   report should say, and it means point 4's guard is required rather than
   conditional. Spec OPEN-4(b).
 
+  **Re-probed 2026-11-06 on `v2026.21`: still crashes. The sequence in the
+  #170 issue body is not the crashing shape on its own.** A standalone C++
+  repro, built against the official release archives, ran against
+  `v2026.14.1` first as the control and then against `v2026.19` and
+  `v2026.21`:
+
+  - The issue's sequence run on `ShaderFixtures.InterfaceSurfaceModule`, whose
+    `Glossy`/`Matte` hold only `float4` fields, does **not** crash on
+    linux-x64 on any of the three versions. It ran 3/3 each through both
+    `getEntryPointCode` and `getTargetCode`, emitted 1 460 bytes, and passed
+    `spirv-val`. The win-x64 probe above measured this same shape, so its
+    1 460 bytes were never a like-for-like comparison with the Linux crash.
+  - The crash needs the concrete type to carry **resources**, which is E14's
+    shape: `Glossy { float4 tint; Texture2D albedo; SamplerState samp; }`.
+    With that, linux-x64 gets SIGSEGV (exit 139) in the fragment entry point's
+    `getEntryPointCode` on `v2026.14.1`, `v2026.19` and `v2026.21` alike. That
+    is 6/6 runs per version, across composites `[module, fs]` and
+    `[module, vs, fs]`. On `v2026.21` the trace is the same as E14's:
+    - frame 0 is `Slang::IRVarLayout::getTypeLayout()`;
+    - below it are `declareVars` ×4, `legalizeInst`,
+      `IRTypeLegalizationPass::processModule`, `legalizeTypes`,
+      `linkAndOptimizeIR`, `_emitEntryPoints`, `_createEntryPointResult` and
+      `ComponentType::getEntryPointCode`.
+  - **win-x64 does not crash on that shape, but what it emits is invalid.** On
+    `v2026.14.1` and `v2026.21`, 3/3 each, every call returns `SLANG_OK` with
+    empty diagnostics. The fragment's SPIR-V then fails
+    `spirv-val --target-env vulkan1.2` with
+    `VUID-StandaloneSpirv-UniformConstant-06677`: legalization splits the
+    texture and sampler out of `Glossy` and emits them as `UniformConstant`
+    variables with no name, no `DescriptorSet` and no `Binding`. That is the
+    same missing var layout that Linux dereferences, handled differently.
+    "linux-x64 only" therefore describes the crash, not the defect.
+    `specialize()` on this shape is broken on both shipped RIDs, which makes
+    the decision above stronger.
+
+  `Specialize` stays out, and #170 stays open for the next bump. That re-probe
+  must use the resource-carrying shape, and it must keep a version that
+  crashed (`v2026.21` will do) as the control.
+
   **No upstream fix exists to wait for — checked 2026-08-18 against
   `v2026.14.1`, which is still Slang's latest release.** #170 was re-scoped from
   "file it upstream" to "re-probe on the next Slang bump", because the upstream
@@ -183,7 +222,8 @@ null-terminated.
   probed on `linux-x64`, and win-x64 does not crash to begin with. The one
   merged change worth re-probing after the next release is PR #11667
   (2026-08-03, existential dynamic-dispatch specialization), though it too is in
-  the typeflow pass rather than the legalizer, so expect no change.
+  the typeflow pass rather than the legalizer, so expect no change. (Confirmed:
+  `v2026.19` and `v2026.21` both contain it and both still crash, 2026-11-06.)
 
 ## Reflection — eleven rules Slang does not hand you
 
@@ -281,14 +321,23 @@ proves nothing.
    `docs/upstream/slang-getbindingrangeimageformat-crash.md` and `.cpp`. Tracked
    as #181; the upstream number belongs here once filed.
 
-   **Upstream already fixes this incidentally, in unmerged PR
-   [#11344](https://github.com/shader-slang/slang/pull/11344)** — it routes both
-   format getters through a helper that null-checks the variable first, which is
-   the same guard by the same reasoning. Our null check therefore mirrors the
-   fix rather than working around it, but only the null-safety half: #11344 also
-   reads a format off the texture *type*, which `v2026.14.1` has no notion of.
-   Both layers come out when a Slang carrying that fix is **pinned** — not when
-   it merges — and the repro in `docs/upstream/` is how you decide.
+   **The upstream fix did not survive its re-land, so the crash is still in
+   `master` and in `v2026.21`.** PR
+   [#11344](https://github.com/shader-slang/slang/pull/11344) routed both
+   format getters through a helper that null-checked the variable first, which
+   is the same guard by the same reasoning. It was **closed unmerged on
+   2026-10-09**. Its takeover,
+   [#13537](https://github.com/shader-slang/slang/pull/13537), was merged on
+   2026-10-15 and is in `v2026.21`, but **the null guard was dropped**:
+   `spReflectionTypeLayout_getBindingRangeImageFormat` still dereferences
+   `leafVariable` unguarded. **Re-run on 2026-11-06 against `v2026.21`:**
+   - win-x64 fails 3/3 with `0xC0000005`;
+   - linux-x64 fails 3/3 with SIGSEGV (exit 139), and frame 0 is still the
+     accessor itself.
+
+   Both layers stay. They come out when a pinned Slang no longer crashes on the
+   repro in `docs/upstream/`, and not when an upstream PR merges: one already
+   merged without the fix.
 
 8. **Member offsets come from `SLANG_PARAMETER_CATEGORY_UNIFORM`, and the test
    asserts them against `OpMemberDecorate … Offset`.** A default or wrong

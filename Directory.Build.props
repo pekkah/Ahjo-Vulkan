@@ -43,9 +43,9 @@
          Asset URLs are derived from the tag:
            https://github.com/shader-slang/slang/releases/download/$(SlangVersion)/slang-$(SlangVersion.TrimStart('v'))-windows-x86_64.zip
            https://github.com/shader-slang/slang/releases/download/$(SlangVersion)/slang-$(SlangVersion.TrimStart('v'))-linux-x86_64.tar.gz -->
-    <SlangVersion>v2026.19</SlangVersion>
-    <SlangWinX64Sha256>fc922f214b5d115f663932e59e80e0f6b6cc6fae140979cf307da6459b6f8f33</SlangWinX64Sha256>
-    <SlangLinuxX64Sha256>bd6cfc47b7353b2cffa36a866b1584749f76f4b2dbebf6dda26bc3fb40dc3c0e</SlangLinuxX64Sha256>
+    <SlangVersion>v2026.21</SlangVersion>
+    <SlangWinX64Sha256>4b6f509e73397175ed36a341beb7ad15f4fff5feaf5f6d95fecf896c0d86b8de</SlangWinX64Sha256>
+    <SlangLinuxX64Sha256>691f9341e5bec099eec97ee30a83bcbef541cee7fe3b4de68a821d42f9506c2f</SlangLinuxX64Sha256>
     <!-- Pinned NVIDIA DLSS (NGX) SDK tag. Independent cadence from the four
          above. See https://github.com/NVIDIA/DLSS/releases.
 

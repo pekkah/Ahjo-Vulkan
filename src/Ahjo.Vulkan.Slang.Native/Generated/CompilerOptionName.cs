@@ -162,5 +162,8 @@ public enum CompilerOptionName
     TraceCoverageBindlessIndex = 158,
     GetCompilerPath = 159,
     BitfieldPackingRules = 160,
+    DisableNotes = 161,
+    DiagnosticFormat = 162,
+    EnableExtendedHLSLBackwardsCompatibility = 163,
     CountOf,
 }

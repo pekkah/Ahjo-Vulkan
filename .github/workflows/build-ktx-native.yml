@@ -47,7 +47,12 @@ jobs:
             runs-on: windows-latest
             lib-file: ktx.dll
           - rid: linux-x64
-            runs-on: ubuntu-latest
+            # Pinned, not ubuntu-latest: on ubuntu-26.04 (GCC 15.2) the
+            # pinned KTX v4.4.2 fails in basisu_kernels_sse.cpp with
+            # "#error Please check your compiler options" (__AVX__ defined).
+            # 24.04 is also the lower glibc baseline for the shipped
+            # libktx.so. Moving off it: #259.
+            runs-on: ubuntu-24.04
             lib-file: libktx.so
           # arm64 and macOS are deliberately absent. libktx links
           # astc-encoder, whose SIMD backend is chosen at compile time, so
