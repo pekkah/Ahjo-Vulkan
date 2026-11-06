@@ -21,16 +21,16 @@ needed.
 
 | File | Upstream | Status |
 |---|---|---|
-| `slang-getbindingrangeimageformat-crash.{md,cpp}` | shader-slang/slang | Not filed. Tracked as #181. Guard: `SlangReflection.ImageFormatOf`. Fixed incidentally by open PR [#11344](https://github.com/shader-slang/slang/pull/11344), unmerged — see "Prior art upstream" in the report. Repro last re-run 2026-08-03 against the pinned `v2026.14.1`: still crashes (`0xC0000005`). |
+| `slang-getbindingrangeimageformat-crash.{md,cpp}` | shader-slang/slang | Not filed. Tracked as #181. Guard: `SlangReflection.ImageFormatOf`. The incidental fix in PR [#11344](https://github.com/shader-slang/slang/pull/11344) was closed unmerged (2026-10-09). Its takeover [#13537](https://github.com/shader-slang/slang/pull/13537) merged 2026-10-15 **without** the null guard; see "Prior art upstream" in the report. Repro last re-run 2026-11-06 against the pinned `v2026.21`: still crashes on win-x64 (`0xC0000005`, 3/3) and on linux-x64 (SIGSEGV, 3/3). |
 
-**#170 has no file here, deliberately.** The `IComponentType::specialize`
-segfault it tracks (interface-typed `ParameterBlock`, crash in
-`Slang::legalizeTypes`) reproduces on `linux-x64` only and not on `win-x64`, so
-a repro kept here could not be re-run by anyone working on the platform this
-repo's wrapper suite runs on. The sequence lives in the issue body, and the
-upstream check — no fix available as of 2026-08-18, `v2026.14.1` already the
-latest release — is recorded in `src/Ahjo.Vulkan.Slang/CLAUDE.md` next to the
-guard and in OPEN-4(c) of the issue-166 spec.
+**#170 has no file here yet.** It tracks the `IComponentType::specialize`
+segfault: an interface-typed `ParameterBlock`, crashing in
+`Slang::legalizeTypes`. The process dies on `linux-x64` only. On `win-x64`
+the same shape returns success and emits SPIR-V that fails `spirv-val`. The
+sequence lives in the issue body. Its re-probe on 2026-11-06 against
+`v2026.21` (still crashes; the impl type must carry resources for it to
+reproduce) is recorded in `src/Ahjo.Vulkan.Slang/CLAUDE.md` next to the
+guard. The earlier upstream check is in OPEN-4(c) of the issue-166 spec.
 
 ## Re-testing after a version bump
 
