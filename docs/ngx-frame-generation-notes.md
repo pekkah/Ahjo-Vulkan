@@ -112,9 +112,10 @@ It also issues one **non-failing** advisory: a `DiagnosticSeverity.Warning`
 through `AhjoDiagnostics.Sink` when `OutputReal` is bound and the `Backbuffer`'s
 known usage lacks `TransferSrc` (below).
 
-Matrix orientation, `MvecScale` semantics and the final image-layout contract
-are **measured in #253 PR C**, not asserted here. Until then the wrapper copies
-the matrices as given.
+Matrix orientation and `MvecScale` semantics are **measured in #253 PR C**, not
+asserted here. Until then the wrapper copies the matrices as given. The
+usage and layout findings below were measured in PR B; PR C confirms the entry
+layouts in a presenting sample.
 
 ## Usages and layouts the layer found (#253 PR B)
 
