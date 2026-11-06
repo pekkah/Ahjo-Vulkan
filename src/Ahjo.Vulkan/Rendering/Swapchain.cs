@@ -28,7 +28,7 @@ namespace Ahjo.Vulkan;
 /// without queue-ownership transfers. Unified-family hardware keeps
 /// the spec-default <c>VK_SHARING_MODE_EXCLUSIVE</c>.</para>
 /// </remarks>
-public sealed unsafe class Swapchain : IDisposable
+public sealed unsafe partial class Swapchain : IDisposable
 {
     private readonly Device       _device;
     private readonly Surface      _surface;
@@ -226,16 +226,38 @@ public sealed unsafe class Swapchain : IDisposable
     {
         ArgumentNullException.ThrowIfNull(device);
         if (desc.Surface.IsNull) throw new ArgumentException("Surface is null.", nameof(desc));
+        if (desc.LowLatency && !device.IsNvLowLatency2Enabled)
+            throw new InvalidOperationException(
+                "SwapchainDescription.LowLatency is true but the device was created without VK_NV_low_latency2. Add VulkanExtensions.NvLowLatency2 and VulkanExtensions.KhrPresentId to DeviceDescription.Extensions (check PhysicalDevice.SupportsExtension first), or set LowLatency = false.");
 
         _device        = device;
         _surface       = desc.Surface;
         // Owned by the Swapchain so its lifetime tracks the per-image
         // semaphore array's. Internal — not exposed to callers.
         _semaphorePool = new SemaphorePool(device);
+        // Reflex low latency (#261) is a construction-time opt-in, sticky
+        // across Recreate. The sleep semaphore comes from the swapchain's own
+        // pool (fresh, so its counter starts at 0) and is not tied to the
+        // VkSwapchainKHR, so it survives Recreate; the pool destroys it in
+        // Dispose.
+        _lowLatency = desc.LowLatency;
+        if (_lowLatency)
+            _sleepSemaphore = _semaphorePool.AcquireTimeline();
         // Zero extent at construction (app launched minimized, #110) is a
         // legal starting state: no VkSwapchainKHR exists yet; the first
         // non-minimized Recreate performs the initial create.
-        _state = CreateOrRecreate(in desc, oldSwapchain: null);
+        try
+        {
+            _state = CreateOrRecreate(in desc, oldSwapchain: null);
+        }
+        catch
+        {
+            // Dispose never runs for a constructor that throws; release the
+            // pool (and the sleep semaphore it owns) here.
+            _semaphorePool.Dispose();
+            throw;
+        }
+        ReapplySleepModeAfterCreate();
     }
 
     /// <summary>
@@ -244,7 +266,13 @@ public sealed unsafe class Swapchain : IDisposable
     /// new <see cref="SwapchainDescription.Width"/> /
     /// <see cref="SwapchainDescription.Height"/> on resize. The
     /// <see cref="Surface"/> field MUST equal the surface this swapchain
-    /// was originally built against.
+    /// was originally built against, and
+    /// <see cref="SwapchainDescription.LowLatency"/> MUST equal the value it
+    /// was constructed with (<see cref="IsLowLatencyEnabled"/>); either
+    /// mismatch throws <see cref="ArgumentException"/>. A low-latency
+    /// swapchain re-chains the latency create-info and re-applies
+    /// <see cref="LatencySleepMode"/> on the new handle, and the KHR
+    /// present-id high-water mark resets to 0.
     /// </summary>
     /// <param name="desc">New swapchain parameters.</param>
     /// <param name="syncBeforeDestroy">
@@ -323,6 +351,10 @@ public sealed unsafe class Swapchain : IDisposable
         if (desc.Surface.Handle != _surface.Handle)
             throw new ArgumentException(
                 "Recreate must use the same Surface this Swapchain was constructed with.",
+                nameof(desc));
+        if (desc.LowLatency != _lowLatency)
+            throw new ArgumentException(
+                "Recreate must use the same LowLatency value this Swapchain was constructed with (" + _lowLatency + ").",
                 nameof(desc));
         // Fail fast after device loss instead of attempting a drain +
         // create against a dead device (#120). The cached exception keeps
@@ -420,10 +452,15 @@ public sealed unsafe class Swapchain : IDisposable
             // freshly created swapchain. Destroying it immediately is
             // legal — none of its images were acquired or presented. (Its
             // fresh RenderingDone semaphores stay tracked by
-            // _semaphorePool and are recovered at Dispose.)
+            // _semaphorePool and are recovered at Dispose.) Any views that step
+            // did create are destroyed first: they reference the new images,
+            // and a view must not outlive the swapchain that owns its image.
             VkSwapchainKHR_T* created = _handle;
             if (created != null && created != old)
+            {
+                DestroyViews();
                 Vk.vkDestroySwapchainKHR(_device.Handle, created, null);
+            }
             // Passing oldSwapchain retires it even when creation fails
             // (#112): the object must not keep referencing the retired
             // handle, and a retry must not pass it as oldSwapchain again.
@@ -451,6 +488,7 @@ public sealed unsafe class Swapchain : IDisposable
         }
 
         RetireOrDestroy(old, oldSems, fullIdle);
+        ReapplySleepModeAfterCreate();
         return _state;
     }
 
@@ -693,14 +731,121 @@ public sealed unsafe class Swapchain : IDisposable
         ArgumentNullException.ThrowIfNull(queue);
         ObjectDisposedException.ThrowIf(_disposed, this);
         ThrowIfNotPresentable();
+        return PresentCore(queue, imageIndex, waitSemaphore.Handle, 0);
+    }
 
-        VkSemaphore_T*    waitRaw = waitSemaphore.Handle;
+    /// <summary>
+    /// <see cref="Present(Queue, uint)"/> with a KHR present id: chains
+    /// <c>VkPresentIdKHR { swapchainCount = 1, pPresentIds = &amp;presentId }</c>
+    /// when <paramref name="presentId"/> is non-zero (issue #261).
+    /// </summary>
+    /// <param name="queue">The presenting queue.</param>
+    /// <param name="imageIndex">The acquired image to present.</param>
+    /// <param name="presentId">0 for "no id" (the plain present, no
+    /// <c>pNext</c>), otherwise an id strictly greater than the last non-zero
+    /// id presented on the current <c>VkSwapchainKHR</c>. The high-water mark
+    /// resets to 0 on every create, so one monotonic counter across resizes is
+    /// always valid.</param>
+    /// <remarks>
+    /// <para><b>KHR present ids are not Reflex frame ids.</b> A KHR id is per
+    /// <c>vkQueuePresentKHR</c> and strictly increasing per swapchain; the
+    /// frame id passed to <see cref="SetLatencyMarker"/> is per rendered frame.
+    /// A frame-generation frame presents twice and so needs two distinct KHR
+    /// ids (for example <c>2N</c> and <c>2N+1</c>) while both presents carry
+    /// the same frame id N.</para>
+    /// <para><c>Present(q, i, default)</c> is ambiguous (CS0121) between this
+    /// overload and <see cref="Present(Queue, uint, in BinarySemaphore)"/>;
+    /// write <c>0UL</c> or <c>default(BinarySemaphore)</c>.</para>
+    /// <para>The result set is that of
+    /// <see cref="Present(Queue, uint, in BinarySemaphore)"/>.</para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">A non-zero
+    /// <paramref name="presentId"/> on a device without
+    /// <c>VK_KHR_present_id</c> (<see cref="Device.IsPresentIdEnabled"/>), or
+    /// the swapchain is not presentable.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A non-zero
+    /// <paramref name="presentId"/> not greater than the last one presented on
+    /// this <c>VkSwapchainKHR</c> (VUID-VkPresentIdKHR-presentIds-04999).</exception>
+    public AcquireResult Present(Queue queue, uint imageIndex, ulong presentId)
+    {
+        ArgumentNullException.ThrowIfNull(queue);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfNotPresentable();
+        ValidatePresentId(presentId);
+        return PresentCore(queue, imageIndex, _renderingDone[imageIndex].Handle, presentId);
+    }
+
+    /// <summary>
+    /// <see cref="Present(Queue, uint, in BinarySemaphore)"/> with a KHR
+    /// present id (issue #261). See
+    /// <see cref="Present(Queue, uint, ulong)"/> for the id rules.
+    /// </summary>
+    /// <param name="queue">The presenting queue.</param>
+    /// <param name="imageIndex">The acquired image to present.</param>
+    /// <param name="waitSemaphore">The rendering-done semaphore the present
+    /// waits on.</param>
+    /// <param name="presentId">0 for "no id", otherwise strictly increasing
+    /// per <c>VkSwapchainKHR</c>.</param>
+    /// <remarks>
+    /// <para><b>KHR present ids are not Reflex frame ids</b>, and a
+    /// frame-generation frame needs two distinct ids — see
+    /// <see cref="Present(Queue, uint, ulong)"/>.</para>
+    /// <para><c>Present(q, i, default)</c> is ambiguous (CS0121); write
+    /// <c>0UL</c> or <c>default(BinarySemaphore)</c>.</para>
+    /// <para>The result set is that of
+    /// <see cref="Present(Queue, uint, in BinarySemaphore)"/>.</para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">A non-zero
+    /// <paramref name="presentId"/> on a device without
+    /// <c>VK_KHR_present_id</c>, or the swapchain is not
+    /// presentable.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A non-zero
+    /// <paramref name="presentId"/> not greater than the last one presented on
+    /// this <c>VkSwapchainKHR</c>.</exception>
+    public AcquireResult Present(Queue queue, uint imageIndex, in BinarySemaphore waitSemaphore, ulong presentId)
+    {
+        ArgumentNullException.ThrowIfNull(queue);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfNotPresentable();
+        ValidatePresentId(presentId);
+        return PresentCore(queue, imageIndex, waitSemaphore.Handle, presentId);
+    }
+
+    private void ValidatePresentId(ulong presentId)
+    {
+        if (presentId == 0) return;
+        if (!_device.IsPresentIdEnabled)
+            throw new InvalidOperationException(
+                "A non-zero presentId requires VK_KHR_present_id in DeviceDescription.Extensions and VkPhysicalDevicePresentIdFeaturesKHR.presentId pushed from ConfigureFeatures.");
+        if (presentId <= _lastPresentId)
+            ThrowPresentIdNotIncreasing(presentId, _lastPresentId);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowPresentIdNotIncreasing(ulong presentId, ulong last)
+        => throw new ArgumentOutOfRangeException(nameof(presentId), presentId,
+            $"presentId must be greater than the last non-zero presentId ({last}) presented on this VkSwapchainKHR (VUID-VkPresentIdKHR-presentIds-04999). The counter resets when Recreate creates a new swapchain.");
+
+    /// <summary>
+    /// The one <c>vkQueuePresentKHR</c> call site. <paramref name="presentId"/>
+    /// 0 leaves <c>pNext</c> null — exactly the pre-#261 call.
+    /// </summary>
+    private AcquireResult PresentCore(Queue queue, uint imageIndex, VkSemaphore_T* waitRaw, ulong presentId)
+    {
         VkSwapchainKHR_T* swap    = _handle;
         uint              idx     = imageIndex;
+        ulong             id      = presentId;
 
+        var pid = new VkPresentIdKHR
+        {
+            sType          = VkStructureType.VK_STRUCTURE_TYPE_PRESENT_ID_KHR,
+            swapchainCount = 1,
+            pPresentIds    = &id,
+        };
         var info = new VkPresentInfoKHR
         {
             sType              = VkStructureType.VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+            pNext              = presentId != 0 ? &pid : null,
             waitSemaphoreCount = waitRaw != null ? 1u : 0u,
             pWaitSemaphores    = waitRaw != null ? &waitRaw : null,
             swapchainCount     = 1,
@@ -708,6 +853,9 @@ public sealed unsafe class Swapchain : IDisposable
             pImageIndices      = &idx,
         };
         VkResult r = Vk.vkQueuePresentKHR(queue.Handle, &info);
+        // VUID-04999 is about ids *passed*, whatever the result, so the
+        // high-water mark moves before the result is mapped.
+        if (presentId != 0) _lastPresentId = presentId;
         return MapPresentationResult(r, "vkQueuePresentKHR", fromAcquire: false);
     }
 
@@ -727,6 +875,9 @@ public sealed unsafe class Swapchain : IDisposable
             Vk.vkDestroySwapchainKHR(_device.Handle, _handle, null);
             _handle = null;
         }
+        // Swapchain first, then let any pending LL2 sleep signal land before
+        // the pool destroys the semaphore it targets (#261).
+        DrainPendingSleepSignal();
         _semaphorePool.Dispose();
     }
 
@@ -797,12 +948,21 @@ public sealed unsafe class Swapchain : IDisposable
         Span<uint> shareFamilies = stackalloc uint[2];
         VkSharingMode sharingMode = ResolveSharingMode(gpu, shareFamilies, out uint familyCount);
 
+        // Reflex opt-in (#261): chained on every create, so a Recreate keeps
+        // it. Without LowLatency pNext stays null — the pre-#261 create.
+        VkSwapchainLatencyCreateInfoNV latencyCi = new()
+        {
+            sType             = VkStructureType.VK_STRUCTURE_TYPE_SWAPCHAIN_LATENCY_CREATE_INFO_NV,
+            latencyModeEnable = 1,
+        };
+
         VkSwapchainCreateInfoKHR ci;
         fixed (uint* pFamilies = shareFamilies)
         {
             ci = new VkSwapchainCreateInfoKHR
             {
                 sType                 = VkStructureType.VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+                pNext                 = _lowLatency ? &latencyCi : null,
                 surface               = _surface.Handle,
                 minImageCount         = count,
                 imageFormat           = _format.format,
@@ -825,6 +985,13 @@ public sealed unsafe class Swapchain : IDisposable
         }
 
         LoadImagesAndViews();
+        // A new VkSwapchainKHR starts its KHR present-id sequence at zero
+        // (VUID-VkPresentIdKHR-presentIds-04999 is per swapchain).
+        _lastPresentId = 0;
+        // The Reflex sleep mode is re-applied by the caller (constructor /
+        // Recreate) only after this create has fully succeeded — see
+        // ReapplySleepModeAfterCreate — so an LL2 failure cannot undo a good
+        // swapchain halfway through its own create.
         return SwapchainState.Ready;
     }
 

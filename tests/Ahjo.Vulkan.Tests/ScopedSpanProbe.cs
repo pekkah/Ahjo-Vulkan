@@ -91,4 +91,12 @@ internal static unsafe class ScopedSpanProbe
         rec.SetEvent(in evt, mem, default, default);
         rec.WaitEvent(in evt, mem, default, default);
     }
+
+    /// <summary>
+    /// Issue #261: the per-frame latency-timings read takes a stack span.
+    /// </summary>
+    internal static void ProbeLatencyTimings(Swapchain swap)
+    {
+        swap.GetLatencyTimings(stackalloc LatencyTimings[4]);
+    }
 }

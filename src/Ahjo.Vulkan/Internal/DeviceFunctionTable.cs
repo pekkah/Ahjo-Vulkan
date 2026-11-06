@@ -56,7 +56,10 @@ namespace Ahjo.Vulkan;
 /// debug-info) are legal only on a lost device; KHR reports is legal at any
 /// time but destructive. EXT info and KHR debug-info are called only after
 /// <see cref="Device.IsLost"/>; KHR reports is also called on a healthy
-/// device by <see cref="Device.TryPollDeviceFaults"/> (#244).</description></item>
+/// device by <see cref="Device.TryPollDeviceFaults"/> (#244).
+/// <c>VK_NV_low_latency2</c> is the fifth block (issue #261); all four of its
+/// pointers are swapchain-scoped device-level calls, none is
+/// <c>vkCmd*</c>.</description></item>
 /// </list>
 /// All pointers are resolved at <see cref="Device"/> construction. Cold-path
 /// and instance-level calls keep using the static <c>[DllImport]</c>s on
@@ -223,6 +226,24 @@ internal readonly unsafe struct DeviceFunctionTable
     public readonly delegate* unmanaged[Stdcall]<
         VkDevice_T*, VkDeviceFaultDebugInfoKHR*, VkResult> GetDeviceFaultDebugInfo;
 
+    // ---- Low latency (VK_NV_low_latency2) ----
+
+    /// <summary><c>vkSetLatencySleepModeNV</c>. Null unless VK_NV_low_latency2
+    /// was enabled on this device.</summary>
+    public readonly delegate* unmanaged[Stdcall]<VkDevice_T*, VkSwapchainKHR_T*, VkLatencySleepModeInfoNV*, VkResult> SetLatencySleepMode;
+
+    /// <summary><c>vkLatencySleepNV</c>. Null unless VK_NV_low_latency2 was
+    /// enabled on this device.</summary>
+    public readonly delegate* unmanaged[Stdcall]<VkDevice_T*, VkSwapchainKHR_T*, VkLatencySleepInfoNV*, VkResult>     LatencySleep;
+
+    /// <summary><c>vkSetLatencyMarkerNV</c>. Null unless VK_NV_low_latency2
+    /// was enabled on this device.</summary>
+    public readonly delegate* unmanaged[Stdcall]<VkDevice_T*, VkSwapchainKHR_T*, VkSetLatencyMarkerInfoNV*, void>     SetLatencyMarker;
+
+    /// <summary><c>vkGetLatencyTimingsNV</c>. Null unless VK_NV_low_latency2
+    /// was enabled on this device.</summary>
+    public readonly delegate* unmanaged[Stdcall]<VkDevice_T*, VkSwapchainKHR_T*, VkGetLatencyMarkerInfoNV*, void>     GetLatencyTimings;
+
     // ---- Pipeline barriers (sync2) ----
 
     public readonly delegate* unmanaged[Stdcall]<
@@ -340,6 +361,11 @@ internal readonly unsafe struct DeviceFunctionTable
         GetDeviceFaultInfo      = null;
         GetDeviceFaultReports   = null;
         GetDeviceFaultDebugInfo = null;
+
+        SetLatencySleepMode = null;
+        LatencySleep        = null;
+        SetLatencyMarker    = null;
+        GetLatencyTimings   = null;
 
         // Core hot-path commands. The wrapper rejects pre-1.3 devices, so
         // every one of these resolves to a valid pointer; the resulting
@@ -588,6 +614,33 @@ internal readonly unsafe struct DeviceFunctionTable
                 ResolveExtensionRequired(
                     Utf8Name.FromLiteral(DeviceExtensionNames.GetDeviceFaultDebugInfo),
                     DeviceExtensionNames.KhrDeviceFault);
+        }
+
+        // VK_NV_low_latency2: four swapchain-scoped device-level calls.
+        // vkQueueNotifyOutOfBandNV is deliberately not resolved — the wrapper
+        // exposes no out-of-band queue (issue #261 spec D3).
+        if (IsExtensionEnabled(enabledExtensions, DeviceExtensionNames.NvLowLatency2))
+        {
+            SetLatencySleepMode =
+                (delegate* unmanaged[Stdcall]<VkDevice_T*, VkSwapchainKHR_T*, VkLatencySleepModeInfoNV*, VkResult>)
+                ResolveExtensionRequired(
+                    Utf8Name.FromLiteral(DeviceExtensionNames.SetLatencySleepMode),
+                    DeviceExtensionNames.NvLowLatency2);
+            LatencySleep =
+                (delegate* unmanaged[Stdcall]<VkDevice_T*, VkSwapchainKHR_T*, VkLatencySleepInfoNV*, VkResult>)
+                ResolveExtensionRequired(
+                    Utf8Name.FromLiteral(DeviceExtensionNames.LatencySleep),
+                    DeviceExtensionNames.NvLowLatency2);
+            SetLatencyMarker =
+                (delegate* unmanaged[Stdcall]<VkDevice_T*, VkSwapchainKHR_T*, VkSetLatencyMarkerInfoNV*, void>)
+                ResolveExtensionRequired(
+                    Utf8Name.FromLiteral(DeviceExtensionNames.SetLatencyMarker),
+                    DeviceExtensionNames.NvLowLatency2);
+            GetLatencyTimings =
+                (delegate* unmanaged[Stdcall]<VkDevice_T*, VkSwapchainKHR_T*, VkGetLatencyMarkerInfoNV*, void>)
+                ResolveExtensionRequired(
+                    Utf8Name.FromLiteral(DeviceExtensionNames.GetLatencyTimings),
+                    DeviceExtensionNames.NvLowLatency2);
         }
     }
 

@@ -513,9 +513,19 @@ spec and plan (OPEN-3, decided).
 **User decision at approval (2026-11-06):** that issue **gates #253 PR C**.
 #253 does not close until Reflex has landed, so that `HelloFrameGen`
 demonstrates the full latency setup NVIDIA's guidelines require (F1). This spec
-does **not** design the Reflex API. PR C consumes whatever API that issue's
-approved spec delivers. The FG consumer contract states the guideline
-requirement verbatim and measures latency with Reflex on and off (D9).
+does **not** design the Reflex API. That issue is **#261**, and its approved
+spec is `2026-11-06-issue-261-reflex-low-latency-design.md`. PR C consumes the #261 API:
+- the low-latency members on `Swapchain`;
+- `SwapchainDescription.LowLatency`;
+- `PclStats`;
+- the #261 D5 marker mapping for D5's two presents per rendered frame, which
+  puts an `OutOfBandPresentStart`/`End` pair with the rendered frame's id
+  around each present, inside one `PresentStart`/`End`.
+
+Plan steps 17b and 19i spell it out. Whether the revision-2 driver honours that
+mapping is #261 OPEN-3, measured in plan step 19i, and it is a stop condition
+for PR C. The FG consumer contract states the guideline requirement verbatim
+and measures latency with Reflex on and off (D9).
 
 ### D7. The API: `DlssFrameGenerationFeature`, mirroring `DlssFeature` and its D9 discipline
 
@@ -648,8 +658,8 @@ NVIDIA files now, the `rel/`-only rule, and the watermark as the tell for a
   7. **Validation layer clean**, with any FG-specific VUIDs recorded, as
      #218 D3 recorded `vkCmdClearColorImage`.
   8. **Latency with Reflex,** off/on/boost with FG off and on, plus the Reflex
-     Test Utility result. This uses the API the Reflex issue delivers (D6;
-     plan step 19i).
+     Test Utility result. This uses the #261 API (D6; plan step 19i), and
+     includes the #261 OPEN-3 attribution check.
 
 ### D10. Tests and benchmark
 
@@ -675,12 +685,12 @@ rule.
 |---|---|---|
 | **A** | `setup-ngx.ps1` + pins, rsp + regen, `NgxFeature(s)`, `NgxSupport` feature argument, `NgxContext` FG availability + diagnosed exception, tests, the `docs/ngx-frame-generation-notes.md` stub | OPEN-1 measured first (plan step 1) |
 | **B** | `DlssFrameGenerationDescription/Camera/Inputs/Feature`, `CreateFrameGeneration`, validation, tests, benchmark, package CLAUDE.md | A merged |
-| **R** (separate issue) | Native Reflex (`VK_NV_low_latency2` + PCL Stats) in `Ahjo.Vulkan`. Its own spec, plan and PR(s) | Independent of A/B. It can land in parallel, branched from `main` |
+| **R** (#261) | Native Reflex (`VK_NV_low_latency2` + PCL Stats) in `Ahjo.Vulkan`. Its own spec, plan and PR | Independent of A/B. It can land in parallel, branched from `main` |
 | **C** | `samples/HelloFrameGen` with Reflex wired in, `docs/ngx-frame-generation-notes.md` with the D9 measurements, README updates | **B merged and R merged** |
 
 The current branch `issue-253-dlss-frame-generation` carries this spec and plan
 plus PR A, which closes nothing. PR C closes #253, and it branches from `main`
-only after both PR B and the Reflex issue's PR have merged. Neither one is
+only after both PR B and the #261 PR have merged. Neither one is
 stacked on the other.
 
 ---
@@ -920,8 +930,9 @@ MEASURE steps as priors, not answers:
   for the NGX path. Only Streamline's guide does, for its own interop mode (E4).
 - **OPEN-3 (resolved at approval, 2026-11-06).** A separate `Ahjo.Vulkan` issue
   is filed now for native Reflex: `VK_NV_low_latency2` sleep and markers **plus
-  PCL Stats** (ETW). It **gates #253 PR C** and pekkah/ahjo#2783. Its API is
-  designed in that issue's spec, not here. Plan steps 17b and 19i consume it.
+  PCL Stats** (ETW). That is **#261**. It **gates #253 PR C** and
+  pekkah/ahjo#2783. Its API is designed in `2026-11-06-issue-261-reflex-low-latency-design.md`, not here, and was approved on
+  2026-11-06. Plan steps 17b and 19i consume it.
 - **OPEN-4.** Whether shipping `rel/nvngx_dlssg.dll` in a commercial Ahjo title
   needs anything from NVIDIA beyond the licence's notify-before-release
   clause. The dev watermark's "CONTACT NVIDIA TO OBTAIN DLLs FOR YOUR TITLE"
@@ -934,8 +945,9 @@ MEASURE steps as priors, not answers:
   Reflex QA checklist) accept a native `VK_NV_low_latency2` integration, or
   does it require `NvLowLatencyVk.dll` (the Reflex SDK's documented Vulkan
   path)? It is answerable by running the Reflex Test Utility against the
-  OPEN-3 implementation, or by asking NVIDIA. It belongs to the OPEN-3 issue,
-  not #253.
+  OPEN-3 implementation, or by asking NVIDIA. It belongs to #261, where it is
+  #261 OPEN-2. #261 runs the Reflex On and On + Boost passes; the FG-on pass
+  is plan step 19i.
 - **OPEN-7 (new, F2).** NVIDIA has published nothing either way on the NGX FG
   path's long-term status. Tag history shows active maintenance since v310.4.0,
   and the only public channel (the repo tracker) is disabled. Re-check at

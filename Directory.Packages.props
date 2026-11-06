@@ -31,6 +31,13 @@
     <PackageVersion Include="ppy.SDL3-CS" Version="2026.1002.1" />
   </ItemGroup>
 
+  <!-- Test-only ETW consumer: Ahjo.Vulkan.Tests' PclStatsEtwRoundTripTests
+       opens a real-time session on the PCL Stats provider and decodes its
+       TraceLogging events (issue #261). Never referenced from src/. -->
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="4.0.0" />
+  </ItemGroup>
+
   <!-- On-demand allocation + latency benchmarks. See
        tests/Ahjo.Vulkan.Benchmarks/ for usage. -->
   <ItemGroup>

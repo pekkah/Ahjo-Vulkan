@@ -76,6 +76,25 @@ public ref struct SwapchainDescription
     public uint Height;
 
     /// <summary>
+    /// Opt this swapchain in to NVIDIA Reflex low latency (issue #261).
+    /// <see langword="true"/> chains
+    /// <c>VkSwapchainLatencyCreateInfoNV { latencyModeEnable = VK_TRUE }</c>
+    /// into every <c>vkCreateSwapchainKHR</c> this swapchain makes.
+    /// </summary>
+    /// <remarks>
+    /// <para>The device must have <c>VK_NV_low_latency2</c> enabled — pass
+    /// <see cref="Device.IsNvLowLatency2Enabled"/> here; the recipe is on
+    /// <see cref="VulkanExtensions.NvLowLatency2"/>. The constructor throws
+    /// otherwise.</para>
+    /// <para>The value is fixed for the swapchain's lifetime: every
+    /// <see cref="Swapchain.Recreate"/> must pass the same value, and the
+    /// opt-in and sleep mode carry across the recreate.</para>
+    /// <para>The default <see langword="false"/> gives the pre-#261 create,
+    /// byte for byte (no <c>pNext</c>).</para>
+    /// </remarks>
+    public bool LowLatency;
+
+    /// <summary>
     /// Runs the field initializers. A <c>ref struct</c> does not synthesize a
     /// parameterless constructor for them the way a record struct does, so this
     /// explicit one is what gives <c>new SwapchainDescription()</c> /

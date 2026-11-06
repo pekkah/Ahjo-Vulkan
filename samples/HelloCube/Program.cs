@@ -100,15 +100,73 @@ internal static unsafe class Program
         20, 21, 22,   20, 22, 23,
     ];
 
+    private const string Usage =
+        "Usage: HelloCube [--frames N] [--reflex off|on|boost] [--present fifo|immediate] [--present-id] [--latency-report N] [--skip-sleep] [--borderless]";
+
     private static int Main(string[] args)
     {
         ulong maxFrames = ulong.MaxValue;
-        for (int i = 0; i + 1 < args.Length; i++)
+        // Reflex (issue #261). Defaults: Reflex On (NVIDIA's required default),
+        // FIFO, no KHR present ids, no latency report.
+        LatencySleepMode reflexMode    = LatencySleepMode.On;
+        string           reflexName    = "on";
+        VkPresentModeKHR presentMode   = VkPresentModeKHR.VK_PRESENT_MODE_FIFO_KHR;
+        bool             usePresentId  = false;
+        ulong            latencyReport = 0;
+        // Diagnostics for the OPEN-7 control (issue #261): skip the Reflex
+        // sleep entirely, and/or run borderless fullscreen. Neither is a valid
+        // Reflex integration — --skip-sleep exists only to measure what the
+        // sleep itself costs.
+        bool             skipSleep     = false;
+        bool             borderless    = false;
+        for (int i = 0; i < args.Length; i++)
         {
-            if (args[i] == "--frames" && ulong.TryParse(args[i + 1], out ulong n))
+            string a = args[i];
+            string? v = i + 1 < args.Length ? args[i + 1] : null;
+            if (a == "--frames" && ulong.TryParse(v, out ulong n))
             {
                 maxFrames = n;
-                break;
+                i++;
+            }
+            else if (a == "--reflex" && v is "off" or "on" or "boost")
+            {
+                reflexName = v!;
+                reflexMode = v switch
+                {
+                    "off" => LatencySleepMode.Off,
+                    "on"  => LatencySleepMode.On,
+                    _     => LatencySleepMode.OnPlusBoost,
+                };
+                i++;
+            }
+            else if (a == "--present" && v is "fifo" or "immediate")
+            {
+                presentMode = v == "fifo"
+                    ? VkPresentModeKHR.VK_PRESENT_MODE_FIFO_KHR
+                    : VkPresentModeKHR.VK_PRESENT_MODE_IMMEDIATE_KHR;
+                i++;
+            }
+            else if (a == "--present-id")
+            {
+                usePresentId = true;
+            }
+            else if (a == "--skip-sleep")
+            {
+                skipSleep = true;
+            }
+            else if (a == "--borderless")
+            {
+                borderless = true;
+            }
+            else if (a == "--latency-report" && ulong.TryParse(v, out ulong r))
+            {
+                latencyReport = r;
+                i++;
+            }
+            else
+            {
+                Console.Error.WriteLine(Usage);
+                return 2;
             }
         }
 
@@ -130,6 +188,10 @@ internal static unsafe class Program
 
         using var window = new SdlWindow("Ahjo.Vulkan — HelloCube (W: wireframe • Esc: quit)", 1024, 768,
             hidden: false, resizable: true);
+        if (borderless)
+            window.SetBorderlessFullscreen();
+        if (skipSleep)
+            Console.WriteLine("Reflex: sleep skipped (diagnostic; not a valid Reflex integration)");
 
         Utf8Name[] instanceExts = SdlWindow.GetRequiredVulkanInstanceExtensions();
         // Validation enabled — same standing regression check pattern
@@ -143,15 +205,28 @@ internal static unsafe class Program
         });
 
         using var surface = window.CreateVulkanSurface(instance);
-        using var device  = CreatePresentDevice(instance, in surface, out uint family, out bool wireframeSupported);
+        using var device  = CreatePresentDevice(instance, in surface, usePresentId,
+            out uint family, out bool wireframeSupported);
+        usePresentId &= device.IsPresentIdEnabled;
+
+        Console.WriteLine(device.IsNvLowLatency2Enabled
+            ? "Reflex: available (VK_NV_low_latency2)"
+            : "Reflex: unavailable on this GPU — PCL markers only");
 
         var swapDesc = new SwapchainDescription
         {
-            Surface = surface,
-            Width   = window.Width,
-            Height  = window.Height,
+            Surface              = surface,
+            Width                = window.Width,
+            Height               = window.Height,
+            PreferredPresentMode = presentMode,
+            LowLatency           = device.IsNvLowLatency2Enabled,
         };
         using var swap = new Swapchain(device, in swapDesc);
+        if (swap.IsLowLatencyEnabled)
+        {
+            swap.SetLatencySleepMode(in reflexMode);
+            Console.WriteLine($"Reflex mode: {reflexName} ({reflexMode})");
+        }
 
         // ---- Vertex + index buffers (host-visible mapped — small payload). ----
         ulong vbBytes = (ulong)(CubeVertices.Length * sizeof(Vertex));
@@ -326,6 +401,20 @@ internal static unsafe class Program
         Console.WriteLine($"Swapchain: {swap.Format} {swap.Extent.width}x{swap.Extent.height}, {swap.ImageCount} images, {swap.PresentMode}");
         Console.WriteLine($"Texture:   {texW}x{texH} ({mipLevels} mips), {pixels.Length:N0} bytes pre-upload.");
 
+        // PC Latency Stats (issue #261): all vendors, always on. The SDL message
+        // hook turns the ping into PclStats.NotifyPingReceived; the next
+        // SimulationStart marker emits PC_LATENCY_PING with the same frame id.
+        PclStats.Initialize(new PclStatsOptions());
+        window.EnablePclPingHook();
+
+        // One frame id per loop iteration (= rendered frame), starting at 1;
+        // KHR present ids are a separate, per-present counter.
+        ulong frameId        = 0;
+        ulong nextPresentId  = 1;
+        ulong sleepTimeouts  = 0;
+        long  sleepTicks     = 0;
+        Span<LatencyTimings> timings = stackalloc LatencyTimings[64];
+
         var clock = Stopwatch.StartNew();
         ulong frame = 0;
         bool  wireframe = false;
@@ -333,13 +422,34 @@ internal static unsafe class Program
         {
             while (!window.ShouldClose)
             {
+                frameId++;
+
+                // Reflex sleep: once per rendered frame, before input sampling.
+                // A no-op returning Signaled when the swapchain is not opted in.
+                // --skip-sleep is the OPEN-7 diagnostic control only.
+                if (!skipSleep)
+                {
+                    long sleepStart = Stopwatch.GetTimestamp();
+                    if (swap.LatencySleep(TimeSpan.FromSeconds(1)) == WaitState.Timeout)
+                        sleepTimeouts++;
+                    sleepTicks += Stopwatch.GetTimestamp() - sleepStart;
+                }
+
+                swap.SetLatencyMarker(LatencyMarker.SimulationStart, frameId);
                 window.PumpEvents();
-                if (window.ShouldClose) break;
+                if (window.ConsumeLeftClick())
+                    swap.SetLatencyMarker(LatencyMarker.TriggerFlash, frameId);
+                if (window.ShouldClose)
+                {
+                    swap.SetLatencyMarker(LatencyMarker.SimulationEnd, frameId);
+                    break;
+                }
                 if (window.ConsumeWireframeToggle() && wireframeSupported)
                 {
                     wireframe = !wireframe;
                     Console.WriteLine($"Wireframe: {(wireframe ? "on" : "off")}");
                 }
+                swap.SetLatencyMarker(LatencyMarker.SimulationEnd, frameId);
 
                 // Terminal first (#222): a lost surface can never be recovered
                 // by Recreate, so this must be tested BEFORE the "not Ready ->
@@ -373,7 +483,7 @@ internal static unsafe class Program
                 if (swap.State != SwapchainState.Ready || resized ||
                     swap.Extent.width != window.Width || swap.Extent.height != window.Height)
                 {
-                    if (!TryRecreate(device, swap, ring, in surface, window))
+                    if (!TryRecreate(device, swap, ring, in surface, window, presentMode))
                     {
                         // Still minimized. Sleep rather than spin; a real
                         // application blocks on the event queue instead.
@@ -387,6 +497,7 @@ internal static unsafe class Program
                     depth = DepthBuffer.Create(device, swap.Extent.width, swap.Extent.height);
                 }
 
+                swap.SetLatencyMarker(LatencyMarker.RenderSubmitStart, frameId);
                 using var fc = ring.BeginFrame();
 
                 var acq = swap.AcquireNextImage(fc.ImageAcquired, TimeSpan.FromSeconds(1), out uint imageIndex);
@@ -394,7 +505,10 @@ internal static unsafe class Program
                     fc.MarkImageAcquireSignaled();
                 if (acq is AcquireResult.OutOfDate or AcquireResult.Suboptimal)
                 {
-                    if (!TryRecreate(device, swap, ring, in surface, window))
+                    // Abandoned frame: close its submit region under the same
+                    // frame id; the next iteration takes a fresh id.
+                    swap.SetLatencyMarker(LatencyMarker.RenderSubmitEnd, frameId);
+                    if (!TryRecreate(device, swap, ring, in surface, window, presentMode))
                     {
                         System.Threading.Thread.Sleep(MinimizedPollMilliseconds);
                         continue;
@@ -412,6 +526,7 @@ internal static unsafe class Program
                 // which the loop-top guard catches on the next iteration.
                 if (acq != AcquireResult.Success)
                 {
+                    swap.SetLatencyMarker(LatencyMarker.RenderSubmitEnd, frameId);
                     Console.Error.WriteLine($"AcquireNextImage: {acq}");
                     continue;
                 }
@@ -507,7 +622,12 @@ internal static unsafe class Program
                 }
                 finally { rec.Dispose(); }
 
-                var pres = swap.Present(queue, imageIndex);
+                swap.SetLatencyMarker(LatencyMarker.PresentStart, frameId);
+                var pres = usePresentId
+                    ? swap.Present(queue, imageIndex, nextPresentId++)
+                    : swap.Present(queue, imageIndex);
+                swap.SetLatencyMarker(LatencyMarker.PresentEnd, frameId);
+                swap.SetLatencyMarker(LatencyMarker.RenderSubmitEnd, frameId);
                 // Present can only report Success, Suboptimal, OutOfDate or
                 // SurfaceLost: Timeout and NotReady are gated `when fromAcquire`
                 // in MapPresentationResult, so a present returning either is a
@@ -518,7 +638,7 @@ internal static unsafe class Program
                     // No sleep on the false leg: the loop top sees a non-Ready
                     // state on the next iteration and sleeps there. One
                     // un-slept iteration is bounded.
-                    if (TryRecreate(device, swap, ring, in surface, window))
+                    if (TryRecreate(device, swap, ring, in surface, window, presentMode))
                     {
                         depth.Dispose();
                         depth = DepthBuffer.Create(device, swap.Extent.width, swap.Extent.height);
@@ -526,15 +646,19 @@ internal static unsafe class Program
                 }
 
                 frame++;
+                if (latencyReport != 0 && frame % latencyReport == 0)
+                    ReportLatency(swap, timings, frame, sleepTimeouts, frame / clock.Elapsed.TotalSeconds,
+                        sleepTicks * 1000.0 / Stopwatch.Frequency / frameId);
                 if (frame >= maxFrames) break;
             }
 
             device.WaitIdle();
-            Console.WriteLine($"Rendered {frame} frames.");
+            Console.WriteLine($"Rendered {frame} frames ({frame / clock.Elapsed.TotalSeconds:F1} fps).");
             return 0;
         }
         finally
         {
+            PclStats.Shutdown();
             depth.Dispose();
             if (!wirePipeline.IsNull) wirePipeline.Dispose();
             // Save the cache before disposing it. WaitIdle above ensures
@@ -724,17 +848,22 @@ internal static unsafe class Program
     /// rebuilt by the caller, on the success leg only.
     /// </remarks>
     private static bool TryRecreate(
-        Device device, Swapchain swap, FrameRing ring, in Surface surface, SdlWindow window)
+        Device device, Swapchain swap, FrameRing ring, in Surface surface, SdlWindow window,
+        VkPresentModeKHR presentMode)
     {
         device.WaitIdle();
         SwapchainState state;
         try
         {
+            // LowLatency must match the constructed value; the swapchain
+            // re-applies its Reflex sleep mode on the new handle (#261).
             state = swap.Recreate(new SwapchainDescription
             {
-                Surface = surface,
-                Width   = window.Width,
-                Height  = window.Height,
+                Surface              = surface,
+                Width                = window.Width,
+                Height               = window.Height,
+                PreferredPresentMode = presentMode,
+                LowLatency           = device.IsNvLowLatency2Enabled,
             });
         }
         catch (VulkanException e) when (e.Result is VkResult.VK_ERROR_SURFACE_LOST_KHR)
@@ -756,9 +885,42 @@ internal static unsafe class Program
         return state == SwapchainState.Ready;
     }
 
+    /// <summary>
+    /// The <c>--latency-report</c> line (issue #261): mean simulation-start →
+    /// GPU-render-end over the driver's populated reports, the report count,
+    /// how many <see cref="Swapchain.LatencySleep"/> calls timed out so far, and
+    /// how many PCL pings the SDL hook has seen. Reads into a caller-owned stack
+    /// span; the interpolation runs only on the report frame.
+    /// </summary>
+    private static void ReportLatency(
+        Swapchain swap, Span<LatencyTimings> timings, ulong frame, ulong sleepTimeouts, double fps, double meanSleepMs)
+    {
+        int n = swap.GetLatencyTimings(timings);
+        int populated = 0;
+        double sum = 0, osQueueSum = 0;
+        for (int i = 0; i < n; i++)
+        {
+            ref readonly LatencyTimings t = ref timings[i];
+            if (t.FrameId == 0 || t.SimulationStartTimeUs == 0 || t.GpuRenderEndTimeUs < t.SimulationStartTimeUs)
+                continue;
+            populated++;
+            sum += t.GpuRenderEndTimeUs - t.SimulationStartTimeUs;
+            // Time the submitted work sat in the OS render queue before the GPU
+            // started it: where FIFO back-pressure shows up.
+            if (t.OsRenderQueueStartTimeUs != 0 && t.GpuRenderStartTimeUs >= t.OsRenderQueueStartTimeUs)
+                osQueueSum += t.GpuRenderStartTimeUs - t.OsRenderQueueStartTimeUs;
+        }
+        string mean = populated == 0 ? "n/a" : (sum / populated / 1000.0).ToString("F2") + " ms";
+        string osq  = populated == 0 ? "n/a" : (osQueueSum / populated / 1000.0).ToString("F2") + " ms";
+        Console.WriteLine(
+            $"[latency] frame {frame} ({fps:F0} fps): sim->gpu-end mean {mean} (os-queue wait {osq}) over {populated}/{n} reports; " +
+            $"sleep mean {meanSleepMs:F2} ms, timeouts {sleepTimeouts}; pcl pings seen {SdlWindow.PclPingsSeen}");
+    }
+
     private static Device CreatePresentDevice(
         Instance      instance,
         in Surface    surface,
+        bool          presentIdFeature,
         out uint      family,
         out bool      fillModeNonSolidSupported)
     {
@@ -782,11 +944,31 @@ internal static unsafe class Program
         family                    = chosen;
         fillModeNonSolidSupported = nonSolid;
 
-        Utf8Name[] deviceExts = [VulkanExtensions.KhrSwapchain];
+        // Reflex (issue #261): VK_NV_low_latency2 plus its creation dependency
+        // VK_KHR_present_id, only where advertised (NVIDIA). The presentId
+        // feature is pushed only when --present-id will pass non-zero ids.
+        bool reflex = gpu.SupportsExtension(VulkanExtensions.NvLowLatency2);
+        Utf8Name[] deviceExts = reflex
+            ? [VulkanExtensions.KhrSwapchain, VulkanExtensions.NvLowLatency2, VulkanExtensions.KhrPresentId]
+            : [VulkanExtensions.KhrSwapchain];
+        if (presentIdFeature && !reflex)
+            Console.WriteLine("--present-id ignored: VK_KHR_present_id is enabled only with VK_NV_low_latency2.");
         return gpu.CreateDevice(new DeviceDescription
         {
-            Queues     = [new QueueRequest(family, count: 1, priority: 1.0f)],
-            Extensions = deviceExts,
+            Queues            = [new QueueRequest(family, count: 1, priority: 1.0f)],
+            Extensions        = deviceExts,
+            ConfigureFeatures = presentIdFeature && reflex
+                ? static (
+                    ref ChainBuilder<VkDeviceCreateInfo> chain,
+                    ref VkPhysicalDeviceFeatures2        _,
+                    ref VkPhysicalDeviceVulkan12Features _,
+                    ref VkPhysicalDeviceVulkan13Features _,
+                    ref VkPhysicalDeviceVulkan14Features _) =>
+                {
+                    ref var pid = ref chain.Push<VkPhysicalDevicePresentIdFeaturesKHR>();
+                    pid.presentId = 1;
+                }
+                : null,
         });
     }
 
