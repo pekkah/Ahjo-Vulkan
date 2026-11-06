@@ -12,12 +12,14 @@
         native/ngx/include/                 SDK headers (generator input of record)
         native/ngx/NGX-LICENSE.txt          NVIDIA RTX SDKs licence text
         native/ngx/staged/<rid>/            static client lib(s) the shim links
-        native/ngx/staged/<rid>/rel/        production feature DLL  (nvngx_dlss.dll / libnvidia-ngx-dlss.so.*)
-        native/ngx/staged/<rid>/dev/        development feature DLL (debug overlay; NEVER ship)
-        native/ngx/doc/                     programming guide PDF (-IncludeDocs)
+        native/ngx/staged/<rid>/rel/        production feature DLLs (nvngx_dlss.dll + nvngx_dlssg.dll /
+                                            libnvidia-ngx-dlss.so.* + libnvidia-ngx-dlssg.so.*)
+        native/ngx/staged/<rid>/dev/        development feature DLLs (debug overlay; NEVER ship)
+        native/ngx/doc/                     programming guide PDFs (-IncludeDocs)
 
     Everything under downloaded/, staged/ and doc/ is git-ignored. The feature
-    DLL is deliberately not part of any Ahjo package: consumers supply it
+    DLLs (nvngx_dlss.dll for Super Resolution, nvngx_dlssg.dll for Frame
+    Generation) are deliberately not part of any Ahjo package: consumers supply it
     themselves (see issue #214). This script only serves local development,
     the samples, and the shim build.
 
@@ -33,11 +35,13 @@
     or all. Headers and the licence are always fetched.
 
 .PARAMETER IncludeDocs
-    Also fetch the DLSS programming guide PDF into native/ngx/doc/.
+    Also fetch the DLSS and DLSS-FG programming guides and the RTX UI
+    Developer Guidelines (PDFs) into native/ngx/doc/.
 
 .PARAMETER SkipFeatureDll
     Fetch only the headers, the licence text and the static NGX client
-    library — never the nvngx_dlss / libnvidia-ngx-dlss feature DLL. This is
+    library — never the nvngx_dlss / nvngx_dlssg (libnvidia-ngx-dlss /
+    libnvidia-ngx-dlssg) feature DLLs. This is
     what CI uses (.github/workflows/build-ngx-native.yml): with it, a CI run
     is structurally incapable of pulling a licence-encumbered feature DLL,
     rather than merely not being asked to (issue #214). A staging produced
@@ -99,8 +103,9 @@ $BaseUrl = "https://raw.githubusercontent.com/NVIDIA/DLSS/$Version"
 $Headers = @(
     'nvsdk_ngx.h', 'nvsdk_ngx_defs.h', 'nvsdk_ngx_params.h', 'nvsdk_ngx_helpers.h',
     'nvsdk_ngx_vk.h', 'nvsdk_ngx_defs_vk.h', 'nvsdk_ngx_helpers_vk.h',
-    # Ray Reconstruction + Frame Generation headers: not bound yet (#214 "Later"),
-    # pinned now so a later phase does not need a second pin bump.
+    # Ray Reconstruction headers: not bound yet (#214 "Later"), pinned now so a
+    # later phase does not need a second pin bump. Frame Generation is bound
+    # since #253 (nvsdk_ngx_defs_dlssg.h only; see tools/generate-ngx.rsp).
     'nvsdk_ngx_defs_dlssd.h', 'nvsdk_ngx_helpers_dlssd.h', 'nvsdk_ngx_helpers_dlssd_vk.h', 'nvsdk_ngx_params_dlssd.h',
     'nvsdk_ngx_defs_dlssg.h', 'nvsdk_ngx_helpers_dlssg.h', 'nvsdk_ngx_helpers_dlssg_vk.h', 'nvsdk_ngx_params_dlssg.h'
 )
@@ -122,6 +127,8 @@ $WinClientFiles = @(
 $WinFeatureFiles = @(
     @{ Path = 'lib/Windows_x86_64/rel/nvngx_dlss.dll';      Stage = 'staged/win-x64/rel/nvngx_dlss.dll' }
     @{ Path = 'lib/Windows_x86_64/dev/nvngx_dlss.dll';      Stage = 'staged/win-x64/dev/nvngx_dlss.dll' }
+    @{ Path = 'lib/Windows_x86_64/rel/nvngx_dlssg.dll';     Stage = 'staged/win-x64/rel/nvngx_dlssg.dll' }
+    @{ Path = 'lib/Windows_x86_64/dev/nvngx_dlssg.dll';     Stage = 'staged/win-x64/dev/nvngx_dlssg.dll' }
 )
 $LinuxClientFiles = @(
     @{ Path = 'lib/Linux_x86_64/libnvsdk_ngx.a';                       Stage = 'staged/linux-x64/libnvsdk_ngx.a' }
@@ -129,9 +136,13 @@ $LinuxClientFiles = @(
 $LinuxFeatureFiles = @(
     @{ Path = "lib/Linux_x86_64/rel/libnvidia-ngx-dlss.so.$Bare";      Stage = "staged/linux-x64/rel/libnvidia-ngx-dlss.so.$Bare" }
     @{ Path = "lib/Linux_x86_64/dev/libnvidia-ngx-dlss.so.$Bare";      Stage = "staged/linux-x64/dev/libnvidia-ngx-dlss.so.$Bare" }
+    @{ Path = "lib/Linux_x86_64/rel/libnvidia-ngx-dlssg.so.$Bare";     Stage = "staged/linux-x64/rel/libnvidia-ngx-dlssg.so.$Bare" }
+    @{ Path = "lib/Linux_x86_64/dev/libnvidia-ngx-dlssg.so.$Bare";     Stage = "staged/linux-x64/dev/libnvidia-ngx-dlssg.so.$Bare" }
 )
 $DocFiles = @(
     @{ Path = 'doc/DLSS_Programming_Guide_Release.pdf'; Stage = 'doc/DLSS_Programming_Guide_Release.pdf' }
+    @{ Path = 'doc/DLSS-FG Programming Guide.pdf';      Stage = 'doc/DLSS-FG_Programming_Guide.pdf' }
+    @{ Path = 'doc/RTX UI Developer Guidelines.pdf';    Stage = 'doc/RTX_UI_Developer_Guidelines.pdf' }
 )
 
 $isWin = ($PSVersionTable.PSVersion.Major -lt 6) -or $IsWindows
@@ -208,7 +219,8 @@ Write-Host "  platform: $Platform  (win-x64: $wantWin, linux-x64: $wantLinux)  d
 
 foreach ($f in $Files) {
     $relPath = $f.Path
-    $url     = "$BaseUrl/$relPath"
+    # Escaped: two upstream doc names contain spaces.
+    $url     = "$BaseUrl/$([uri]::EscapeUriString($relPath))"
     $local   = Join-Path $downloadRoot ($relPath -replace '/', [IO.Path]::DirectorySeparatorChar)
 
     if ($Force -or -not (Test-Path -LiteralPath $local)) {
@@ -269,9 +281,11 @@ Write-Host "Staged under native/ngx/:" -ForegroundColor Green
 $staged | ForEach-Object { Write-Host "  $_" }
 Write-Host ""
 if ($wantFeatureDll) {
-    Write-Host "Feature DLL for running samples/tests locally (not part of any package; see #214):"
+    Write-Host "Feature DLLs for running samples/tests locally (not part of any package; see #214):"
     if ($wantWin)   { Write-Host "  $(Join-Path $NgxRoot 'staged' 'win-x64'   'rel' 'nvngx_dlss.dll')" }
+    if ($wantWin)   { Write-Host "  $(Join-Path $NgxRoot 'staged' 'win-x64'   'rel' 'nvngx_dlssg.dll')" }
     if ($wantLinux) { Write-Host "  $(Join-Path $NgxRoot 'staged' 'linux-x64' 'rel' "libnvidia-ngx-dlss.so.$Bare")" }
+    if ($wantLinux) { Write-Host "  $(Join-Path $NgxRoot 'staged' 'linux-x64' 'rel' "libnvidia-ngx-dlssg.so.$Bare")" }
     Write-Host "  dev/ builds carry the on-screen debug overlay and must never ship."
 }
 else {

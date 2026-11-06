@@ -15,6 +15,22 @@ namespace Ahjo.Vulkan.Ngx;
 public readonly record struct NgxDescription
 {
     /// <summary>
+    /// Creates a description with every member at its default. Explicit so
+    /// that <c>new NgxDescription()</c> runs the property initializers —
+    /// <see cref="RequiredFeatures"/> defaults to
+    /// <see cref="NgxFeatures.SuperResolution"/>, not to
+    /// <see cref="NgxFeatures.None"/> (CS8983, the #119 pattern).
+    /// </summary>
+    public NgxDescription()
+    {
+        // The two required strings keep the default they always had — unset —
+        // and Validate rejects them with a message naming the property. The
+        // explicit constructor only makes the compiler ask the question.
+        ProjectId     = null!;
+        EngineVersion = null!;
+    }
+
+    /// <summary>
     /// Your application's NVIDIA project ID: a GUID-shaped string, e.g.
     /// <c>"a0f57b54-1daf-4934-90ae-c4035c19df04"</c>. Required. NGX parses it
     /// (DLSS Programming Guide §5.2.1), so a malformed value reaches a
@@ -53,9 +69,11 @@ public readonly record struct NgxDescription
     private static readonly string s_defaultApplicationDataPath = Path.GetTempPath();
 
     /// <summary>
-    /// Extra directories to search for the DLSS feature library, on top of the
-    /// application directory. This is how you point NGX at an
-    /// <c>nvngx_dlss.dll</c> that does not sit beside your executable.
+    /// Extra directories to search for the NGX feature libraries, on top of the
+    /// application directory. NGX searches this one list for <b>every</b>
+    /// feature DLL — <c>nvngx_dlss.dll</c> (Super Resolution) and
+    /// <c>nvngx_dlssg.dll</c> (Frame Generation) alike. This is how you point
+    /// NGX at feature libraries that do not sit beside your executable.
     /// <see langword="null"/> = search the application directory only.
     /// </summary>
     /// <remarks>
@@ -64,6 +82,26 @@ public readonly record struct NgxDescription
     /// deployment mistake names itself.
     /// </remarks>
     public IReadOnlyList<string>? DlssSearchPaths { get; init; }
+
+    /// <summary>
+    /// The features <see cref="NgxContext.Create"/> requires. Defaults to
+    /// <see cref="NgxFeatures.SuperResolution"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><see cref="NgxContext.Create"/> probes every feature, but throws
+    /// its diagnosed exception only for an unavailable feature listed here. An
+    /// unavailable feature that is <i>not</i> listed leaves the context usable
+    /// and reports itself through <see cref="NgxContext.IsSuperSamplingAvailable"/>
+    /// / <see cref="NgxContext.IsFrameGenerationAvailable"/>; the matching
+    /// create call then throws the same diagnosed exception.</para>
+    /// <para>So a renderer that offers Frame Generation only where it works
+    /// asks for <see cref="NgxFeatures.SuperResolution"/> and reads
+    /// <see cref="NgxContext.IsFrameGenerationAvailable"/>; one that uses only
+    /// Frame Generation asks for <see cref="NgxFeatures.FrameGeneration"/> and
+    /// does not need <c>nvngx_dlss.dll</c> at all.</para>
+    /// <para><see cref="NgxFeatures.None"/> and undefined bits are rejected.</para>
+    /// </remarks>
+    public NgxFeatures RequiredFeatures { get; init; } = NgxFeatures.SuperResolution;
 
     /// <summary>
     /// How much NGX logs. Defaults to <see cref="NgxLoggingLevel.Off"/>, which
@@ -110,6 +148,14 @@ public readonly record struct NgxDescription
             throw new ArgumentException(
                 "NgxDescription.EngineVersion is required. Any non-empty version string will do; NGX reports it with telemetry.",
                 nameof(EngineVersion));
+        }
+
+        if (RequiredFeatures == NgxFeatures.None || (RequiredFeatures & ~NgxFeatureMap.AllFeatures) != 0)
+        {
+            throw new ArgumentException(
+                $"NgxDescription.RequiredFeatures is {(uint)RequiredFeatures}; it must be a non-empty combination of " +
+                "NgxFeatures.SuperResolution and NgxFeatures.FrameGeneration.",
+                nameof(RequiredFeatures));
         }
 
         IReadOnlyList<string>? paths = DlssSearchPaths;

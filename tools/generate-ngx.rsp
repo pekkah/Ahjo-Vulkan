@@ -19,14 +19,25 @@ native/ngx/src/ahjo_ngx.h
 # off this list and our own declarations vanish from the output.
 #
 # Traversal alone excludes the entire D3D11/D3D12/CUDA *entry-point* surface,
-# because those live in nvsdk_ngx.h and the dlssd/dlssg headers, which are not
-# listed here. Measured; no --exclude is needed for them.
+# because those live in nvsdk_ngx.h and the dlssd/dlssg helper and params
+# headers, which are not listed here (nvsdk_ngx_defs_dlssg.h is, and declares
+# no entry point). Measured; no --exclude is needed for them.
 --traverse
 native/ngx/src/ahjo_ngx.h
 native/ngx/include/nvsdk_ngx_vk.h
 native/ngx/include/nvsdk_ngx_defs.h
 native/ngx/include/nvsdk_ngx_defs_vk.h
 native/ngx/include/nvsdk_ngx_params.h
+# DLSS Frame Generation (#253): the defs header ONLY. It carries the "DLSSG.*"
+# and "FrameGeneration.*" parameter-name macros and three enums, all C-clean.
+# Do NOT traverse the other two dlssg headers:
+#   - nvsdk_ngx_params_dlssg.h is C++ (default member initializers at :45, :48,
+#     :109) and includes the D3D entry-point header nvsdk_ngx.h (:28). The
+#     wrapper writes FG parameters by name instead of binding its structs.
+#   - nvsdk_ngx_helpers_dlssg_vk.h contains only static inline functions, so it
+#     has no symbol to bind.
+# (spec 2026-11-06-issue-253 D3.)
+native/ngx/include/nvsdk_ngx_defs_dlssg.h
 --include-directory
 native/ngx/stubs
 --include-directory

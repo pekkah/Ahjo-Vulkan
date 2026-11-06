@@ -9,7 +9,7 @@
 | `Ahjo.Vulkan.Slang.Native.Tests/` | Slang binding checks — must pass with **no** Vulkan loader/ICD installed |
 | `Ahjo.Vulkan.Ngx.Native.Tests/` | NGX shim checks — export drift across three lists, struct layout (sizes, alignments **and** offsets), version identity; must pass with **no** Vulkan loader/ICD installed |
 | `Ahjo.Vulkan.Slang.Tests/` | Slang **wrapper** checks — compile to SPIR-V, compose + link a multi-module program, diagnostics as exceptions, and reflection into the `Pipelines/` description types (asserted against `OpDecorate` in the emitted SPIR-V); one driver-gated test builds a `PipelineLayout` from a reflected composed program |
-| `Ahjo.Vulkan.Ngx.Tests/` | NGX **wrapper** checks — shadow-enum drift (values and member counts), `NgxDescription` validation, the `NgxExtensionSet` copy-and-NUL-terminate contract over a fabricated array, `DlssOptimalSettings` availability semantics, and the `AhjoValidation`-gated evaluate checks. Some tests create a `VkDevice`; the DLSS ones need NVIDIA hardware and a consumer-supplied `nvngx_dlss.dll` |
+| `Ahjo.Vulkan.Ngx.Tests/` | NGX **wrapper** checks — shadow-enum drift (values and member counts), `NgxDescription` validation, the `NgxExtensionSet` copy-and-NUL-terminate contract over a fabricated array, `DlssOptimalSettings` availability semantics, and the `AhjoValidation`-gated evaluate checks. Some tests create a `VkDevice`; the DLSS ones need NVIDIA hardware and a consumer-supplied `nvngx_dlss.dll`, and the Frame Generation ones additionally an RTX 40-series or newer GPU and `nvngx_dlssg.dll` |
 | `Ahjo.Vulkan.Benchmarks/` | BenchmarkDotNet — the zero-allocation regression canary |
 
 ## Rules

@@ -2,12 +2,15 @@
 
 Everything on this page is either in the Vulkan specification, in NVIDIA's
 pinned DLSS programming guide (`native/ngx/doc/DLSS_Programming_Guide_Release.pdf`,
-`NgxVersion` `v310.7.0`), or was **measured on hardware** — an RTX 4070 Ti on
-driver 610.47. Traps found by measurement rather than read in a header say so,
-with the driver version, because that provenance is the difference between a
-rule and a rumour.
+`NgxVersion` `v310.9.1`), or was **measured on hardware** — an RTX 4070 Ti on
+driver 610.47. Those driver-610.47 measurements were taken against NGX
+`v310.7.0`, the pin at the time (#218/#219); the pin has since moved to
+`v310.9.1` (#239) and they have not been re-run. Traps found by measurement
+rather than read in a header say so, with the driver version, because that
+provenance is the difference between a rule and a rumour.
 
-`samples/HelloDlaa` is the worked call site for all of it.
+`samples/HelloDlaa` is the worked call site for all of it. DLSS Frame
+Generation has its own page: [ngx-frame-generation-notes.md](ngx-frame-generation-notes.md).
 
 ---
 
@@ -328,8 +331,20 @@ physical device → device extensions → device → `NgxContext.Create`.
   like an unsupported GPU.
 
 *(Both measured, RTX 4070 Ti / 610.47.)* Use
-`NgxSupport.TryGetInstanceExtensions` and `NgxSupport.TryGetDeviceExtensions`,
-and dispose each `NgxExtensionSet` **after** the create call that consumed it.
+`NgxSupport.TryGetInstanceExtensions` and `NgxSupport.TryGetDeviceExtensions`
+with `NgxFeature.SuperResolution`, and dispose each `NgxExtensionSet` **after**
+the create call that consumed it:
+
+```csharp
+NgxSupport.TryGetInstanceExtensions(NgxFeature.SuperResolution, in ngx, out NgxExtensionSet? instanceExts);
+// … create the instance with instanceExts.Names, dispose instanceExts, pick gpu …
+NgxSupport.TryGetDeviceExtensions(NgxFeature.SuperResolution, gpu, in ngx, out NgxExtensionSet? deviceExts);
+// … create the device with deviceExts.Names, dispose deviceExts …
+```
+
+Using Frame Generation as well? Query both features and create with the
+**union** of the two sets (see `NgxSupport`'s remarks and
+[ngx-frame-generation-notes.md](ngx-frame-generation-notes.md)).
 
 ### 4.8 RenderDoc
 

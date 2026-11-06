@@ -55,6 +55,19 @@ naming the expected file and every directory searched. There is no silent
 fallback, and there is no software path: DLSS runs inside the NVIDIA display
 driver.
 
+**Which features a context insists on.** `NgxDescription.RequiredFeatures`
+(default `NgxFeatures.SuperResolution`) lists the features `NgxContext.Create`
+requires. It probes every feature, but throws only for an unavailable one listed
+there. An unlisted one reports itself through `IsSuperSamplingAvailable` /
+`IsFrameGenerationAvailable`, and its create call throws the same diagnosed
+exception later. So a renderer that offers DLSS Frame Generation only where it
+works keeps the default and reads `IsFrameGenerationAvailable`. Frame
+Generation needs a second NVIDIA file, `nvngx_dlssg.dll` /
+`libnvidia-ngx-dlssg.so.<version>`, supplied the same way as `nvngx_dlss.dll`.
+The `NgxSupport` queries take an `NgxFeature`; a renderer using both features
+creates its instance and device with the union of both extension sets. See
+[`docs/ngx-frame-generation-notes.md`](https://github.com/pekkah/Ahjo-Vulkan/blob/main/docs/ngx-frame-generation-notes.md).
+
 The full consumer contract — where to get the DLL, the NVIDIA licence
 obligations that land on **your** application, and the renderer conventions
 (jitter sign, motion-vector direction and space, mip bias, `Reset`, image

@@ -223,6 +223,142 @@ public sealed unsafe class DlssHardwareTests
         }
     }
 
+    // ---- Frame Generation availability (#253 PR A) ---------------------------
+    //
+    // In this class rather than their own, deliberately: NGX's init and
+    // shutdown are process-global, and xUnit runs test CLASSES in parallel. A
+    // second class creating NgxContexts races this one's Shutdown1 into
+    // FAIL_NotInitialized from GetCapabilityParameters — measured on the
+    // first attempt. One class is one serial stream of NGX calls.
+
+    private const NgxFeatures BothFeatures = NgxFeatures.SuperResolution | NgxFeatures.FrameGeneration;
+
+    private static void RequireFrameGeneration()
+        => TestGate.RequireDeviceFeature(
+            NgxTestEnvironment.IsFrameGenerationAvailable,
+            "No RTX 40-series or newer GPU with a DLSS-capable driver, nvngx_dlss.dll and nvngx_dlssg.dll on this host.");
+
+    [Fact]
+    public void TryGetDeviceExtensions_FrameGeneration_ReturnsASet()
+    {
+        RequireFrameGeneration();
+
+        using Instance instance = NgxTestEnvironment.CreateInstance(BothFeatures);
+        PhysicalDevice gpu = instance.PickPhysicalDevice(static (in PhysicalDeviceInfo _) => true);
+        NgxDescription description = NgxTestEnvironment.Description;
+
+        Assert.True(NgxSupport.TryGetDeviceExtensions(NgxFeature.FrameGeneration, gpu, in description, out NgxExtensionSet? extensions));
+        using (extensions)
+        {
+            Assert.NotNull(extensions);
+            Assert.Equal(extensions.Count, extensions.Names.Length);
+        }
+    }
+
+    [Fact]
+    public void Create_RequiringSuperResolution_ReportsFrameGenerationAvailable()
+    {
+        RequireFrameGeneration();
+
+        using Instance instance = NgxTestEnvironment.CreateInstance(BothFeatures);
+        using Device device = NgxTestEnvironment.CreateDevice(instance, BothFeatures, out _);
+
+        NgxDescription description = NgxTestEnvironment.Description;
+        Assert.Equal(NgxFeatures.SuperResolution, description.RequiredFeatures);
+
+        using NgxContext ngx = NgxContext.Create(device, in description);
+        Assert.True(ngx.IsSuperSamplingAvailable);
+        Assert.True(ngx.IsFrameGenerationAvailable);
+        Assert.True(ngx.MaxGeneratedFrames >= 1);
+    }
+
+    [Fact]
+    public void FrameGenerationOnlyContext_WithoutSuperResolution_DiagnosesEverySuperResolutionEntryPoint()
+    {
+        RequireFrameGeneration();
+
+        if (File.Exists(Path.Combine(AppContext.BaseDirectory, "nvngx_dlss.dll")))
+        {
+            TestGate.Unsupported(
+                "nvngx_dlss.dll sits beside the test binary, so NGX finds it regardless of DlssSearchPaths; " +
+                "moving a file the developer installed is not this suite's business.");
+        }
+
+        // A search directory holding ONLY the Frame Generation library, so
+        // Super Resolution is unavailable and Frame Generation is not.
+        string staged = NgxTestEnvironment.FeatureDllSearchPaths[0];
+        string fgOnly = Path.Combine(Path.GetTempPath(), "ahjo-ngx-fg-only-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(fgOnly);
+        File.Copy(Path.Combine(staged, "nvngx_dlssg.dll"), Path.Combine(fgOnly, "nvngx_dlssg.dll"));
+
+        try
+        {
+            NgxDescription description = NgxTestEnvironment.Description with
+            {
+                DlssSearchPaths  = [fgOnly],
+                RequiredFeatures = NgxFeatures.FrameGeneration,
+            };
+
+            using Instance instance = NgxTestEnvironment.CreateInstance(BothFeatures);
+            using Device device = NgxTestEnvironment.CreateDevice(instance, BothFeatures, out uint family);
+            using var pool = new CommandBufferPool(device, family);
+
+            using (NgxContext ngx = NgxContext.Create(device, in description))
+            {
+                Assert.False(ngx.IsSuperSamplingAvailable);
+                Assert.True(ngx.IsFrameGenerationAvailable);
+
+                var settings = Assert.Throws<NgxFeatureLibraryNotFoundException>(
+                    () => ngx.GetOptimalSettings(OutputWidth, OutputHeight, DlssQualityMode.MaxQuality));
+                Assert.Equal(NgxFeature.SuperResolution, settings.Feature);
+                Assert.Contains(fgOnly, settings.SearchedDirectories);
+
+                Assert.False(ngx.TryGetStats(out DlssStats stats));
+                Assert.Equal(default, stats);
+
+                CommandRecorder recorder = pool.Begin();
+                try
+                {
+                    // CommandRecorder is a ref struct, so no Assert.Throws lambda.
+                    NgxFeatureLibraryNotFoundException? create = null;
+                    try
+                    {
+                        using DlssFeature unexpected = ngx.CreateDlss(ref recorder, new DlssFeatureDescription
+                        {
+                            RenderWidth = OutputWidth, RenderHeight = OutputHeight,
+                            OutputWidth = OutputWidth, OutputHeight = OutputHeight,
+                            Mode        = DlssQualityMode.Dlaa,
+                        });
+                    }
+                    catch (NgxFeatureLibraryNotFoundException ex)
+                    {
+                        create = ex;
+                    }
+
+                    Assert.NotNull(create);
+                    Assert.Equal(NgxFeature.SuperResolution, create.Feature);
+                }
+                finally
+                {
+                    recorder.Dispose();
+                }
+            }
+        }
+        finally
+        {
+            // Best effort: NGX keeps nvngx_dlssg.dll mapped after the context
+            // is disposed (measured — Delete fails with access denied), so the
+            // copy can only go once the process exits. It is in %TEMP%.
+            try
+            {
+                Directory.Delete(fgOnly, recursive: true);
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+            {
+            }
+        }
+    }
+
     // ---- fixtures -----------------------------------------------------------
 
     /// <summary>Instance, NVIDIA device, queue, command pool and NGX context.</summary>

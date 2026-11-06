@@ -100,4 +100,15 @@ internal static class NgxParameterNames
     public static readonly Utf8Name DynamicMinRenderHeight = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_Parameter_DLSS_Get_Dynamic_Min_Render_Height);
     public static readonly Utf8Name DynamicMaxRenderWidth  = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_Parameter_DLSS_Get_Dynamic_Max_Render_Width);
     public static readonly Utf8Name DynamicMaxRenderHeight = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_Parameter_DLSS_Get_Dynamic_Max_Render_Height);
+
+    // ---- Frame generation ----------------------------------------------------
+    // Capability keys only (#253 PR A). The create, resource, matrix and scalar
+    // DLSSG.* keys arrive with the code that writes them (PR B), per the
+    // "exactly the keys the wrapper uses" rule above.
+    public static readonly Utf8Name FrameGenerationAvailable             = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_Parameter_FrameGeneration_Available);
+    public static readonly Utf8Name FrameGenerationFeatureInitResult     = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_Parameter_FrameGeneration_FeatureInitResult);
+    public static readonly Utf8Name FrameGenerationNeedsUpdatedDriver    = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_Parameter_FrameGeneration_NeedsUpdatedDriver);
+    public static readonly Utf8Name FrameGenerationMinDriverVersionMajor = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_Parameter_FrameGeneration_MinDriverVersionMajor);
+    public static readonly Utf8Name FrameGenerationMinDriverVersionMinor = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_Parameter_FrameGeneration_MinDriverVersionMinor);
+    public static readonly Utf8Name DlssgMultiFrameCountMax              = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_MultiFrameCountMax);
 }

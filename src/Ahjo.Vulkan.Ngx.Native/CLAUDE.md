@@ -62,7 +62,7 @@ The test suite completes that contract: it skips wholesale without a shim, **unl
 
 ## What is never committed, packed or fetched
 
-The feature DLL — `nvngx_dlss.dll` / `libnvidia-ngx-dlss.so.<version>`. Consumers supply it (#214). `native/ngx/staged/` is git-ignored, `PackNgxRuntimes` packs only the shim we compiled plus `NGX-LICENSE.txt`, and CI fetches with `-SkipFeatureDll` so a CI run is structurally incapable of pulling one rather than merely not asked to. The static client library and archive are not packed either.
+The feature DLLs — `nvngx_dlss.dll` / `libnvidia-ngx-dlss.so.<version>` (Super Resolution) and `nvngx_dlssg.dll` / `libnvidia-ngx-dlssg.so.<version>` (Frame Generation, #253). Consumers supply them (#214). `native/ngx/staged/` is git-ignored, `PackNgxRuntimes` packs only the shim we compiled plus `NGX-LICENSE.txt`, and CI fetches with `-SkipFeatureDll` so a CI run is structurally incapable of pulling one rather than merely not asked to. The static client library and archive are not packed either.
 
 ## The lane
 

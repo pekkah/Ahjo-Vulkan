@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -28,8 +29,15 @@ public sealed unsafe class NgxContext : IDisposable
     private NVSDK_NGX_Parameter* _capabilityParameters;
 
     private readonly bool _superSamplingAvailable;
-    private readonly uint _minDriverVersionMajor;
-    private readonly uint _minDriverVersionMinor;
+    private readonly bool _frameGenerationAvailable;
+    private readonly FeatureDiagnosis _superSamplingDiagnosis;
+    private readonly FeatureDiagnosis _frameGenerationDiagnosis;
+    private readonly uint _maxGeneratedFrames;
+
+    // A copy of NgxDescription.DlssSearchPaths, for the deferred diagnosis an
+    // optional feature's create call throws. Copied so a caller mutating the
+    // list it passed cannot change what the message says was searched.
+    private readonly string[]? _searchPaths;
 
     // Re-entrancy guard. 0 = free, 1 = a call is inside. Only touched when
     // validation is on.
@@ -41,32 +49,47 @@ public sealed unsafe class NgxContext : IDisposable
         nint loader,
         NVSDK_NGX_Parameter* capabilityParameters,
         bool superSamplingAvailable,
-        uint minDriverVersionMajor,
-        uint minDriverVersionMinor)
+        in FeatureDiagnosis superSamplingDiagnosis,
+        bool frameGenerationAvailable,
+        in FeatureDiagnosis frameGenerationDiagnosis,
+        uint maxGeneratedFrames,
+        string[]? searchPaths)
     {
-        _device                 = device;
-        _loader                 = loader;
-        _capabilityParameters   = capabilityParameters;
-        _superSamplingAvailable = superSamplingAvailable;
-        _minDriverVersionMajor  = minDriverVersionMajor;
-        _minDriverVersionMinor  = minDriverVersionMinor;
+        _device                   = device;
+        _loader                   = loader;
+        _capabilityParameters     = capabilityParameters;
+        _superSamplingAvailable   = superSamplingAvailable;
+        _superSamplingDiagnosis   = superSamplingDiagnosis;
+        _frameGenerationAvailable = frameGenerationAvailable;
+        _frameGenerationDiagnosis = frameGenerationDiagnosis;
+        _maxGeneratedFrames       = maxGeneratedFrames;
+        _searchPaths              = searchPaths;
     }
 
     /// <summary>
-    /// Initializes NGX for <paramref name="device"/> and reads DLSS's
-    /// availability off the capability parameter map.
+    /// Initializes NGX for <paramref name="device"/> and reads every wrapped
+    /// feature's availability off the capability parameter map.
     /// </summary>
     /// <exception cref="ArgumentException"><paramref name="description"/> is
-    /// malformed — see <see cref="NgxDescription.ProjectId"/>.</exception>
+    /// malformed — see <see cref="NgxDescription.ProjectId"/> and
+    /// <see cref="NgxDescription.RequiredFeatures"/>.</exception>
     /// <exception cref="NgxFeatureLibraryNotFoundException">
-    /// NVIDIA's feature library was not found. The message lists every
-    /// directory searched. This package does not ship it — see the package
-    /// README.
+    /// The feature library of a feature in
+    /// <see cref="NgxDescription.RequiredFeatures"/> was not found. The message
+    /// lists every directory searched. This package does not ship it — see the
+    /// package README.
     /// </exception>
     /// <exception cref="NgxDriverTooOldException">The installed NVIDIA driver
-    /// is below the minimum DLSS reports.</exception>
-    /// <exception cref="NgxException">Any other NGX failure.</exception>
+    /// is below the minimum a required feature reports.</exception>
+    /// <exception cref="NgxException">Any other NGX failure, including a
+    /// required feature reported unavailable for no stated reason.</exception>
     /// <remarks>
+    /// <para><b>Only <see cref="NgxDescription.RequiredFeatures"/> can make this
+    /// throw for an unavailable feature.</b> Every wrapped feature is probed; one
+    /// that is unavailable but not required leaves the context usable, reports
+    /// itself through <see cref="IsSuperSamplingAvailable"/> /
+    /// <see cref="IsFrameGenerationAvailable"/>, and its create call throws the
+    /// diagnosed exception this method would have thrown.</para>
     /// <para><b>A successful <c>Init</c> does not mean DLSS works.</b> The
     /// feature library is located later, and the capability map is the
     /// documented probe — so this method reads that map and throws rather than
@@ -131,13 +154,7 @@ public sealed unsafe class NgxContext : IDisposable
             }
 
             if (!NgxResult.Succeeded(initResult))
-            {
-                ThrowDiagnosed(
-                    initResult,
-                    featureInitResult: NVSDK_NGX_Result.NVSDK_NGX_Result_Success,
-                    needsUpdatedDriver: 0, minDriverMajor: 0, minDriverMinor: 0,
-                    in description, "NGX Vulkan initialization");
-            }
+                ThrowInitFailed(initResult, description.RequiredFeatures, description.DlssSearchPaths);
 
             initialized = true;
 
@@ -145,24 +162,44 @@ public sealed unsafe class NgxContext : IDisposable
                 NgxApi.NVSDK_NGX_VULKAN_GetCapabilityParameters(&capabilityParameters),
                 "NVSDK_NGX_VULKAN_GetCapabilityParameters");
 
-            // The availability triple. THIS, not Init's return code, is where a
-            // missing nvngx_dlss.dll shows up (spec D5).
-            int  available          = GetIntOrZero(capabilityParameters, NgxParameterNames.SuperSamplingAvailable);
-            int  needsUpdatedDriver = GetIntOrZero(capabilityParameters, NgxParameterNames.SuperSamplingNeedsUpdatedDriver);
-            uint featureInitResult  = GetUIntOrZero(capabilityParameters, NgxParameterNames.SuperSamplingFeatureInitResult);
-            uint minMajor           = GetUIntOrZero(capabilityParameters, NgxParameterNames.SuperSamplingMinDriverVersionMajor);
-            uint minMinor           = GetUIntOrZero(capabilityParameters, NgxParameterNames.SuperSamplingMinDriverVersionMinor);
+            // The availability blocks. THESE, not Init's return code, are where
+            // a missing nvngx_dlss.dll / nvngx_dlssg.dll shows up (spec D5).
+            // For Frame Generation the missing DLL reports the same key as SR —
+            // FrameGeneration.FeatureInitResult == FAIL_FeatureNotFound, with
+            // Available 0 — measured by renaming nvngx_dlssg.dll away on an
+            // RTX 4070 Ti / driver 616.92 (#253 plan step 2).
+            bool srAvailable = GetIntOrZero(capabilityParameters, NgxParameterNames.SuperSamplingAvailable) != 0;
+            var  srDiagnosis = new FeatureDiagnosis(
+                (NVSDK_NGX_Result)GetUIntOrZero(capabilityParameters, NgxParameterNames.SuperSamplingFeatureInitResult),
+                (uint)GetIntOrZero(capabilityParameters, NgxParameterNames.SuperSamplingNeedsUpdatedDriver),
+                GetUIntOrZero(capabilityParameters, NgxParameterNames.SuperSamplingMinDriverVersionMajor),
+                GetUIntOrZero(capabilityParameters, NgxParameterNames.SuperSamplingMinDriverVersionMinor));
 
-            if (available == 0)
-            {
-                ThrowDiagnosed(
-                    NVSDK_NGX_Result.NVSDK_NGX_Result_Success,
-                    (NVSDK_NGX_Result)featureInitResult,
-                    (uint)needsUpdatedDriver, minMajor, minMinor,
-                    in description, "DLSS Super Resolution capability query");
-            }
+            bool fgAvailable = GetIntOrZero(capabilityParameters, NgxParameterNames.FrameGenerationAvailable) != 0;
+            var  fgDiagnosis = new FeatureDiagnosis(
+                (NVSDK_NGX_Result)GetUIntOrZero(capabilityParameters, NgxParameterNames.FrameGenerationFeatureInitResult),
+                (uint)GetIntOrZero(capabilityParameters, NgxParameterNames.FrameGenerationNeedsUpdatedDriver),
+                GetUIntOrZero(capabilityParameters, NgxParameterNames.FrameGenerationMinDriverVersionMajor),
+                GetUIntOrZero(capabilityParameters, NgxParameterNames.FrameGenerationMinDriverVersionMinor));
+            // Absent (FAIL_UnsupportedParameter) when nvngx_dlssg.dll is
+            // missing — GetUIntOrZero turns that into 0, and the clamp below
+            // only applies when FG is available anyway.
+            uint multiFrameCountMax = GetUIntOrZero(capabilityParameters, NgxParameterNames.DlssgMultiFrameCountMax);
 
-            var context = new NgxContext(device, loader, capabilityParameters, superSamplingAvailable: true, minMajor, minMinor);
+            ThrowIfRequiredUnavailable(
+                description.RequiredFeatures,
+                srAvailable, in srDiagnosis,
+                fgAvailable, in fgDiagnosis,
+                description.DlssSearchPaths);
+
+            string[]? searchPaths = description.DlssSearchPaths is { } paths ? [.. paths] : null;
+            uint maxGeneratedFrames = fgAvailable ? Math.Max(1u, multiFrameCountMax) : 0u;
+
+            var context = new NgxContext(
+                device, loader, capabilityParameters,
+                srAvailable, in srDiagnosis,
+                fgAvailable, in fgDiagnosis,
+                maxGeneratedFrames, searchPaths);
             loader               = 0;      // ownership transferred to the context
             capabilityParameters = null;
             return context;
@@ -177,12 +214,44 @@ public sealed unsafe class NgxContext : IDisposable
     }
 
     /// <summary>
-    /// Whether DLSS Super Resolution is available on this device. Always
-    /// <see langword="true"/> for a context that was constructed successfully —
-    /// <see cref="Create"/> throws rather than returning an unusable context —
-    /// and kept as a property so a caller holding a context can assert it.
+    /// Whether DLSS Super Resolution is available on this device, as NGX's
+    /// capability map reported it at <see cref="Create"/>.
     /// </summary>
+    /// <remarks>
+    /// Always <see langword="true"/> when
+    /// <see cref="NgxDescription.RequiredFeatures"/> included
+    /// <see cref="NgxFeatures.SuperResolution"/> — <see cref="Create"/> throws
+    /// otherwise. A context created without that requirement can report
+    /// <see langword="false"/>, and then <see cref="CreateDlss"/> throws the
+    /// diagnosed exception.
+    /// </remarks>
     public bool IsSuperSamplingAvailable => _superSamplingAvailable;
+
+    /// <summary>
+    /// Whether DLSS Frame Generation is available on this device, as NGX's
+    /// capability map reported it at <see cref="Create"/>.
+    /// </summary>
+    /// <remarks>
+    /// This is how a renderer offers Frame Generation only where it works:
+    /// require <see cref="NgxFeatures.SuperResolution"/> (or nothing beyond
+    /// what it needs) and read this. It is <see langword="false"/> on hardware
+    /// below the RTX 40 series and on a host without <c>nvngx_dlssg.dll</c>.
+    /// </remarks>
+    public bool IsFrameGenerationAvailable => _frameGenerationAvailable;
+
+    /// <summary>
+    /// How many frames Frame Generation can generate per rendered frame
+    /// (<c>DLSSG.MultiFrameCountMax</c>), or 0 when
+    /// <see cref="IsFrameGenerationAvailable"/> is <see langword="false"/>.
+    /// </summary>
+    /// <remarks>
+    /// 1 means 2x only: one generated frame between each pair of rendered
+    /// frames. RTX 40-series GPUs are expected at 1 — Multi-Frame Generation
+    /// requires an RTX 50-series GPU (DLSS-FG guide, System Requirements) — and
+    /// an RTX 4070 Ti / driver 616.92 measured 1. Clamped to at least 1 when
+    /// Frame Generation is available.
+    /// </remarks>
+    public uint MaxGeneratedFrames => _maxGeneratedFrames;
 
     /// <summary>
     /// What render extent DLSS wants for <paramref name="outputWidth"/> ×
@@ -203,9 +272,18 @@ public sealed unsafe class NgxContext : IDisposable
     /// enumerates all six modes, and an exception per unavailable one turns a
     /// normal query into control flow.</para>
     /// </remarks>
+    /// <exception cref="NgxException">Super Resolution is unavailable on this
+    /// context (<see cref="IsSuperSamplingAvailable"/> is
+    /// <see langword="false"/>): the diagnosed exception <see cref="Create"/>
+    /// would have thrown had <see cref="NgxDescription.RequiredFeatures"/>
+    /// included it, e.g. <see cref="NgxFeatureLibraryNotFoundException"/>.</exception>
     public DlssOptimalSettings GetOptimalSettings(uint outputWidth, uint outputHeight, DlssQualityMode mode)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+
+        // Without Super Resolution there is no optimal-settings callback to
+        // find, and "out of date or wrong map" would misname the cause.
+        if (!_superSamplingAvailable) ThrowSuperSamplingUnavailable();
 
         EnterExclusive(nameof(GetOptimalSettings));
         try
@@ -264,11 +342,18 @@ public sealed unsafe class NgxContext : IDisposable
     /// least one <see cref="DlssFeature"/> exists.
     /// </summary>
     /// <returns><see langword="false"/> when the installed feature library
-    /// publishes no stats callback; then <paramref name="stats"/> is
-    /// <c>default</c>.</returns>
+    /// publishes no stats callback, or when Super Resolution is unavailable on
+    /// this context (<see cref="IsSuperSamplingAvailable"/>); then
+    /// <paramref name="stats"/> is <c>default</c>.</returns>
     public bool TryGetStats(out DlssStats stats)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (!_superSamplingAvailable)
+        {
+            stats = default;
+            return false;
+        }
 
         EnterExclusive(nameof(TryGetStats));
         try
@@ -336,6 +421,11 @@ public sealed unsafe class NgxContext : IDisposable
     public DlssFeature CreateDlss(ref CommandRecorder recorder, in DlssFeatureDescription description)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+
+        // Reachable since RequiredFeatures exists: a context that did not
+        // require Super Resolution may have been created without it.
+        if (!_superSamplingAvailable) ThrowSuperSamplingUnavailable();
+
         ValidateFeatureDescription(in description);
 
         EnterExclusive(nameof(CreateDlss));
@@ -588,66 +678,155 @@ public sealed unsafe class NgxContext : IDisposable
     }
 
     /// <summary>
+    /// The <see cref="Create"/> throw matrix: throws the diagnosed exception for
+    /// the first feature in <paramref name="required"/> that is unavailable,
+    /// Super Resolution first, and returns otherwise.
+    /// </summary>
+    /// <remarks>
+    /// <c>internal</c> and pure over raw key values so the matrix is testable
+    /// with no device (spec D10, the <see cref="ProjectOptimalSettings"/>
+    /// pattern).
+    /// </remarks>
+    internal static void ThrowIfRequiredUnavailable(
+        NgxFeatures required,
+        bool srAvailable,
+        in FeatureDiagnosis sr,
+        bool fgAvailable,
+        in FeatureDiagnosis fg,
+        IReadOnlyList<string>? searchPaths)
+    {
+        if (!srAvailable && (required & NgxFeatures.SuperResolution) != 0)
+        {
+            ThrowDiagnosed(
+                NVSDK_NGX_Result.NVSDK_NGX_Result_Success, NgxFeature.SuperResolution,
+                in sr, searchPaths, "DLSS Super Resolution capability query");
+        }
+
+        if (!fgAvailable && (required & NgxFeatures.FrameGeneration) != 0)
+        {
+            ThrowDiagnosed(
+                NVSDK_NGX_Result.NVSDK_NGX_Result_Success, NgxFeature.FrameGeneration,
+                in fg, searchPaths, "DLSS Frame Generation capability query");
+        }
+    }
+
+    /// <summary>
+    /// The stored Super Resolution diagnosis, thrown by every SR entry point on
+    /// a context created without SR available.
+    /// </summary>
+    [DoesNotReturn]
+    private void ThrowSuperSamplingUnavailable()
+        => ThrowDiagnosed(
+            NVSDK_NGX_Result.NVSDK_NGX_Result_Success, NgxFeature.SuperResolution,
+            in _superSamplingDiagnosis, _searchPaths, "DLSS Super Resolution capability query");
+
+    /// <summary>
+    /// The feature an init failure is attributed to: the first one in
+    /// <paramref name="required"/>, Super Resolution first — the same order
+    /// <see cref="ThrowIfRequiredUnavailable"/> checks in.
+    /// </summary>
+    internal static NgxFeature FirstRequiredFeature(NgxFeatures required)
+        => (required & NgxFeatures.SuperResolution) != 0 || (required & NgxFeatures.FrameGeneration) == 0
+            ? NgxFeature.SuperResolution
+            : NgxFeature.FrameGeneration;
+
+    /// <summary>
+    /// A failed <c>Init</c>, diagnosed against the first required feature — so
+    /// a <c>FAIL_FeatureNotFound</c> on a Frame-Generation-only context names
+    /// <c>nvngx_dlssg.dll</c>, not <c>nvngx_dlss.dll</c>. <c>internal</c> so
+    /// that is testable with no device.
+    /// </summary>
+    [DoesNotReturn]
+    internal static void ThrowInitFailed(NVSDK_NGX_Result initResult, NgxFeatures required, IReadOnlyList<string>? searchPaths)
+    {
+        var noDiagnosis = new FeatureDiagnosis(NVSDK_NGX_Result.NVSDK_NGX_Result_Success, 0, 0, 0);
+        ThrowDiagnosed(initResult, FirstRequiredFeature(required), in noDiagnosis, searchPaths, "NGX Vulkan initialization");
+    }
+
+    /// <summary>
     /// Maps a failed init or an unavailable feature onto the most specific
     /// exception the evidence supports (spec D5).
     /// </summary>
+    [DoesNotReturn]
     private static void ThrowDiagnosed(
         NVSDK_NGX_Result result,
-        NVSDK_NGX_Result featureInitResult,
-        uint needsUpdatedDriver,
-        uint minDriverMajor,
-        uint minDriverMinor,
-        in NgxDescription description,
+        NgxFeature feature,
+        in FeatureDiagnosis diagnosis,
+        IReadOnlyList<string>? searchPaths,
         string operation)
     {
         const NVSDK_NGX_Result NotFound = NVSDK_NGX_Result.NVSDK_NGX_Result_FAIL_FeatureNotFound;
 
-        if (result == NotFound || featureInitResult == NotFound)
-            throw new NgxFeatureLibraryNotFoundException(NotFound, BuildMissingLibraryMessage(in description));
+        if (result == NotFound || diagnosis.FeatureInitResult == NotFound)
+        {
+            string expected = NgxFeatureMap.ExpectedLibraryFile(feature);
+            string[] searched = BuildSearchedDirectories(searchPaths);
+            throw new NgxFeatureLibraryNotFoundException(
+                NotFound, feature, expected, searched,
+                BuildMissingLibraryMessage(feature, expected, searched));
+        }
 
-        if (needsUpdatedDriver != 0)
+        // "DLSS" for Super Resolution keeps the messages exactly as they were
+        // before Frame Generation existed.
+        string subject = feature == NgxFeature.SuperResolution ? "DLSS" : NgxFeatureMap.DisplayName(feature);
+
+        if (diagnosis.NeedsUpdatedDriver != 0)
         {
             throw new NgxDriverTooOldException(
                 NVSDK_NGX_Result.NVSDK_NGX_Result_FAIL_FeatureNotSupported,
-                $"DLSS is unavailable: the installed NVIDIA driver is older than DLSS requires. " +
-                $"Minimum driver version: {minDriverMajor}.{minDriverMinor}.",
-                minDriverMajor, minDriverMinor);
+                $"{subject} is unavailable: the installed NVIDIA driver is older than {subject} requires. " +
+                $"Minimum driver version: {diagnosis.MinDriverVersionMajor}.{diagnosis.MinDriverVersionMinor}.",
+                diagnosis.MinDriverVersionMajor, diagnosis.MinDriverVersionMinor);
         }
 
         // When the call itself succeeded, the feature's own verdict is the
         // interesting one.
-        NVSDK_NGX_Result reported = NgxResult.Succeeded(result) ? featureInitResult : result;
+        NVSDK_NGX_Result reported = NgxResult.Succeeded(result) ? diagnosis.FeatureInitResult : result;
         if (NgxResult.Succeeded(reported))
         {
             // Available == 0 with no reason recorded anywhere. Say exactly
             // that instead of "failed: Success".
             throw new NgxException(
                 NVSDK_NGX_Result.NVSDK_NGX_Result_FAIL_FeatureNotSupported,
-                $"{operation}: NGX reports DLSS Super Resolution as unavailable on this device and gave no reason " +
-                "(SuperSampling.Available is 0, SuperSampling.FeatureInitResult is Success). The GPU most likely " +
-                "does not support DLSS.");
+                feature == NgxFeature.SuperResolution
+                    ? $"{operation}: NGX reports DLSS Super Resolution as unavailable on this device and gave no reason " +
+                      "(SuperSampling.Available is 0, SuperSampling.FeatureInitResult is Success). The GPU most likely " +
+                      "does not support DLSS."
+                    : $"{operation}: NGX reports DLSS Frame Generation as unavailable on this device and gave no reason " +
+                      "(FrameGeneration.Available is 0, FrameGeneration.FeatureInitResult is Success). The GPU most likely " +
+                      "is not an RTX 40-series or newer (DLSS-FG guide, System Requirements).");
         }
 
         throw new NgxException(reported, NgxResult.Format(reported, operation));
     }
 
-    private static string BuildMissingLibraryMessage(in NgxDescription description)
+    /// <summary>The application directory, then each search path, in order —
+    /// what NGX searched and what the exception reports.</summary>
+    private static string[] BuildSearchedDirectories(IReadOnlyList<string>? searchPaths)
     {
-        string expected = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? "nvngx_dlss.dll"
-            : "libnvidia-ngx-dlss.so.<version>";
+        int count = searchPaths?.Count ?? 0;
+        var searched = new string[count + 1];
+        searched[0] = AppContext.BaseDirectory;
+        for (int i = 0; i < count; i++)
+            searched[i + 1] = searchPaths![i];
+        return searched;
+    }
+
+    private static string BuildMissingLibraryMessage(NgxFeature feature, string expected, string[] searched)
+    {
+        bool sr = feature == NgxFeature.SuperResolution;
 
         var text = new StringBuilder(512);
-        text.Append("DLSS is unavailable: the NVIDIA feature library was not found.\n");
+        text.Append(sr ? "DLSS" : NgxFeatureMap.DisplayName(feature));
+        text.Append(" is unavailable: the NVIDIA feature library was not found.\n");
         text.Append("Expected file: ").Append(expected).Append('\n');
-        text.Append("Searched:\n  ").Append(AppContext.BaseDirectory).Append('\n');
-
-        IReadOnlyList<string>? paths = description.DlssSearchPaths;
-        for (int i = 0; i < (paths?.Count ?? 0); i++)
-            text.Append("  ").Append(paths![i]).Append('\n');
+        text.Append("Searched:\n");
+        for (int i = 0; i < searched.Length; i++)
+            text.Append("  ").Append(searched[i]).Append('\n');
 
         text.Append("This library is NOT shipped by Ahjo.Vulkan.Ngx — the application supplies it from NVIDIA's DLSS SDK ");
-        text.Append("(https://github.com/NVIDIA/DLSS, lib/<plat>/rel/). See docs/ngx-notes.md.");
+        text.Append("(https://github.com/NVIDIA/DLSS, lib/<plat>/rel/). See ");
+        text.Append(sr ? "docs/ngx-notes.md." : "docs/ngx-frame-generation-notes.md.");
         return text.ToString();
     }
 
