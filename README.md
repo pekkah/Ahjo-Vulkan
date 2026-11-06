@@ -8,7 +8,9 @@ NuGet as eight packages:
   C# wrapper. What most callers want. Vulkan + integrated
   [AMD VulkanMemoryAllocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
   are coupled in one wrapper surface (`Allocator`, `AllocatedBuffer`,
-  `AllocatedImage`, `MappedRegion` live here).
+  `AllocatedImage`, `MappedRegion` live here). Also carries NVIDIA Reflex
+  low latency over `VK_NV_low_latency2` on `Swapchain`, and PC Latency Stats
+  markers for every GPU vendor — see [docs/reflex-notes.md](docs/reflex-notes.md).
 - [**Ahjo.Vulkan.Native**](https://www.nuget.org/packages/Ahjo.Vulkan.Native)
   — raw P/Invoke bindings against `vulkan.h`. Pulled in transitively by
   `Ahjo.Vulkan`; referenced directly only if you want to bypass the

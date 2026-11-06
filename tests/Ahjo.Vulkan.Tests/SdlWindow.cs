@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using SDL;
 using static SDL.SDL3;
 
@@ -47,6 +48,7 @@ internal sealed unsafe class SdlWindow : IDisposable
     private nint        _metalView; // SDL_MetalView, populated lazily on macOS.
     private bool        _resized;
     private bool        _wireframeRequested;
+    private bool        _leftClicked;
 
     public nint Handle => (nint)_window;
 
@@ -138,6 +140,9 @@ internal sealed unsafe class SdlWindow : IDisposable
                     if (evt.key.key == SDL_Keycode.SDLK_ESCAPE) ShouldClose         = true;
                     else if (evt.key.key == SDL_Keycode.SDLK_W) _wireframeRequested = true;
                     break;
+                case SDL_EventType.SDL_EVENT_MOUSE_BUTTON_DOWN:
+                    if (evt.button.button == 1) _leftClicked = true;
+                    break;
                 case SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                     int w = 0, h = 0;
                     SDL_GetWindowSizeInPixels(_window, &w, &h);
@@ -164,6 +169,61 @@ internal sealed unsafe class SdlWindow : IDisposable
         bool r = _wireframeRequested;
         _wireframeRequested = false;
         return r;
+    }
+
+    /// <summary>
+    /// Switches to SDL's borderless "desktop" fullscreen (a null display mode)
+    /// and updates <see cref="Width"/>/<see cref="Height"/> once the size
+    /// change arrives through <see cref="PumpEvents"/>.
+    /// </summary>
+    public void SetBorderlessFullscreen()
+    {
+        if (!SDL_SetWindowFullscreenMode(_window, null) || !SDL_SetWindowFullscreen(_window, true))
+            throw new InvalidOperationException($"SDL_SetWindowFullscreen failed: {SDL_GetError()}");
+        SDL_SyncWindow(_window);
+        PumpEvents();
+    }
+
+    /// <summary>
+    /// True once per left mouse button press since the last call — the
+    /// Reflex <c>TriggerFlash</c> marker source in the samples (issue #261).
+    /// </summary>
+    public bool ConsumeLeftClick()
+    {
+        bool r = _leftClicked;
+        _leftClicked = false;
+        return r;
+    }
+
+    /// <summary>
+    /// Installs an SDL Windows message hook that forwards the PC Latency Stats
+    /// ping (<see cref="PclStats.IsPingMessage"/>) to
+    /// <see cref="PclStats.NotifyPingReceived"/> (issue #261). The hook is
+    /// process-wide in SDL; a no-op off Windows.
+    /// </summary>
+    public void EnablePclPingHook()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        SDL_SetWindowsMessageHook(&PclHook, 0);
+    }
+
+    /// <summary>How many ping messages the hook has seen (diagnostics for the
+    /// OPEN-5 hardware check).</summary>
+    public static int PclPingsSeen => Volatile.Read(ref s_pclPingsSeen);
+
+    private static int s_pclPingsSeen;
+
+    // SDL calls this for every Windows message before it is translated and
+    // dispatched. Returning true lets SDL continue processing the message.
+    [UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
+    private static SDLBool PclHook(nint userdata, MSG* msg)
+    {
+        if (msg != null && PclStats.IsPingMessage(msg->message))
+        {
+            Interlocked.Increment(ref s_pclPingsSeen);
+            PclStats.NotifyPingReceived();
+        }
+        return true;
     }
 
     public void Dispose()

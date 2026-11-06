@@ -78,6 +78,18 @@ internal static unsafe class Program
             Console.WriteLine(
                 $"First binding: '{(reflection.DescriptorSetCount > 0 ? reflection.Bindings(0)[0].Name : "<none>")}'.");
 
+            // Issue #261: root the PCL Stats ETW path (advapi32 TraceLogging +
+            // the [UnmanagedCallersOnly] enable callback) so ILC compiles it
+            // rather than trimming it away. Windows-only; no GPU needed.
+            if (OperatingSystem.IsWindows())
+            {
+                PclStats.Initialize(new PclStatsOptions());
+                PclStats.Marker(PclMarker.SimulationStart, 1);
+                PclStats.Marker(PclMarker.SimulationEnd, 1);
+                PclStats.Shutdown();
+                Console.WriteLine("PCL Stats: ok");
+            }
+
             return Render(program);
         }
     }

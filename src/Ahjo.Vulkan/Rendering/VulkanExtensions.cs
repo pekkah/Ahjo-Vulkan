@@ -241,4 +241,57 @@ public static class VulkanExtensions
     /// is on <see cref="KhrShaderAbort"/>.</remarks>
     public static Utf8Name KhrShaderConstantData =>
         Utf8Name.FromLiteral(DeviceExtensionNames.KhrShaderConstantData);
+
+    /// <summary>VK_NV_low_latency2 — device-level. Enables NVIDIA Reflex low
+    /// latency on a <see cref="Swapchain"/> created with
+    /// <see cref="SwapchainDescription.LowLatency"/>:
+    /// <see cref="Swapchain.SetLatencySleepMode"/>,
+    /// <see cref="Swapchain.LatencySleep"/>,
+    /// <see cref="Swapchain.SetLatencyMarker"/> and
+    /// <see cref="Swapchain.GetLatencyTimings"/>. This is the only one of the
+    /// two low-latency names the wrapper gates entry-point resolution
+    /// on.</summary>
+    /// <remarks>
+    /// <para><b>The full enable recipe, once.</b></para>
+    /// <list type="number">
+    /// <item><description>Check support first with
+    /// <see cref="PhysicalDevice.SupportsExtension"/>(<see cref="NvLowLatency2"/>).
+    /// Only NVIDIA drivers advertise it.</description></item>
+    /// <item><description>Put <b>both</b> this name and
+    /// <see cref="KhrPresentId"/> in <see cref="DeviceDescription.Extensions"/>.
+    /// <c>VK_KHR_present_id</c> is this extension's device-creation dependency
+    /// (<c>vk.xml</c>), so <c>vkCreateDevice</c> rejects the list without
+    /// it.</description></item>
+    /// <item><description><c>timelineSemaphore</c> is required and is already
+    /// enabled by default; the extension has no feature struct of its
+    /// own.</description></item>
+    /// <item><description>Push <c>VkPhysicalDevicePresentIdFeaturesKHR { presentId = 1 }</c>
+    /// from <see cref="DeviceDescription.ConfigureFeatures"/> <b>only</b> if
+    /// non-zero present ids will be passed to
+    /// <see cref="Swapchain.Present(Queue, uint, ulong)"/>
+    /// (VUID-VkPresentInfoKHR-pNext-06235). Low latency itself does not need
+    /// it.</description></item>
+    /// <item><description>Create the swapchain with
+    /// <c>SwapchainDescription.LowLatency = device.IsNvLowLatency2Enabled</c>
+    /// (<see cref="Device.IsNvLowLatency2Enabled"/>), and pass the same value
+    /// on every <see cref="Swapchain.Recreate"/>.</description></item>
+    /// </list>
+    /// <para>The frame-loop contract (marker order, frame ids, frame
+    /// generation) is in <c>docs/reflex-notes.md</c>.</para>
+    /// </remarks>
+    public static Utf8Name NvLowLatency2 => Utf8Name.FromLiteral(DeviceExtensionNames.NvLowLatency2);
+
+    /// <summary>VK_KHR_present_id — device-level. Required by
+    /// <see cref="NvLowLatency2"/> as a device-creation dependency, and the
+    /// extension behind the present-id overloads
+    /// <see cref="Swapchain.Present(Queue, uint, ulong)"/> /
+    /// <see cref="Swapchain.Present(Queue, uint, in BinarySemaphore, ulong)"/>.</summary>
+    /// <remarks>Gates <b>no</b> entry point: present ids are a
+    /// <c>VkPresentIdKHR</c> chained on present. Passing a non-zero id also
+    /// needs <c>VkPhysicalDevicePresentIdFeaturesKHR.presentId</c> pushed from
+    /// <see cref="DeviceDescription.ConfigureFeatures"/>; the wrapper cannot see
+    /// that feature after <c>vkCreateDevice</c>, which is why
+    /// <see cref="Device.IsPresentIdEnabled"/> reflects the extension only. The
+    /// full recipe is on <see cref="NvLowLatency2"/>.</remarks>
+    public static Utf8Name KhrPresentId => Utf8Name.FromLiteral(DeviceExtensionNames.KhrPresentId);
 }

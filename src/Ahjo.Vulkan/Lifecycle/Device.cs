@@ -90,6 +90,8 @@ public sealed unsafe class Device : IDisposable
             PhysicalDevice.ContainsExtension(enabledExtensions, "VK_EXT_memory_budget"u8);
         ShaderAbortExtensionEnabled =
             PhysicalDevice.ContainsExtension(enabledExtensions, DeviceExtensionNames.KhrShaderAbort);
+        IsPresentIdEnabled =
+            PhysicalDevice.ContainsExtension(enabledExtensions, DeviceExtensionNames.KhrPresentId);
         // The span is consumed here and never stored — a ReadOnlySpan field
         // in a class would not compile, which is the enforcement.
         Functions      = new DeviceFunctionTable(handle, enabledExtensions);
@@ -209,6 +211,30 @@ public sealed unsafe class Device : IDisposable
     /// enabled.
     /// </summary>
     public bool IsDeviceFaultEnabled => DeviceFaultApi != DeviceFaultApi.None;
+
+    /// <summary>
+    /// <see langword="true"/> iff <c>VK_NV_low_latency2</c> was enabled at
+    /// <c>vkCreateDevice</c> (<see cref="VulkanExtensions.NvLowLatency2"/> in
+    /// <see cref="DeviceDescription.Extensions"/>) and its entry points
+    /// resolved. Pass it as <see cref="SwapchainDescription.LowLatency"/>, and
+    /// hide Reflex UI when it is <see langword="false"/> (issue #261).
+    /// </summary>
+    public bool IsNvLowLatency2Enabled => Functions.LatencySleep != null;
+
+    /// <summary>
+    /// <see langword="true"/> when <c>VK_KHR_present_id</c> was enabled at
+    /// <c>vkCreateDevice</c> (<see cref="VulkanExtensions.KhrPresentId"/> in
+    /// <see cref="DeviceDescription.Extensions"/>). Gates the non-zero ids of
+    /// <see cref="Swapchain.Present(Queue, uint, ulong)"/>.
+    /// </summary>
+    /// <remarks>
+    /// Extension-only. The wrapper cannot see whether
+    /// <c>VkPhysicalDevicePresentIdFeaturesKHR.presentId</c> was pushed —
+    /// Vulkan exposes no post-<c>vkCreateDevice</c> feature query — so the
+    /// validation layer is the oracle for the feature
+    /// (VUID-VkPresentInfoKHR-pNext-06235).
+    /// </remarks>
+    public bool IsPresentIdEnabled { get; }
 
     /// <summary>
     /// Reads why this device was lost, using

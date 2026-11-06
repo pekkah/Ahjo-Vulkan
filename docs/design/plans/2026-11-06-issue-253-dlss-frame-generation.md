@@ -8,7 +8,7 @@ previous one has merged**. Never stack them.
 - **PR A** — steps 1–10: the measurement gate, pins, bindings, and context/support availability.
 - **PR B** — steps 11–16: the feature API, validation, tests and benchmark.
 - **PR C** — steps 17–21: `samples/HelloFrameGen` (with Reflex), the measured contract and docs.
-  It is gated on **both** PR B and the Reflex issue's PR (spec D6/D11).
+  It is gated on **both** PR B and the #261 Reflex PR (spec D6/D11).
 
 **Hardware is required.** Steps 2, 9 (the hardware half), 15, 18 and 19 run
 only on the RTX 4070 Ti with the FG DLL staged. CI cannot run them (#32). Quote
@@ -648,21 +648,22 @@ summary (types, `CreateFrameGeneration`, `Evaluate`) to that stub.
 
 ---
 
-# PR C — branch from `main` after PR B **and** the Reflex issue's PR have merged
+# PR C — branch from `main` after PR B **and** the #261 Reflex PR have merged
 
 **Prerequisites (check both before branching):**
 1. PR B is merged.
-2. The Reflex issue (spec OPEN-3; native `VK_NV_low_latency2` + PCL Stats in
-   `Ahjo.Vulkan`) has an approved spec, and its PR is merged to `main`.
+2. #261 (native `VK_NV_low_latency2` + PCL Stats in `Ahjo.Vulkan`, spec
+   OPEN-3) is merged to `main`. Its spec is `docs/design/specs/2026-11-06-issue-261-reflex-low-latency-design.md` ("#261 spec").
 
-If either is missing, do not start PR C. Never branch PR C from the Reflex
+If either is missing, do not start PR C. Never branch PR C from the #261
 branch or from PR B's branch.
 
-**Reflex API names below are placeholders.** This plan does not design that
-API. Wherever a step says *(Reflex API)*, use the names, signatures and call
-order from the Reflex issue's approved spec and plan. If that spec does not
-cover something a step below needs, **stop and ask**. Do not add to the Reflex
-API from inside PR C.
+**The Reflex API below is #261's, as approved.** Steps 17b and 19i use the
+names, signatures and call order from the #261 spec, section "What #253 PR C
+gets", and from its D3-D7. If the merged API differs from what is written
+here, the merged code and the #261 spec win; report the difference. If a step
+needs something #261 does not provide, **stop and ask**. Do not add to the
+Reflex API from inside PR C.
 
 ## 17. `samples/HelloFrameGen/` (new)
 
@@ -800,40 +801,83 @@ The sample must not allocate per frame. Hoist the `SemaphoreSubmit` spans to
 stack locals (`MemoryMarshal.CreateReadOnlySpan(ref local, 1)`, as
 `FrameContext.cs:163-171` does).
 
-### 17b. Wire Reflex into HelloFrameGen — depends on the Reflex issue's design
+### 17b. Wire Reflex into HelloFrameGen — the #261 API
 
-Each item below names *what* the sample must do. The *how* comes from the
-Reflex issue's spec.
+All names are `Ahjo.Vulkan` public API from #261. Citations like "D5" in this
+step refer to the **#261 spec** unless they say otherwise.
 
-- **Enablement.** Enable whatever instance and device extensions and features
-  the Reflex spec requires, such as `VK_NV_low_latency2` and its present-id
-  dependency, at the init steps above, alongside the NGX unions. *(Reflex API)*
-- **Swapchain.** Create it with whatever Reflex opt-in the Reflex spec
-  defines. `VK_NV_low_latency2` is swapchain-scoped. *(Reflex API)*
+- **Enablement.** At init step 4/5, if
+  `gpu.SupportsExtension(VulkanExtensions.NvLowLatency2)`, add
+  `VulkanExtensions.NvLowLatency2` and `VulkanExtensions.KhrPresentId` to
+  `DeviceDescription.Extensions`, alongside the NGX unions (#261 D2). Do
+  **not** push `VkPhysicalDevicePresentIdFeaturesKHR`: the sample passes no
+  KHR present ids, because Reflex does not need them (#261 D4/E4).
+- **Swapchain.** `new SwapchainDescription { …, LowLatency = device.IsNvLowLatency2Enabled }`.
+  Pass the **same** value on every `Recreate`, because a mismatch throws
+  `ArgumentException` (#261 D3). The wrapper re-applies the sleep mode after
+  each recreate. The sample does not.
 - **Mode.** Reflex Low Latency is **on whenever `--mode fg`**, and the user
   cannot turn it off while FG is on (RTX UI Developer Guidelines, UI l. 149-150;
-  spec F1). Add `--reflex off|on|boost`, default `on`. Combining
-  `--mode fg --reflex off` is a command-line error, exit 2, with a message
-  citing the guideline. `--mode off --reflex off` is allowed, because it is the
-  latency baseline.
-- **Per-frame sleep and markers,** in the order the Reflex spec prescribes:
-  sleep before input/simulation, then simulation, render-submit and
-  present markers around the existing loop. Per D5's two-present frame:
-  - **OPEN for the Reflex spec:** how present markers and present ids map onto
-    *two* presents per rendered frame, the generated one and the real one.
-    The Reflex spec must answer this. If it does not, stop and ask. Do not
-    choose. *(Reflex API)*
-- **PCL Stats.** Initialize at startup, send markers in step with the Reflex
-  markers, and shut down at exit, on every vendor's GPU (UI l. 142-143).
-  *(Reflex API)*
-- **Frame ids.** Use one frame id per rendered frame, shared by Reflex markers,
-  PCL markers and `DlssFrameGenerationInputs.BackbufferFrameId`. The Streamline
-  checklist states the same matching rule for its path
-  (`ProgrammingGuideDLSS_G.md:951`). On the NGX path it is the sample's own
-  consistency rule.
-- **Zero per-frame allocation still holds.** If the Reflex API's per-frame calls
-  are not covered by that issue's benchmark, report it rather than adding a
-  benchmark here.
+  spec F1).
+  - Add `--reflex off|on|boost`, default `on`. Map these once after swapchain
+    creation to `swap.SetLatencySleepMode(LatencySleepMode.Off / .On / .OnPlusBoost)`.
+  - Combining `--mode fg --reflex off` is a command-line error, exit 2, with a
+    message citing the guideline.
+  - `--mode off --reflex off` is allowed, because it is the latency baseline.
+  - If `device.IsNvLowLatency2Enabled` is false (non-NVIDIA, or a driver
+    without the extension), do not call `SetLatencySleepMode`, because it
+    throws. Print `"Reflex: unavailable on this GPU — PCL markers only"`. With
+    `--mode fg`, FG is unavailable anyway (step 7), so the run is `--mode off`.
+- **Per-frame sleep and markers.** These are the #261 D5 sequence, verbatim.
+  Per rendered frame N:
+  ```
+  swap.LatencySleep(TimeSpan.FromSeconds(1))   once per RENDERED frame, before input
+  swap.SetLatencyMarker(LatencyMarker.SimulationStart, N)   (emits a pending PCL ping first)
+    input, simulation; on left click: SetLatencyMarker(TriggerFlash, N)
+  swap.SetLatencyMarker(SimulationEnd, N)
+  swap.SetLatencyMarker(RenderSubmitStart, N)
+    steps 1-5 of the frame loop (render, FG evaluate, blit → i0, Submit2 rec1)
+  swap.SetLatencyMarker(PresentStart, N)
+    SetLatencyMarker(OutOfBandPresentStart, N); swap.Present(queue, i0); SetLatencyMarker(OutOfBandPresentEnd, N)
+    steps 7-9 (acquire i1, blit OutputReal → i1, fc.Submit rec2)
+    SetLatencyMarker(OutOfBandPresentStart, N); swap.Present(queue, i1); SetLatencyMarker(OutOfBandPresentEnd, N)
+  swap.SetLatencyMarker(PresentEnd, N)
+  swap.SetLatencyMarker(RenderSubmitEnd, N)
+  ```
+  - `--mode off` uses the same loop with one present and **no** OOB pair.
+  - Every marker goes on the thread that presents. In this sample there is
+    only one thread.
+  - `SetLatencyMarker` sends the Vulkan marker when the swapchain is opted in,
+    and sends the mapped PCL marker. The exception is the two OOB present
+    markers on an opted-in swapchain: they go to the driver only, because the
+    driver writes PCL 11/12 around its real OS present (#261 spec E6/D7).
+    Do not call `PclStats.Marker` separately for any of these. That would
+    stamp markers twice, and for 11/12 it would put an early timestamp in
+    front of the driver's.
+  - On an abandoned frame (acquire `OutOfDate`), still emit `SimulationEnd` and
+    `RenderSubmitEnd` for N, and do not reuse N.
+  - **Two presents per rendered frame** are attributed to frame N by the
+    OOB-present markers (#261 D5, Vulkan frame-attribution rule 1). Whether the
+    revision-2 driver on the 4070 Ti actually does this is **#261 OPEN-3**,
+    measured in 19i. That is the stop condition: if 19i shows it does not, stop
+    and report. Do not change the marker sequence or the API from PR C.
+- **PCL Stats.** Wire it at startup and shutdown. It runs on every vendor's
+  GPU (UI l. 142-143).
+  - `PclStats.Initialize(new PclStatsOptions())` before the loop.
+  - `window.EnablePclPingHook()`, from #261's `SdlWindow` addition, so the
+    ping message calls `PclStats.NotifyPingReceived()`.
+  - `PclStats.Shutdown()` in the teardown `finally`.
+  - Left-click: `window.ConsumeLeftClick()` → `TriggerFlash`.
+- **Frame ids.** Use one `ulong` per rendered frame, **starting at 1**
+  (`frameId` 0 throws). The same value goes to the Reflex markers, the PCL
+  markers (via `SetLatencyMarker`) and `DlssFrameGenerationInputs.BackbufferFrameId`.
+  The Streamline checklist states the same matching rule for its path
+  (`ProgrammingGuideDLSS_G.md:951`). KHR present ids are a different number
+  space (#261 E4), and the sample uses none.
+- **Zero per-frame allocation still holds.** #261's `LowLatencyBenchmarks` and
+  `PclStatsBenchmarks` cover `LatencySleep`, `SetLatencyMarker`,
+  `GetLatencyTimings` and `PclStats.Marker`. If a call the sample makes is not
+  covered there, report it rather than adding a benchmark here.
 
 ## 18. Build and validation run (PR C)
 
@@ -924,21 +968,49 @@ report.** Do not publish a contract that claims shippable output.
 caveat of `docs/ngx-notes.md` §5. Compare against the guide's 218/384 MB
 estimates (FG guide l. 153-159).
 
-**i. Latency with Reflex (depends on the Reflex issue).** Use the latency
-measurement source the Reflex spec delivers, for example
-`vkGetLatencyTimingsNV` reports *(Reflex API)*. Where possible, cross-check
-against PresentMon's PC-latency column, which reads PCL Stats. Report the
-average PC latency for each of these runs:
+**i. Latency with Reflex (#261).** Use two sources.
+- `swap.GetLatencyTimings(stackalloc LatencyTimings[64])`: the mean of
+  `GpuRenderEndTimeUs - SimulationStartTimeUs` over entries with
+  `FrameId != 0`. Print it every 120 frames with a `--latency-report` flag
+  modelled on #261's HelloCube.
+- PresentMon's PC-latency column, which reads PCL Stats.
+
+Report the average PC latency and FPS for each of these runs:
 - `--mode off --reflex off`
 - `--mode off --reflex on`
 - `--mode fg --reflex on`
 - `--mode fg --reflex boost`
 
+**#261 OPEN-3 check (stop condition).** In the `--mode fg` runs, confirm three
+things:
+- `GetLatencyTimings` reports **one** entry per rendered frame id, not two,
+  with populated `PresentStartTimeUs`/`PresentEndTimeUs`;
+- the FPS reported by timings equals the rendered rate, not twice it;
+- PresentMon's PCL falls inside the guide's FG-on band of 3.0-5.7× average
+  frame time (Reflex guide l. 1237).
+
+**#261 OPEN-8 check (stop condition).** During one `--mode fg --reflex on` run,
+capture an elevated ETW session on the PCL GUID
+(`logman create trace … -p {0d216f06-82a6-4d49-bc4f-8f38ae56efab} 0 5 -ets`,
+then `tracerpt`). This is the method of `docs/reflex-notes.md` §7.5. Confirm:
+- the driver's thread writes **two** 11/12 pairs per rendered frame id N;
+- no 11/12 appears on the sample's own thread.
+
+If either does not hold, **stop and report**. Do not change the marker
+sequence, the forwarding rule or the #261 API from PR C.
+
+If any of these fails, **stop and report**. Do not change the marker sequence
+or the #261 API from PR C.
+
 Also run NVIDIA's Reflex Test Utility (`Reflex_Verification/ReflexTest.exe`,
-Reflex guide §4.2) with FG on, and record pass or warnings. That is the
-evidence for **OPEN-6** (whether a native `VK_NV_low_latency2` integration
-passes NVIDIA's verification). Record the result. Do not interpret it as
-certification.
+Reflex guide §4.2) with FG on, and record pass or warnings verbatim. That is
+the FG-on evidence for **OPEN-6** (= **#261 OPEN-2**): does a native
+`VK_NV_low_latency2` + C# PCL integration pass NVIDIA's verification? #261
+recorded the Reflex On / On + Boost passes without FG. If warnings point at the
+integration path rather than marker placement, stop and report. Otherwise record
+the result, and do not interpret it as certification. Record windowed or
+borderless next to every number, because the utility expects fullscreen
+exclusive (#261 spec, OPEN section).
 
 ## 20. `docs/ngx-frame-generation-notes.md` (fill the PR B stub)
 
@@ -966,9 +1038,12 @@ trap.
    - **NVIDIA's RTX UI Developer Guidelines require it for a title shipping
      FG.** Quote UI l. 88-89, 149-150 and 295 verbatim from the fetched PDF;
    - PCL markers must be on for all vendors;
-   - the native `VK_NV_low_latency2` status, quoting spec F1 and OPEN-6;
-   - a link to the Reflex issue, how the sample wires Reflex (step 17b), and
-     the 19i latency table and Reflex Test Utility result.
+   - the native `VK_NV_low_latency2` status, quoting spec F1 and OPEN-6
+     (= #261 OPEN-2);
+   - a link to #261 and `docs/reflex-notes.md` (the Reflex consumer contract),
+     how the sample wires Reflex (step 17b: the FG marker sequence, OOB pairs
+     around both presents), and the 19i latency table, OPEN-3 check and
+     Reflex Test Utility result.
 6. **Layouts and usages.** Step 18's results.
 7. **VRAM.** Step 19h.
 8. **What the wrapper cannot check.** Pacing, matrix and motion-vector

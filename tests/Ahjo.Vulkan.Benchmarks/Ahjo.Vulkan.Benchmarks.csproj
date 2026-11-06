@@ -22,6 +22,12 @@
     <ProjectReference Include="..\..\src\Ahjo.Vulkan.Ngx\Ahjo.Vulkan.Ngx.csproj" />
   </ItemGroup>
 
+  <!-- LowLatencyBenchmarks only (issue #261): a hidden Win32 window for the
+       swapchain surface. Win32Window uses no xunit or TestGate types. -->
+  <ItemGroup>
+    <Compile Include="..\Ahjo.Vulkan.Tests\Win32Window.cs" Link="Win32Window.cs" />
+  </ItemGroup>
+
   <!--
     The benchmarks need real vert + frag, compute and mesh modules; they
     reuse the test project's shader sources rather than duplicating them

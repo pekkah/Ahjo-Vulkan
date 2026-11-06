@@ -5,7 +5,10 @@ integrated [AMD VulkanMemoryAllocator](https://github.com/GPUOpen-LibrariesAndSD
 Built for games: `ref struct` command-buffer recorders, `readonly struct`
 resource handles, zero heap allocations on per-frame paths. Buffer/image
 creation pairs `VkBuffer`/`VkImage` with its VMA allocation handle in a
-single type so you never juggle the two halves manually.
+single type so you never juggle the two halves manually. NVIDIA Reflex low
+latency (`VK_NV_low_latency2`) lives on `Swapchain`, and `PclStats` emits PC
+Latency markers on every GPU vendor — see
+[docs/reflex-notes.md](https://github.com/pekkah/Ahjo-Vulkan/blob/main/docs/reflex-notes.md).
 
 > **Status: pre-1.0.** The public surface may shift between 0.x releases
 > as the wrapper fills in remaining Vulkan coverage. Tag your

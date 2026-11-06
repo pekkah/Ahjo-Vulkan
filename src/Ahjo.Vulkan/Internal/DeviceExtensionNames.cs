@@ -39,6 +39,12 @@ namespace Ahjo.Vulkan;
 /// <c>VkDeviceFaultShaderAbortMessageInfoKHR</c> on the KHR debug-info read
 /// (#245); <see cref="KhrShaderConstantData"/> is its device-creation
 /// dependency.</para>
+/// <para><see cref="NvLowLatency2"/> gates the four
+/// <c>VK_NV_low_latency2</c> entry points below (sleep mode, sleep, marker,
+/// timings; issue #261). <see cref="KhrPresentId"/> gates <b>none</b>: it is
+/// <c>VK_NV_low_latency2</c>'s device-creation dependency, and its only use is
+/// chaining <c>VkPresentIdKHR</c> on present, which needs no entry
+/// point.</para>
 /// </remarks>
 internal static class DeviceExtensionNames
 {
@@ -69,4 +75,11 @@ internal static class DeviceExtensionNames
 
     public static ReadOnlySpan<byte> KhrShaderAbort        => "VK_KHR_shader_abort"u8;
     public static ReadOnlySpan<byte> KhrShaderConstantData => "VK_KHR_shader_constant_data"u8;
+
+    public static ReadOnlySpan<byte> NvLowLatency2         => "VK_NV_low_latency2"u8;
+    public static ReadOnlySpan<byte> SetLatencySleepMode   => "vkSetLatencySleepModeNV"u8;
+    public static ReadOnlySpan<byte> LatencySleep          => "vkLatencySleepNV"u8;
+    public static ReadOnlySpan<byte> SetLatencyMarker      => "vkSetLatencyMarkerNV"u8;
+    public static ReadOnlySpan<byte> GetLatencyTimings     => "vkGetLatencyTimingsNV"u8;
+    public static ReadOnlySpan<byte> KhrPresentId          => "VK_KHR_present_id"u8;
 }

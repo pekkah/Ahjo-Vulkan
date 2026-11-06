@@ -145,6 +145,100 @@ public sealed unsafe class WindowedValidationTests
             $"Validation reported {errs} error(s) over {Frames} frames — see issue #89 for the canonical regression.");
     }
 
+    /// <summary>
+    /// Issue #261 spec D5: the frame-generation two-present loop — one Reflex
+    /// frame id N per rendered frame, OUT_OF_BAND_PRESENT pairs around each of
+    /// the two presents inside one PRESENT_START/END, and distinct KHR present
+    /// ids 2N / 2N+1 — runs validation-clean on a <c>VK_NV_low_latency2</c>
+    /// device. Serialized with the PCL tests (markers forward to
+    /// <see cref="PclStats"/>).
+    /// </summary>
+    [Fact]
+    public void FrameGenerationMarkerSequence_IsValidationClean()
+    {
+        TestGate.RequirePlatform(OperatingSystem.IsWindows(), "Surface tests are Win32-only for now.");
+        TestGate.RequireDriver();
+        TestGate.RequireHardwareDriver("VK_NV_low_latency2 is NVIDIA hardware only.");
+        TestGate.RequireValidationLayer();
+
+        int errorCount = 0;
+        var firstErrors = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        Action<DebugMessage> sink = msg =>
+        {
+            if ((msg.Severity & VkDebugUtilsMessageSeverityFlagBitsEXT.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0)
+            {
+                if (Interlocked.Increment(ref errorCount) <= 5)
+                    firstErrors.Enqueue($"{msg.MessageIdName}: {msg.Message}");
+            }
+        };
+
+        using var host = SwapchainLowLatencyTests.Host.Create(
+            lowLatency: true, presentIdFeature: true, validation: true, debugCallback: sink);
+        var desc = host.Description(lowLatency: true);
+        using var swap = new Swapchain(host.Device, in desc);
+        swap.SetLatencySleepMode(LatencySleepMode.On);
+
+        using var sems  = new SemaphorePool(host.Device);
+        using var cmds  = new CommandBufferPool(host.Device, host.Family);
+        BinarySemaphore acquired0 = sems.AcquireBinary();
+        BinarySemaphore acquired1 = sems.AcquireBinary();
+
+        const ulong Frames = 30;
+        for (ulong n = 1; n <= Frames; n++)
+        {
+            swap.LatencySleep(TimeSpan.FromSeconds(1));
+            swap.SetLatencyMarker(LatencyMarker.SimulationStart, n);
+            swap.SetLatencyMarker(LatencyMarker.SimulationEnd, n);
+            swap.SetLatencyMarker(LatencyMarker.RenderSubmitStart, n);
+
+            // Generated frame: acquire i0, submit, present with KHR id 2N.
+            uint i0 = AcquireAndSubmit(host, swap, cmds, acquired0);
+            swap.SetLatencyMarker(LatencyMarker.PresentStart, n);
+            swap.SetLatencyMarker(LatencyMarker.OutOfBandPresentStart, n);
+            AssertPresented(swap.Present(host.Queue, i0, 2 * n));
+            swap.SetLatencyMarker(LatencyMarker.OutOfBandPresentEnd, n);
+
+            // Real frame: acquire i1, submit, present with KHR id 2N+1.
+            uint i1 = AcquireAndSubmit(host, swap, cmds, acquired1);
+            swap.SetLatencyMarker(LatencyMarker.OutOfBandPresentStart, n);
+            AssertPresented(swap.Present(host.Queue, i1, 2 * n + 1));
+            swap.SetLatencyMarker(LatencyMarker.OutOfBandPresentEnd, n);
+            swap.SetLatencyMarker(LatencyMarker.PresentEnd, n);
+            swap.SetLatencyMarker(LatencyMarker.RenderSubmitEnd, n);
+
+            // One frame in flight: the acquire semaphores and command buffers
+            // are reused next frame.
+            host.Device.WaitIdle();
+            cmds.ResetForFrame();
+        }
+
+        int errs = Volatile.Read(ref errorCount);
+        Assert.True(errs == 0,
+            $"Validation reported {errs} error(s) over {Frames} FG frames: " + string.Join(" | ", firstErrors));
+    }
+
+    private static uint AcquireAndSubmit(
+        SwapchainLowLatencyTests.Host host, Swapchain swap, CommandBufferPool cmds, BinarySemaphore acquired)
+    {
+        var acq = swap.AcquireNextImage(acquired, TimeSpan.FromSeconds(1), out uint imageIndex);
+        Assert.True(acq is AcquireResult.Success or AcquireResult.Suboptimal, $"AcquireNextImage returned {acq}.");
+        var rec = cmds.Begin();
+        try
+        {
+            rec.PipelineBarrier(SwapchainLowLatencyTests.Host.PresentBarrier(swap, imageIndex));
+            var wait   = new SemaphoreSubmit(acquired, Stage.ColorAttachmentOutput);
+            var signal = new SemaphoreSubmit(swap.GetRenderingDoneFor(imageIndex), Stage.AllGraphics);
+            // Heap arrays: Queue.Submit2's span parameters are not `scoped`, so a
+            // stack span cannot reach them alongside `ref CommandRecorder` (CS8350).
+            host.Queue.Submit2(ref rec, default(Fence), new[] { wait }, new[] { signal });
+        }
+        finally { rec.Dispose(); }
+        return imageIndex;
+    }
+
+    private static void AssertPresented(AcquireResult r)
+        => Assert.True(r is AcquireResult.Success or AcquireResult.Suboptimal, $"Present returned {r}.");
+
     private static void RecordSwapBarrier(
         ref CommandRecorder rec,
         Swapchain           swap,
