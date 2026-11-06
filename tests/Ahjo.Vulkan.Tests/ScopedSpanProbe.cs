@@ -97,7 +97,7 @@ internal static unsafe class ScopedSpanProbe
     /// stack spans for its semaphore waits/signals <b>alongside</b> a
     /// <c>ref CommandRecorder</c>. That pairing is what makes <c>scoped</c>
     /// load-bearing — dropping it from either span parameter fails here with
-    /// CS8350.
+    /// CS9080.
     /// </summary>
     internal static void ProbeSubmit2(Queue queue, ref CommandRecorder rec, in Fence fence, in BinarySemaphore sem)
     {
