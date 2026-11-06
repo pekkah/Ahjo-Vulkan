@@ -102,13 +102,74 @@ internal static class NgxParameterNames
     public static readonly Utf8Name DynamicMaxRenderHeight = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_Parameter_DLSS_Get_Dynamic_Max_Render_Height);
 
     // ---- Frame generation ----------------------------------------------------
-    // Capability keys only (#253 PR A). The create, resource, matrix and scalar
-    // DLSSG.* keys arrive with the code that writes them (PR B), per the
-    // "exactly the keys the wrapper uses" rule above.
+    // Capability.
     public static readonly Utf8Name FrameGenerationAvailable             = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_Parameter_FrameGeneration_Available);
     public static readonly Utf8Name FrameGenerationFeatureInitResult     = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_Parameter_FrameGeneration_FeatureInitResult);
     public static readonly Utf8Name FrameGenerationNeedsUpdatedDriver    = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_Parameter_FrameGeneration_NeedsUpdatedDriver);
     public static readonly Utf8Name FrameGenerationMinDriverVersionMajor = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_Parameter_FrameGeneration_MinDriverVersionMajor);
     public static readonly Utf8Name FrameGenerationMinDriverVersionMinor = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_Parameter_FrameGeneration_MinDriverVersionMinor);
     public static readonly Utf8Name DlssgMultiFrameCountMax              = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_MultiFrameCountMax);
+
+    // Create. Width/Height are the generic names above, as NGX_VK_CREATE_DLSSG
+    // writes them (nvsdk_ngx_helpers_dlssg_vk.h:53-57).
+    public static readonly Utf8Name DlssgBackbufferFormat           = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_BackbufferFormat);
+    public static readonly Utf8Name DlssgInternalWidth              = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_InternalWidth);
+    public static readonly Utf8Name DlssgInternalHeight             = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_InternalHeight);
+    public static readonly Utf8Name DlssgDynamicResolution          = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_DynamicResolution);
+    public static readonly Utf8Name DlssgResourceNeverProvidedFlags = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_ResourceNeverProvided_Flags);
+
+    // Resources.
+    public static readonly Utf8Name DlssgBackbuffer         = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_Backbuffer);
+    public static readonly Utf8Name DlssgDepth              = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_Depth);
+    public static readonly Utf8Name DlssgMVecs              = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_MVecs);
+    public static readonly Utf8Name DlssgHudless            = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_HUDLess);
+    public static readonly Utf8Name DlssgUi                 = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_UI);
+    public static readonly Utf8Name DlssgOutputInterpolated = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_OutputInterpolated);
+    public static readonly Utf8Name DlssgOutputReal         = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_OutputReal);
+
+    // Matrices.
+    public static readonly Utf8Name DlssgCameraViewToClip = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraViewToClip);
+    public static readonly Utf8Name DlssgClipToCameraView = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_ClipToCameraView);
+    public static readonly Utf8Name DlssgClipToLensClip   = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_ClipToLensClip);
+    public static readonly Utf8Name DlssgClipToPrevClip   = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_ClipToPrevClip);
+    public static readonly Utf8Name DlssgPrevClipToClip   = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_PrevClipToClip);
+
+    // Scalars: jitter and motion vectors.
+    public static readonly Utf8Name DlssgJitterOffsetX = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_JitterOffsetX);
+    public static readonly Utf8Name DlssgJitterOffsetY = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_JitterOffsetY);
+    public static readonly Utf8Name DlssgMvecScaleX    = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_MvecScaleX);
+    public static readonly Utf8Name DlssgMvecScaleY    = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_MvecScaleY);
+
+    // Scalars: camera.
+    public static readonly Utf8Name DlssgCameraPinholeOffsetX = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraPinholeOffsetX);
+    public static readonly Utf8Name DlssgCameraPinholeOffsetY = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraPinholeOffsetY);
+    public static readonly Utf8Name DlssgCameraPosX           = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraPosX);
+    public static readonly Utf8Name DlssgCameraPosY           = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraPosY);
+    public static readonly Utf8Name DlssgCameraPosZ           = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraPosZ);
+    public static readonly Utf8Name DlssgCameraUpX            = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraUpX);
+    public static readonly Utf8Name DlssgCameraUpY            = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraUpY);
+    public static readonly Utf8Name DlssgCameraUpZ            = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraUpZ);
+    public static readonly Utf8Name DlssgCameraRightX         = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraRightX);
+    public static readonly Utf8Name DlssgCameraRightY         = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraRightY);
+    public static readonly Utf8Name DlssgCameraRightZ         = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraRightZ);
+    public static readonly Utf8Name DlssgCameraFwdX           = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraFwdX);
+    public static readonly Utf8Name DlssgCameraFwdY           = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraFwdY);
+    public static readonly Utf8Name DlssgCameraFwdZ           = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraFwdZ);
+    public static readonly Utf8Name DlssgCameraNear           = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraNear);
+    public static readonly Utf8Name DlssgCameraFar            = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraFar);
+    public static readonly Utf8Name DlssgCameraFov            = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraFOV);
+    public static readonly Utf8Name DlssgCameraAspectRatio    = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraAspectRatio);
+
+    // Scalars: flags.
+    public static readonly Utf8Name DlssgColorBuffersHdr        = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_ColorBuffersHDR);
+    public static readonly Utf8Name DlssgDepthInverted          = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_DepthInverted);
+    public static readonly Utf8Name DlssgCameraMotionIncluded   = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_CameraMotionIncluded);
+    public static readonly Utf8Name DlssgReset                  = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_Reset);
+    public static readonly Utf8Name DlssgNotRenderingGameFrames = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_NotRenderingGameFrames);
+    public static readonly Utf8Name DlssgOrthoProjection        = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_OrthoProjection);
+
+    // Scalars: multi-frame and frame id.
+    public static readonly Utf8Name DlssgMultiFrameCount   = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_MultiFrameCount);
+    public static readonly Utf8Name DlssgMultiFrameIndex   = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_MultiFrameIndex);
+    public static readonly Utf8Name DlssgBackbufferFrameId = Utf8Name.FromLiteral(NgxApi.NVSDK_NGX_DLSSG_Parameter_BackbufferFrameID);
 }

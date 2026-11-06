@@ -106,6 +106,39 @@ next draw or dispatch.
 `AhjoValidation.Enabled` a re-entrancy guard says so rather than corrupting the
 parameter map.
 
+## Frame generation
+
+DLSS Frame Generation (RTX 40-series or newer, plus `nvngx_dlssg.dll`) is a
+second feature on the same `NgxContext`:
+
+```csharp
+if (ngx.IsFrameGenerationAvailable)
+{
+    using DlssFrameGenerationFeature fg = ngx.CreateFrameGeneration(ref setupRecorder, new DlssFrameGenerationDescription
+    {
+        Width = 1920, Height = 1080, BackbufferFormat = VkFormat.VK_FORMAT_R8G8B8A8_UNORM, // UNORM, never _SRGB
+        RenderWidth = 1920, RenderHeight = 1080,
+    });
+    // submit setupRecorder and WAIT before the first Evaluate.
+
+    fg.Evaluate(ref recorder, new DlssFrameGenerationInputs
+    {
+        Backbuffer = backbuffer, Depth = depth, MotionVectors = motionVectors,
+        Hudless = hudless, UiColorAndAlpha = ui,
+        OutputInterpolated = generated, OutputReal = real,
+        Camera = camera,                   // unjittered matrices
+        BackbufferFrameId = frameId,
+    });
+}
+```
+
+`Evaluate` allocates nothing per frame, and **presents nothing**: it writes the
+generated frame into your image, and presenting it — twice per rendered frame,
+paced — is the application's job. FG's jitter is in clip space, not Super
+Resolution's render pixels. The consumer contract, including what is still
+being measured, is
+[`docs/ngx-frame-generation-notes.md`](https://github.com/pekkah/Ahjo-Vulkan/blob/main/docs/ngx-frame-generation-notes.md).
+
 ## Requirements
 
 NVIDIA hardware with a DLSS-capable driver, `win-x64` or `linux-x64`, and the

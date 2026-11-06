@@ -20,11 +20,11 @@ Useful subsets:
 
 ```
 # Allocation-only round-trips (no driver required):
-dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*ChainBuilder*|*ResultPolicy*|*HandleOwnership*|*DeviceFaultPoll*"
+dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*ChainBuilder*" "*ResultPolicy*" "*HandleOwnership*" "*DeviceFaultPoll*"
 
 # Driver-bound: needs a real Vulkan ICD on the host. Fails at GlobalSetup
 # if the host cannot create a VkInstance.
-dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*FrameRing*|*PushDescriptors*|*PipelineBarrier*|*CommandRecorder*|*BufferBenchmarks*|*MeshShader*|*AccelerationStructure*|*DlssEvaluate*"
+dotnet run --project tests/Ahjo.Vulkan.Benchmarks -c Release -- --filter "*FrameRing*" "*PushDescriptors*" "*PipelineBarrier*" "*CommandRecorder*" "*BufferBenchmarks*" "*MeshShader*" "*AccelerationStructure*" "*DlssEvaluate*" "*DlssFrameGeneration*"
 ```
 
 `BenchmarkDotNet.Artifacts/` is gitignored — the run produces CSV / Markdown
@@ -86,7 +86,19 @@ They carry a **stricter host gate than any other row**: not just an NVIDIA GPU
 and a DLSS-capable driver, but a feature DLL this repo does not ship and never
 will (#214). `DlssEvaluateBenchmarks` is therefore its own class and its
 `[GlobalSetup]` throws with an actionable message rather than skipping, the
-`MeshShaderBenchmarks` precedent. #218's `Ahjo.Vulkan` edits were controlled for in the same session, and the
+`MeshShaderBenchmarks` precedent.
+
+The three **`DlssFrameGenerationEvaluate.*`** rows were captured for **#253** on
+.NET 10.0.14 (SDK 11.0.100-rc.3) / Windows 11 10.0.26300.9818, RTX 4070 Ti /
+driver 616.92, BenchmarkDotNet v0.15.8, against the `rel/` `nvngx_dlssg.dll` of
+NGX `v310.9.1`. They are a **single run each**, not a minimum of several, so
+read the Mean as indicative. The load-bearing `Allocated` column is exact
+either way. Their gate is stricter still than `DlssEvaluate`'s: an **RTX
+40-series or newer** GPU and a second consumer-supplied DLL, `nvngx_dlssg.dll`.
+So `DlssFrameGenerationEvaluateBenchmarks` is its own class too, and a host
+with Super Resolution but no Frame Generation keeps running `DlssEvaluate`.
+
+#218's `Ahjo.Vulkan` edits were controlled for in the same session, and the
 control set is chosen for what actually changed. The only *structural* change is
 that `Allocator` gained an `internal readonly uint HeapCount`, growing the struct
 16 → 24 bytes — and `Allocator` is embedded **by value** in `Buffer`, `Image`,
@@ -145,6 +157,9 @@ managed-byte count BDN's `MemoryDiagnoser` reports; `-` is zero.
 | `DlssEvaluate.Evaluate_16`                      |  17.11 µs  |        -  | #218 canary: sixteen `DlssFeature.Evaluate` calls recorded into one command buffer per invoke, never submitted. Feature is 2560×1440 → 3840×2160 MaxQuality, the extent `GetOptimalSettings` actually returns on the capture host. Guards the four properties spec D9 rests the zero-allocation claim on — stack-local resource structs, `static readonly Utf8Name` keys, a parameter map allocated once, `ref CommandRecorder`. **Minimum of 9 runs**; the five clean ones read 17.105 / 17.166 / 17.232 / 17.358 / 17.599 µs at StdDev 0.06–0.13 µs, none BDN-bimodal. **This row punishes a hot GPU**, which is worth knowing before reading a regression into it: four confirming runs taken back-to-back after ~10 minutes of continuous DLSS work drifted to 25.08 / 20.99 / 18.83 / 17.55 µs with StdDev collapsing 3.88 → 0.22 µs as the card settled, i.e. a clean monotone recovery to the recorded band rather than a mode. `PackParameters_16` below, which makes no NGX call, held 1.145–1.174 µs across the same runs — that is the control that says the drift is thermal and not the managed side. Let the GPU idle before capturing this row. Mostly NGX's own per-frame work: `PackParameters_16` below is the managed share, ~7% of it. **Four of the six resource arms are measured, not all six**: the inputs carry no `ExposureTexture` and no `BiasCurrentColorMask` (the shape `DlssFeatureFlags.AutoExposure` implies), so `NgxImage.ToNative` runs 4x per evaluate and only the null-write branch of the two optional slots is exercised — the same disclosure the `Aabbs` arm gets on the `AccelerationStructure` rows. Needs an NVIDIA GPU, a DLSS-capable driver **and** a consumer-supplied `nvngx_dlss.dll` — see the driver-dependency caveat; the `[GlobalSetup]` throws rather than skipping, which is why this is its own class. |
 | `DlssEvaluate.PackParameters_16`                |   1.29 µs  |        -  | #218 canary: the same sixteen iterations through `DlssFeature.EvaluateCore(…, invokeNgx: false)` — parameter-map population plus resource-struct fill, with `EvaluateFeature_C` skipped. This is the half the wrapper owns and the one #218 asks to measure; it is one method and one stack frame in both modes on purpose, because the map retains raw pointers to those stack locals (spec E6). **Minimum of 6 runs** (1.292 / 1.301 / 1.319 / 1.327 / 1.332 / 1.362 µs, StdDev ≤ 0.022 µs). **Was 1.15 µs, and the +12% is a deliberate correctness cost, not drift**: `EvaluateCore` now nulls the six resource keys in a `finally`, so the reused parameter map never holds a pointer into a dead stack frame on any exit — the `invokeNgx: false` path this row drives, a throwing `EvaluateFeature_C`, or the normal one. That is six more `SetVoidPointer` calls on top of ~30, and the row moved by about six thirtieths, which is what a native call costing what the other thirty cost looks like. An earlier capture of this row at 1.145–1.174 µs predates that fix; do not read the difference as a regression. ~81 ns per evaluate for ~36 native parameter writes (30 set, 6 cleared) and the resource structs. Same host gate as the row above. |
 | `DlssEvaluate.PackParameters_16_AllSlots`       |   1.34 µs  |        -  | #218: `PackParameters_16` with **both optional slots bound** — a 1x1 `ExposureTexture` and a render-resolution `BiasCurrentColorMask`. It exists because the row above binds neither, so `NgxImage.ToNative` runs 4x not 6x there and both `SetVoidPointer` ternaries are only ever measured on their null leg; this row is the other leg, and it is where an allocation added to the optional-slot path would show up. **Minimum of 6 runs** (1.337 / 1.338 / 1.338 / 1.346 / 1.354 / 1.458 µs; the last was BDN-noisy at StdDev 0.13 µs and is excluded from the reading, the rest sit at ≤ 0.021 µs). The ~45 ns delta against the row above is two extra `ToNative` fills and nothing else — the native write count is identical either way, because an absent optional slot still writes a null. Same host gate as the two rows above. |
+| `DlssFrameGenerationEvaluate.Evaluate_16`       |  81.25 µs  |        -  | #253 canary: sixteen `DlssFrameGenerationFeature.Evaluate` calls recorded into one command buffer per invoke, validation **off**, never submitted. Feature is 1920×1080 `R8G8B8A8_UNORM`, render extent = output, all seven slots bound, an identity-matrix camera. Guards #218's four properties plus #253 spec D7.1: seven stack-local resource structs **and five stack-local `Matrix4x4` copies** whose addresses the map holds, `static readonly Utf8Name` keys, one parameter map per feature, `ref CommandRecorder`. **Single run** (StdDev 0.88 µs); an earlier same-day run read 89.15 µs. Mostly NGX's own work: `PackParameters_16` below is the managed share, ~4% of it. Needs an RTX 40-series or newer GPU, a DLSS-capable driver **and** a consumer-supplied `nvngx_dlssg.dll` — the strictest gate in the project; `[GlobalSetup]` throws rather than skipping. |
+| `DlssFrameGenerationEvaluate.PackParameters_16` |   3.02 µs  |        -  | #253 canary: the same sixteen iterations through `DlssFrameGenerationFeature.EvaluateCore(…, invokeNgx: false)`, all seven slots bound — seven resource-struct fills, five matrix copies, 31 scalar writes and the twelve pointer-key clears in the `finally`, with `EvaluateFeature_C` skipped. The managed half, and the row an allocation regression shows up in first. **Single run** (3.022 µs, StdDev 0.023 µs; an earlier run read 3.005 µs). ~189 ns per evaluate for 55 native parameter writes (43 set, 12 cleared). Same host gate as the row above. |
+| `DlssFrameGenerationEvaluate.PackParameters_16_RequiredOnly` | 2.97 µs |   -  | #253: `PackParameters_16` with **only the required slots** bound — `Hudless`, `UiColorAndAlpha` and `OutputReal` unbound — so the null leg of all three optional-slot branches and their `SetVoidPointer` ternaries is the one measured (the row above measures the non-null leg). **Single run** (2.974 µs, StdDev 0.021 µs). The ~50 ns delta is three skipped `ToNative` fills and nothing else: an absent optional slot still writes a null, so the native write count is identical. Same host gate as the two rows above. |
 | `PipelineBarrier.SingleImageTransition`         | 143.9 ns   |        -  | One `vkCmdPipelineBarrier2` with a single image barrier. Recaptured for #201 — **minimum of 5 runs** (143.9 / 144.6 / 144.7 / 147.1 / 165.7 ns). Was 178.8 ns at #155; see the split-barrier caveat and the recorder-disposal note on the row below. |
 | `PipelineBarrier.LargeBatch_8x8x1`              |   2.72 µs  |        -  | One `vkCmdPipelineBarrier2` with 64 image barriers. Recaptured for #201 — **minimum of 5 runs** (2.718 / 2.728 / 2.743 / 2.748 / 2.768 µs, every run BDN-unimodal at MValue 2). **The bimodality this row used to document is gone, but not because of the fix in the same commit.** The class had the `ResetForFrame()`-before-recorder-`Dispose()` ordering bug (#188/#199 shape) in all four of its methods and it was fixed here — but three pre-fix control runs in the same session read 2.716 / 2.755 / 2.780 µs, i.e. already tight and already below the old 2.80 µs figure. Fix and control are within each other's noise, so the fix cost nothing and bought nothing measurable at this scale. **What the bad ordering costs is pool state, not per-invoke work**: it grows **one** extra `VkCommandBuffer`, not one per invoke — the pool settles into ping-ponging two buffers after the second invoke (`Pools/CommandBufferPool.cs:98-118`, `:155-159`, `:168-178`). That one-off allocation is amortized across millions of ops and is therefore invisible at *every* scale; it is not why the fix showed up on one row and not another. The part that is per-invoke and steady-state is the **ping-pong itself**: post-fix one buffer is re-recorded every invoke, pre-fix two alternate, so each invoke records into driver-side memory last touched two invokes ago. That is a recurring locality cost, and it scales with how much of the measurement is recording. Here it is invisible because 2.7 µs of driver per-barrier work for 64 barriers dominates any locality delta by two orders of magnitude, and because this method records 256 commands per invoke against `MeshShader.DrawMeshTasksIndirectCount_1024`'s 1024 — that row, where recording is nearly the whole measurement, is where two-buffers-in-rotation can plausibly show as the two-mode signature it lost. The old "strongly bimodal, median 3.61 µs, range 2.80–4.61 µs" reading is therefore **host/driver drift since #155, unexplained**, not something this branch repaired — keep comparing minima across ≥3 runs until a run reproduces the wide spread and identifies it. |
 | `PipelineBarrier.SetWaitEventPair_SingleImage`  | 247.1 ns   |        -  | #155 canary: one `vkCmdSetEvent2` + `vkCmdWaitEvents2` pair, one image barrier each. Recording only, never submitted. Recaptured for #201 — **minimum of 5 runs** (247.1–257.2 ns); was 260.7 ns. |
@@ -241,8 +256,8 @@ is ever submitted.
   changes < 20% as noise; investigate larger swings.
 - **Driver dependency**: the FrameRing / `BufferBenchmarks` / CommandRecorder /
   PipelineBarrier / PushDescriptors / BindDescriptorSets / StagingUploader /
-  SyncPool / TimestampQuery / `DlssEvaluate` benchmarks
-  fail at `[GlobalSetup]` on a host without a Vulkan ICD. That is the
+  SyncPool / TimestampQuery / `DlssEvaluate` / `DlssFrameGenerationEvaluate`
+  benchmarks fail at `[GlobalSetup]` on a host without a Vulkan ICD. That is the
   expected behavior — there is no soft skip in the benchmark project (BDN
   reports the failure and moves on).
   `DescriptorSetPoolVariableCountBenchmarks` additionally needs a device that
@@ -287,6 +302,16 @@ is ever submitted.
   than skipping. That is again exactly why it is its own class: the #29 canary
   must not be taken down by an absent proprietary SDK. It also needs the
   `ahjo_ngx` shim built, which is itself opt-in.
+  `DlssFrameGenerationEvaluateBenchmarks` (#253) goes one step further than
+  that: its `[GlobalSetup]` needs an **RTX 40-series or newer** GPU, and a
+  second consumer-supplied file, `nvngx_dlssg.dll`, resolved from the same
+  `native/ngx/staged/<rid>/rel/` directory. It creates the context with
+  `RequiredFeatures = NgxFeatures.FrameGeneration`, so a missing DLL or an
+  older GPU throws a diagnosed NGX exception at setup rather than measuring
+  nothing. It is its own class rather than more methods on
+  `DlssEvaluateBenchmarks` for the same reason one level down: an RTX 20/30
+  host with Super Resolution but no Frame Generation must still run the SR
+  canary.
 - **No row for `Allocator.GetHeapBudgets`, deliberately.**
   It `stackalloc`s `VK_MAX_MEMORY_HEAPS` `VmaBudget` entries and makes one
   `vmaGetHeapBudgets` call, so it allocates nothing — but it is a

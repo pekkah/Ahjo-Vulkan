@@ -10,7 +10,7 @@ Full details live in scoped CLAUDE.md files that load automatically when you wor
 
 1. **UTF-8 string literals** — Vulkan `const char*` takes `Utf8Name.FromLiteral("…"u8)`; never round-trip through `string` + `Encoding.UTF8.GetBytes`. → `src/Ahjo.Vulkan/CLAUDE.md`
 2. **Native AOT stays clean** — no reflection discovery, no dynamic codegen, nothing trim-unsafe reachable from the wrapper; CI publishes `samples/AotSmoke` with `PublishAot=true`. → `src/Ahjo.Vulkan/CLAUDE.md`, `docs/aot-notes.md`
-3. **Zero per-frame allocations** on `Recording/`, `Sync/`, `Pools/`, `Memory/` hot paths — and anything else called per frame, e.g. `Ahjo.Vulkan.Ngx`'s `DlssFeature.Evaluate`; setup-time allocation is fine. → `src/Ahjo.Vulkan/CLAUDE.md`, `src/Ahjo.Vulkan.Ngx/CLAUDE.md`
+3. **Zero per-frame allocations** on `Recording/`, `Sync/`, `Pools/`, `Memory/` hot paths — and anything else called per frame, e.g. `Ahjo.Vulkan.Ngx`'s `DlssFeature.Evaluate` and `DlssFrameGenerationFeature.Evaluate`; setup-time allocation is fine. → `src/Ahjo.Vulkan/CLAUDE.md`, `src/Ahjo.Vulkan.Ngx/CLAUDE.md`
 4. **Generated code is generated** — never hand-edit `src/*/Generated/`, `native/downloaded/`, `native/ktx/downloaded/`, `native/slang/downloaded/`; edit `tools/*.rsp` + regenerate (`/regen-bindings`). → per-project CLAUDE.md files
 5. **`TreatWarningsAsErrors=true`** repo-wide with `AnalysisLevel=latest`. Fix the diagnostic; don't `#pragma`-suppress to get green.
 

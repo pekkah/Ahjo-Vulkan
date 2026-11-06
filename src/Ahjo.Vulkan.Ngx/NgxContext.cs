@@ -19,7 +19,8 @@ namespace Ahjo.Vulkan.Ngx;
 /// <see cref="AhjoValidation.Enabled"/> a re-entrancy guard says so with a
 /// message rather than letting two threads corrupt the map; with validation off
 /// it is one predictable branch.</para>
-/// <para><b>Dispose every <see cref="DlssFeature"/> first.</b>
+/// <para><b>Dispose every <see cref="DlssFeature"/> and
+/// <see cref="DlssFrameGenerationFeature"/> first.</b>
 /// <see cref="Dispose"/> shuts NGX down for the device.</para>
 /// </remarks>
 public sealed unsafe class NgxContext : IDisposable
@@ -497,17 +498,106 @@ public sealed unsafe class NgxContext : IDisposable
     }
 
     /// <summary>
+    /// Creates a DLSS Frame Generation feature, recording its initialization
+    /// work into <paramref name="recorder"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Submit <paramref name="recorder"/> and wait for it to complete
+    /// before the first <see cref="DlssFrameGenerationFeature.Evaluate"/>.</b>
+    /// <c>NVSDK_NGX_VULKAN_CreateFeature1</c> records real GPU work here; an
+    /// evaluate against a feature whose initialization has not executed is
+    /// undefined.</para>
+    /// <para><b>Recreate on any resize</b> — of the backbuffer or of the render
+    /// extent (DLSS-FG guide l. 657-668).</para>
+    /// <para>Transcribes <c>NGX_VK_CREATE_DLSSG</c>
+    /// (<c>nvsdk_ngx_helpers_dlssg_vk.h:45-60</c>) with a non-null device, so it
+    /// takes the multi-device <c>CreateFeature1</c> path, and additionally
+    /// writes the internal extent, dynamic-resolution flag and
+    /// <c>DLSSG.ResourceNeverProvidedFlags = UIAlpha |
+    /// BidirectionalDistortionField</c> — the wrapper exposes a slot for
+    /// neither, and the header says declaring them "may enable memory
+    /// optimizations" (<c>nvsdk_ngx_defs_dlssg.h:101-110</c>).</para>
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="description"/> has a
+    /// zero extent, an undefined format or an <c>_SRGB</c> format.</exception>
+    /// <exception cref="NgxException">Frame Generation is unavailable on this
+    /// context (<see cref="IsFrameGenerationAvailable"/> is
+    /// <see langword="false"/>): the diagnosed exception <see cref="Create"/>
+    /// would have thrown had <see cref="NgxDescription.RequiredFeatures"/>
+    /// included it, e.g. <see cref="NgxFeatureLibraryNotFoundException"/>. Or
+    /// <c>CreateFeature1</c> itself failed.</exception>
+    public DlssFrameGenerationFeature CreateFrameGeneration(ref CommandRecorder recorder, in DlssFrameGenerationDescription description)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (!_frameGenerationAvailable) ThrowFrameGenerationUnavailable();
+
+        ValidateFrameGenerationDescription(in description);
+
+        EnterExclusive(nameof(CreateFrameGeneration));
+        try
+        {
+            NVSDK_NGX_Parameter* parameters = null;
+            NgxResult.ThrowIfFailed(
+                NgxApi.NVSDK_NGX_VULKAN_AllocateParameters(&parameters),
+                "NVSDK_NGX_VULKAN_AllocateParameters");
+
+            try
+            {
+                NgxApi.NVSDK_NGX_Parameter_SetUI(parameters, NgxParameterNames.CreationNodeMask.Ptr, 1);
+                NgxApi.NVSDK_NGX_Parameter_SetUI(parameters, NgxParameterNames.VisibilityNodeMask.Ptr, 1);
+                // The generic Width/Height names, as NGX_VK_CREATE_DLSSG writes
+                // them (nvsdk_ngx_helpers_dlssg_vk.h:53-57).
+                NgxApi.NVSDK_NGX_Parameter_SetUI(parameters, NgxParameterNames.Width.Ptr, description.Width);
+                NgxApi.NVSDK_NGX_Parameter_SetUI(parameters, NgxParameterNames.Height.Ptr, description.Height);
+                NgxApi.NVSDK_NGX_Parameter_SetUI(parameters, NgxParameterNames.DlssgBackbufferFormat.Ptr, (uint)description.BackbufferFormat);
+                NgxApi.NVSDK_NGX_Parameter_SetUI(parameters, NgxParameterNames.DlssgInternalWidth.Ptr, description.RenderWidth);
+                NgxApi.NVSDK_NGX_Parameter_SetUI(parameters, NgxParameterNames.DlssgInternalHeight.Ptr, description.RenderHeight);
+                NgxApi.NVSDK_NGX_Parameter_SetUI(parameters, NgxParameterNames.DlssgDynamicResolution.Ptr, description.DynamicResolution ? 1u : 0u);
+                NgxApi.NVSDK_NGX_Parameter_SetUI(
+                    parameters, NgxParameterNames.DlssgResourceNeverProvidedFlags.Ptr,
+                    (uint)(NVSDK_NGX_DLSSG_ResourceFlags.NVSDK_NGX_DLSSG_ResourceFlags_UIAlpha |
+                           NVSDK_NGX_DLSSG_ResourceFlags.NVSDK_NGX_DLSSG_ResourceFlags_BidirectionalDistortionField));
+
+                NVSDK_NGX_Handle* handle = null;
+                NgxResult.ThrowIfFailed(
+                    NgxApi.NVSDK_NGX_VULKAN_CreateFeature1(
+                        (VkDevice_T*)(nint)_device.RawHandle,
+                        (VkCommandBuffer_T*)recorder.RawHandle,
+                        NVSDK_NGX_Feature.NVSDK_NGX_Feature_FrameGeneration,
+                        parameters,
+                        &handle),
+                    "NVSDK_NGX_VULKAN_CreateFeature1 (frame generation)");
+
+                var feature = new DlssFrameGenerationFeature(
+                    this, handle, parameters, in description, _maxGeneratedFrames);
+                parameters = null;   // ownership transferred to the feature
+                return feature;
+            }
+            finally
+            {
+                if (parameters != null) NgxApi.NVSDK_NGX_VULKAN_DestroyParameters(parameters);
+            }
+        }
+        finally
+        {
+            ExitExclusive();
+        }
+    }
+
+    /// <summary>
     /// Destroys the capability parameter map, shuts NGX down for the device and
     /// releases the Vulkan loader handle. Idempotent.
     /// </summary>
     /// <remarks>
     /// <para>Ordering, all three of which the wrapper cannot enforce:</para>
     /// <list type="number">
-    ///   <item><description><b>Dispose every <see cref="DlssFeature"/> this
-    ///   context created first.</b> Releasing a feature after its context has
+    ///   <item><description><b>Dispose every <see cref="DlssFeature"/> and
+    ///   <see cref="DlssFrameGenerationFeature"/> this context created
+    ///   first.</b> Releasing a feature after its context has
     ///   shut down is undefined.</description></item>
     ///   <item><description><b>No command buffer that recorded a
-    ///   <see cref="CreateDlss"/> or <see cref="DlssFeature.Evaluate"/> may still
+    ///   create or evaluate of either feature type may still
     ///   be in flight.</b> <c>Shutdown1</c> tears down NGX's driver-side objects,
     ///   and a still-executing submit that referenced them is an object-in-use
     ///   violation (DLSS Programming Guide §5.5). Wait on a fence or
@@ -678,6 +768,65 @@ public sealed unsafe class NgxContext : IDisposable
     }
 
     /// <summary>
+    /// Always-on checks on the Frame Generation create description.
+    /// Setup-time, so the message strings cost nothing that matters.
+    /// <c>internal</c> so every branch is testable with no device.
+    /// </summary>
+    internal static void ValidateFrameGenerationDescription(in DlssFrameGenerationDescription description)
+    {
+        if (description.Width == 0 || description.Height == 0)
+        {
+            throw new ArgumentException(
+                $"DlssFrameGenerationDescription extent is {description.Width}x{description.Height}; both dimensions " +
+                "must be non-zero. Pass the backbuffer (swapchain) extent.",
+                nameof(description));
+        }
+
+        if (description.RenderWidth == 0 || description.RenderHeight == 0)
+        {
+            throw new ArgumentException(
+                $"DlssFrameGenerationDescription render extent is {description.RenderWidth}x{description.RenderHeight}; " +
+                "both dimensions must be non-zero. Pass the depth and motion-vector extent — the same as Width x Height " +
+                "when nothing upscales before Frame Generation.",
+                nameof(description));
+        }
+
+        if (description.BackbufferFormat == VkFormat.VK_FORMAT_UNDEFINED)
+        {
+            throw new ArgumentException(
+                "DlssFrameGenerationDescription.BackbufferFormat is VK_FORMAT_UNDEFINED. Pass the backbuffer's format; " +
+                "both outputs must have the same one.",
+                nameof(description));
+        }
+
+        if (IsSrgb(description.BackbufferFormat))
+        {
+            throw new ArgumentException(
+                $"DlssFrameGenerationDescription.BackbufferFormat is {description.BackbufferFormat}, an _SRGB format. " +
+                "Frame Generation's outputs must share the backbuffer's format and need storage usage, and no _SRGB " +
+                "format supports VK_IMAGE_USAGE_STORAGE_BIT on mainstream desktop drivers. Use the UNORM format and " +
+                "encode sRGB in the shader (#253 spec E7, docs/ngx-notes.md §6).",
+                nameof(description));
+        }
+    }
+
+    /// <summary>
+    /// The uncompressed <c>_SRGB</c> formats — the only ones a colour
+    /// attachment, and so a backbuffer, can have.
+    /// </summary>
+    private static bool IsSrgb(VkFormat format) => format switch
+    {
+        VkFormat.VK_FORMAT_R8_SRGB                 => true,
+        VkFormat.VK_FORMAT_R8G8_SRGB               => true,
+        VkFormat.VK_FORMAT_R8G8B8_SRGB             => true,
+        VkFormat.VK_FORMAT_B8G8R8_SRGB             => true,
+        VkFormat.VK_FORMAT_R8G8B8A8_SRGB           => true,
+        VkFormat.VK_FORMAT_B8G8R8A8_SRGB           => true,
+        VkFormat.VK_FORMAT_A8B8G8R8_SRGB_PACK32    => true,
+        _                                          => false,
+    };
+
+    /// <summary>
     /// The <see cref="Create"/> throw matrix: throws the diagnosed exception for
     /// the first feature in <paramref name="required"/> that is unavailable,
     /// Super Resolution first, and returns otherwise.
@@ -719,6 +868,17 @@ public sealed unsafe class NgxContext : IDisposable
         => ThrowDiagnosed(
             NVSDK_NGX_Result.NVSDK_NGX_Result_Success, NgxFeature.SuperResolution,
             in _superSamplingDiagnosis, _searchPaths, "DLSS Super Resolution capability query");
+
+    /// <summary>
+    /// The stored Frame Generation diagnosis, thrown by
+    /// <see cref="CreateFrameGeneration"/> on a context created without Frame
+    /// Generation available.
+    /// </summary>
+    [DoesNotReturn]
+    private void ThrowFrameGenerationUnavailable()
+        => ThrowDiagnosed(
+            NVSDK_NGX_Result.NVSDK_NGX_Result_Success, NgxFeature.FrameGeneration,
+            in _frameGenerationDiagnosis, _searchPaths, "DLSS Frame Generation capability query");
 
     /// <summary>
     /// The feature an init failure is attributed to: the first one in
