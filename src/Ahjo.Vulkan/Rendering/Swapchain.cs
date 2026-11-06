@@ -246,7 +246,17 @@ public sealed unsafe partial class Swapchain : IDisposable
         // Zero extent at construction (app launched minimized, #110) is a
         // legal starting state: no VkSwapchainKHR exists yet; the first
         // non-minimized Recreate performs the initial create.
-        _state = CreateOrRecreate(in desc, oldSwapchain: null);
+        try
+        {
+            _state = CreateOrRecreate(in desc, oldSwapchain: null);
+        }
+        catch
+        {
+            // Dispose never runs for a constructor that throws; release the
+            // pool (and the sleep semaphore it owns) here.
+            _semaphorePool.Dispose();
+            throw;
+        }
         ReapplySleepModeAfterCreate();
     }
 

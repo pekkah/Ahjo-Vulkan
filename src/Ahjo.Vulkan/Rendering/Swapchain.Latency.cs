@@ -252,7 +252,10 @@ public sealed unsafe partial class Swapchain
     private void DrainPendingSleepSignal()
     {
         if (!_lowLatency || _sleepValue == 0) return;
-        _ = _sleepSemaphore.WaitFor(_sleepValue, TimeSpan.FromMilliseconds(100));
+        // Teardown must reach _semaphorePool.Dispose: an OOM from
+        // vkWaitSemaphores here would otherwise leak every pooled semaphore.
+        try { _ = _sleepSemaphore.WaitFor(_sleepValue, TimeSpan.FromMilliseconds(100)); }
+        catch (VulkanException) { }
     }
 
     // Pushes _sleepMode to the current handle. No handle (minimized) → the
