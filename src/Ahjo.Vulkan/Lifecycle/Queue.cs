@@ -147,8 +147,8 @@ public sealed unsafe class Queue
     public void Submit2(
         ref CommandRecorder           recorder,
         in  Fence                     fence,
-        ReadOnlySpan<SemaphoreSubmit> waits,
-        ReadOnlySpan<SemaphoreSubmit> signals)
+        scoped ReadOnlySpan<SemaphoreSubmit> waits,
+        scoped ReadOnlySpan<SemaphoreSubmit> signals)
     {
         recorder.End();
         VkCommandBuffer_T* cb = recorder.Handle;

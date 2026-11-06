@@ -93,7 +93,28 @@ internal static unsafe class ScopedSpanProbe
     }
 
     /// <summary>
+    /// Issue #205 shape on <see cref="Queue"/>: the per-frame submit takes
+    /// stack spans for its semaphore waits/signals <b>alongside</b> a
+    /// <c>ref CommandRecorder</c>. That pairing is what makes <c>scoped</c>
+    /// load-bearing — dropping it from either span parameter fails here with
+    /// CS9080.
+    /// </summary>
+    internal static void ProbeSubmit2(Queue queue, ref CommandRecorder rec, in Fence fence, in BinarySemaphore sem)
+    {
+        Span<SemaphoreSubmit> waits   = stackalloc SemaphoreSubmit[1];
+        Span<SemaphoreSubmit> signals = stackalloc SemaphoreSubmit[1];
+        waits[0]   = new SemaphoreSubmit(sem, Stage.ColorAttachmentOutput);
+        signals[0] = new SemaphoreSubmit(sem, Stage.AllGraphics);
+        queue.Submit2(ref rec, in fence, waits, signals);
+    }
+
+    /// <summary>
     /// Issue #261: the per-frame latency-timings read takes a stack span.
+    /// This is a <b>usage</b> check only, not a <c>scoped</c> guard:
+    /// <see cref="Swapchain"/> is a class and the call has no other
+    /// ref-struct argument, so the compiler accepts a stack span whether or
+    /// not the parameter is <c>scoped</c>. The modifier stays because it is
+    /// accurate (the destination is never captured).
     /// </summary>
     internal static void ProbeLatencyTimings(Swapchain swap)
     {

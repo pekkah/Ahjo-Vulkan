@@ -90,7 +90,7 @@ public sealed unsafe class QueueOwnershipTransferTests
                 ];
                 producer.PipelineBarrier(default, releases, default);
 
-                SemaphoreSubmit[] signals = [new SemaphoreSubmit(releaseDone, Stage.Copy)];
+                ReadOnlySpan<SemaphoreSubmit> signals = [new SemaphoreSubmit(releaseDone, Stage.Copy)];
                 Fence noFence = default;
                 graphics.Submit2(ref producer, in noFence, default, signals);
             }
@@ -115,7 +115,7 @@ public sealed unsafe class QueueOwnershipTransferTests
                 // acquire half is the thing under test. Recording it inside a
                 // valid command buffer that gets submitted is enough.
 
-                SemaphoreSubmit[] waits = [new SemaphoreSubmit(releaseDone, Stage.Copy)];
+                ReadOnlySpan<SemaphoreSubmit> waits = [new SemaphoreSubmit(releaseDone, Stage.Copy)];
                 transfer.Submit2(ref consumer, in transferFence, waits, default);
             }
             finally { consumer.Dispose(); }
@@ -217,7 +217,7 @@ public sealed unsafe class QueueOwnershipTransferTests
                     Stage.Copy, Access.TransferWrite);
                 producer.PipelineBarrier(in release);
 
-                SemaphoreSubmit[] signals = [new SemaphoreSubmit(releaseDone, Stage.Copy)];
+                ReadOnlySpan<SemaphoreSubmit> signals = [new SemaphoreSubmit(releaseDone, Stage.Copy)];
                 graphics.Submit2(ref producer, in graphicsFence, default, signals);
             }
             finally { producer.Dispose(); }
@@ -233,7 +233,7 @@ public sealed unsafe class QueueOwnershipTransferTests
                     Stage.Copy, Access.TransferRead);
                 consumer.PipelineBarrier(in acquire);
 
-                SemaphoreSubmit[] waits = [new SemaphoreSubmit(releaseDone, Stage.Copy)];
+                ReadOnlySpan<SemaphoreSubmit> waits = [new SemaphoreSubmit(releaseDone, Stage.Copy)];
                 transfer.Submit2(ref consumer, in transferFence, waits, default);
             }
             finally { consumer.Dispose(); }
