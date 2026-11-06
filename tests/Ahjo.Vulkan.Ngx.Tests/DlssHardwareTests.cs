@@ -359,7 +359,409 @@ public sealed unsafe class DlssHardwareTests
         }
     }
 
+    // ---- Frame Generation feature (#253 PR B) --------------------------------
+    //
+    // Same class as everything above, for the process-global NGX reason given
+    // at the start of the PR A section.
+
+    private const uint FgWidth  = 1920;
+    private const uint FgHeight = 1080;
+
+    private static DlssFrameGenerationDescription FgDescription => new()
+    {
+        Width            = FgWidth,
+        Height           = FgHeight,
+        BackbufferFormat = VkFormat.VK_FORMAT_R8G8B8A8_UNORM,
+        RenderWidth      = FgWidth,
+        RenderHeight     = FgHeight,
+    };
+
+    [Fact]
+    public void CreateFrameGeneration_RequiringFrameGeneration_CreatesAndDisposes()
+    {
+        RequireFrameGeneration();
+
+        using var host = FrameGenerationHost.Create(BothFeatures);
+
+        DlssFrameGenerationFeature? feature = null;
+        try
+        {
+            // CreateFeature1 records real initialization work, so this recorder
+            // must be submitted AND completed before any Evaluate.
+            host.Queue.ImmediateSubmit(host.Pool, (ref CommandRecorder recorder) =>
+            {
+                feature = host.Ngx.CreateFrameGeneration(ref recorder, FgDescription);
+            });
+
+            Assert.NotNull(feature);
+            Assert.Equal(FgWidth, feature.Width);
+            Assert.Equal(FgHeight, feature.Height);
+            Assert.Equal(VkFormat.VK_FORMAT_R8G8B8A8_UNORM, feature.BackbufferFormat);
+            Assert.Equal(FgWidth, feature.RenderWidth);
+            Assert.Equal(FgHeight, feature.RenderHeight);
+            Assert.Equal(host.Ngx.MaxGeneratedFrames, feature.MaxGeneratedFrames);
+            Assert.True(feature.MaxGeneratedFrames >= 1);
+        }
+        finally
+        {
+            feature?.Dispose();
+        }
+
+        // Idempotent.
+        feature.Dispose();
+    }
+
+    [Fact]
+    public void CreateFrameGeneration_OnSuperResolutionContext_WhereFrameGenerationIsAvailable_Succeeds()
+    {
+        RequireFrameGeneration();
+
+        // The engine's shape (pekkah/ahjo#2783): require only Super Resolution,
+        // read IsFrameGenerationAvailable, and create FG when it is true.
+        using var host = FrameGenerationHost.Create(NgxFeatures.SuperResolution);
+        Assert.True(host.Ngx.IsFrameGenerationAvailable);
+
+        DlssFrameGenerationFeature? feature = null;
+        try
+        {
+            host.Queue.ImmediateSubmit(host.Pool, (ref CommandRecorder recorder) =>
+            {
+                feature = host.Ngx.CreateFrameGeneration(ref recorder, FgDescription);
+            });
+
+            Assert.NotNull(feature);
+        }
+        finally
+        {
+            feature?.Dispose();
+        }
+    }
+
+    [Fact]
+    public void FrameGeneration_EndToEnd_CreateEvaluateRelease_LayerClean()
+    {
+        RequireFrameGeneration();
+
+        using var host = FrameGenerationHost.Create(NgxFeatures.SuperResolution);
+        using var targets = FrameGenerationTargets.Create(host.Device, FgWidth, FgHeight);
+
+        DlssFrameGenerationFeature? feature = null;
+        try
+        {
+            host.Queue.ImmediateSubmit(host.Pool, (ref CommandRecorder recorder) =>
+            {
+                feature = host.Ngx.CreateFrameGeneration(ref recorder, FgDescription);
+            });
+            Assert.NotNull(feature);
+
+            // The validation layer is the only oracle for the layout contract
+            // (see EndToEnd_CreateEvaluateRelease). Capture its errors across
+            // the evaluate and fail on any.
+            var layerErrors = new List<string>();
+            DiagnosticSink previousSink = AhjoDiagnostics.Sink;
+            AhjoDiagnostics.Sink = (severity, source, message) =>
+            {
+                if (severity == DiagnosticSeverity.Error)
+                {
+                    lock (layerErrors) layerErrors.Add($"[{source}] {message}");
+                }
+                previousSink(severity, source, message);
+            };
+
+            // The wrapper's own checks too, against real VMA images — so a
+            // Release run proves ValidateInputs accepts what the documented
+            // contract builds, not only the FromRaw fixtures.
+            bool previousValidation = AhjoValidation.Enabled;
+            AhjoValidation.Enabled = true;
+
+            DlssFrameGenerationFeature created = feature;
+            try
+            {
+                host.Queue.ImmediateSubmit(host.Pool, (ref CommandRecorder recorder) =>
+                {
+                    targets.RecordLayoutTransitions(ref recorder);
+
+                    created.Evaluate(ref recorder, new DlssFrameGenerationInputs
+                    {
+                        Backbuffer         = targets.Backbuffer,
+                        Depth              = targets.Depth,
+                        MotionVectors      = targets.MotionVectors,
+                        Hudless            = targets.Hudless,
+                        UiColorAndAlpha    = targets.Ui,
+                        OutputInterpolated = targets.OutputInterpolated,
+                        OutputReal         = targets.OutputReal,
+                        Camera             = new DlssFrameGenerationCamera
+                        {
+                            ViewToClip     = System.Numerics.Matrix4x4.Identity,
+                            ClipToView     = System.Numerics.Matrix4x4.Identity,
+                            ClipToPrevClip = System.Numerics.Matrix4x4.Identity,
+                            PrevClipToClip = System.Numerics.Matrix4x4.Identity,
+                            Up             = System.Numerics.Vector3.UnitY,
+                            Right          = System.Numerics.Vector3.UnitX,
+                            Forward        = -System.Numerics.Vector3.UnitZ,
+                            Near           = 0.1f,
+                            Far            = 100f,
+                            FieldOfView    = MathF.PI / 3f,
+                            AspectRatio    = (float)FgWidth / FgHeight,
+                        },
+                        Reset             = true,
+                        BackbufferFrameId = 1,
+                    });
+
+                    // The exit-layout contract: a barrier whose oldLayouts are
+                    // the documented post-evaluate layouts, so the layer checks
+                    // what NGX actually left each image in.
+                    targets.RecordPostEvaluateBarrier(ref recorder);
+                });
+            }
+            finally
+            {
+                AhjoValidation.Enabled = previousValidation;
+                AhjoDiagnostics.Sink = previousSink;
+            }
+
+            Assert.True(layerErrors.Count == 0,
+                "The Vulkan validation layer reported errors during the DLSS Frame Generation create/evaluate:"
+                + Environment.NewLine + "  "
+                + string.Join(Environment.NewLine + "  ", layerErrors));
+        }
+        finally
+        {
+            feature?.Dispose();
+        }
+    }
+
     // ---- fixtures -----------------------------------------------------------
+
+    /// <summary>Instance and device with the SR + FG extension unions, queue,
+    /// command pool and NGX context requiring <c>required</c>.</summary>
+    private sealed class FrameGenerationHost : IDisposable
+    {
+        public required Instance          Instance { get; init; }
+        public required Device            Device   { get; init; }
+        public required Queue             Queue    { get; init; }
+        public required CommandBufferPool Pool     { get; init; }
+        public required NgxContext        Ngx      { get; init; }
+
+        public static FrameGenerationHost Create(NgxFeatures required)
+        {
+            Instance instance = NgxTestEnvironment.CreateInstance(BothFeatures);
+
+            Device?            device = null;
+            CommandBufferPool? pool   = null;
+            NgxContext?        ngx    = null;
+            try
+            {
+                device = NgxTestEnvironment.CreateDevice(instance, BothFeatures, out uint family);
+                NgxDescription description = NgxTestEnvironment.Description with { RequiredFeatures = required };
+
+                pool = new CommandBufferPool(device, family);
+                ngx  = NgxContext.Create(device, in description);
+
+                return new FrameGenerationHost
+                {
+                    Instance = instance,
+                    Device   = device,
+                    Queue    = device.GetQueue(family, queueIndex: 0),
+                    Pool     = pool,
+                    Ngx      = ngx,
+                };
+            }
+            catch
+            {
+                ngx?.Dispose();
+                pool?.Dispose();
+                device?.Dispose();
+                instance.Dispose();
+                throw;
+            }
+        }
+
+        public void Dispose()
+        {
+            Ngx.Dispose();
+            Pool.Dispose();
+            Device.Dispose();
+            Instance.Dispose();
+        }
+    }
+
+    /// <summary>All seven Frame Generation images at one extent, their views,
+    /// and the layout transitions the evaluate contract requires.</summary>
+    private sealed class FrameGenerationTargets : IDisposable
+    {
+        private Image _backbuffer, _depth, _motionVectors, _hudless, _ui, _outputInterpolated, _outputReal;
+
+        public NgxImage Backbuffer         { get; private init; }
+        public NgxImage Depth              { get; private init; }
+        public NgxImage MotionVectors      { get; private init; }
+        public NgxImage Hudless            { get; private init; }
+        public NgxImage Ui                 { get; private init; }
+        public NgxImage OutputInterpolated { get; private init; }
+        public NgxImage OutputReal         { get; private init; }
+
+        public static FrameGenerationTargets Create(Device device, uint width, uint height)
+        {
+            Allocator allocator = device.Allocator;
+
+            Image Make(VkFormat format, ImageUsage usage)
+                => allocator.CreateImage(
+                    new ImageDescription { Format = format, Width = width, Height = height, Usage = usage },
+                    new AllocationDescription { Usage = MemoryUsage.AutoPreferDevice });
+
+            const VkFormat Color = VkFormat.VK_FORMAT_R8G8B8A8_UNORM;
+            // TransferSrc is not in NVIDIA's headers or guide: with OutputReal
+            // bound, Frame Generation vkCmdCopyImage's FROM the backbuffer
+            // (into OutputReal). Without the bit the layer reports
+            // VUID-vkCmdCopyImage-aspect-06662 on this image; with OutputReal
+            // unbound and no TransferSrc the layer is clean. Observed on an
+            // RTX 4070 Ti / driver 616.92 (#253 PR B), the FG counterpart of
+            // SR's TransferDst-on-Output finding.
+            Image backbuffer    = Make(Color, ImageUsage.Sampled | ImageUsage.ColorAttachment | ImageUsage.TransferSrc);
+            Image depth         = Make(VkFormat.VK_FORMAT_D32_SFLOAT, ImageUsage.Sampled | ImageUsage.DepthStencilAttachment);
+            Image motionVectors = Make(VkFormat.VK_FORMAT_R16G16_SFLOAT, ImageUsage.Sampled | ImageUsage.ColorAttachment);
+            Image hudless       = Make(Color, ImageUsage.Sampled | ImageUsage.ColorAttachment);
+            Image ui            = Make(VkFormat.VK_FORMAT_R16G16B16A16_SFLOAT, ImageUsage.Sampled | ImageUsage.ColorAttachment);
+            // TransferDst, measured per output by dropping it from each in turn
+            // (RTX 4070 Ti / driver 616.92, #253 PR B):
+            //  - OutputReal NEEDS it: it is the dstImage of FG's
+            //    Backbuffer -> OutputReal vkCmdCopyImage, and without the bit the
+            //    layer reports VUID-vkCmdCopyImage-aspect-06663.
+            //  - OutputInterpolated does NOT: the layer is clean without it. No
+            //    SR-style vkCmdClearColorImage was observed on either output.
+            // TransferSrc on both only because RecordPostEvaluateBarrier moves
+            // them to TRANSFER_SRC_OPTIMAL for a blit, as a present path would.
+            Image outputInterpolated = Make(Color, ImageUsage.Storage | ImageUsage.TransferSrc);
+            Image outputReal         = Make(Color, ImageUsage.Storage | ImageUsage.TransferSrc | ImageUsage.TransferDst);
+
+            var colorView = new ImageViewDescription { Aspect = VkImageAspectFlagBits.VK_IMAGE_ASPECT_COLOR_BIT };
+            var depthView = new ImageViewDescription { Aspect = VkImageAspectFlagBits.VK_IMAGE_ASPECT_DEPTH_BIT };
+
+            return new FrameGenerationTargets
+            {
+                _backbuffer         = backbuffer,
+                _depth              = depth,
+                _motionVectors      = motionVectors,
+                _hudless            = hudless,
+                _ui                 = ui,
+                _outputInterpolated = outputInterpolated,
+                _outputReal         = outputReal,
+                Backbuffer         = NgxImage.CreateView(device, in backbuffer, colorView),
+                Depth              = NgxImage.CreateView(device, in depth, depthView),
+                MotionVectors      = NgxImage.CreateView(device, in motionVectors, colorView),
+                Hudless            = NgxImage.CreateView(device, in hudless, colorView),
+                Ui                 = NgxImage.CreateView(device, in ui, colorView),
+                OutputInterpolated = NgxImage.CreateView(device, in outputInterpolated, colorView),
+                OutputReal         = NgxImage.CreateView(device, in outputReal, colorView),
+            };
+        }
+
+        /// <summary>
+        /// The layout contract, recorded: the five inputs to a shader-read
+        /// layout, both outputs to GENERAL — with the compute + transfer
+        /// destination scope the SR test uses on its output.
+        /// </summary>
+        public void RecordLayoutTransitions(ref CommandRecorder recorder)
+        {
+            Span<ImageBarrier> barriers =
+            [
+                ToShaderRead(in _backbuffer),
+                ImageBarrier.Transition(
+                    in _depth, VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED, VkImageLayout.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    Stage.AllCommands, Access.None, Stage.ComputeShader, Access.ShaderRead,
+                    VkImageAspectFlagBits.VK_IMAGE_ASPECT_DEPTH_BIT),
+                ToShaderRead(in _motionVectors),
+                ToShaderRead(in _hudless),
+                ToShaderRead(in _ui),
+                ToGeneral(in _outputInterpolated),
+                ToGeneral(in _outputReal),
+            ];
+
+            recorder.PipelineBarrier(barriers);
+
+            static ImageBarrier ToShaderRead(in Image image)
+                => ImageBarrier.Transition(
+                    in image, VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED, VkImageLayout.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    Stage.AllCommands, Access.None, Stage.ComputeShader, Access.ShaderRead);
+
+            static ImageBarrier ToGeneral(in Image image)
+                => ImageBarrier.Transition(
+                    in image, VkImageLayout.VK_IMAGE_LAYOUT_UNDEFINED, VkImageLayout.VK_IMAGE_LAYOUT_GENERAL,
+                    Stage.AllCommands, Access.None,
+                    Stage.ComputeShader | Stage.AllTransfer, Access.ShaderWrite | Access.TransferWrite);
+        }
+
+        /// <summary>
+        /// A real transition out of every image — inputs to <c>GENERAL</c>
+        /// (the Backbuffer back to <c>SHADER_READ_ONLY_OPTIMAL</c>), outputs to
+        /// <c>TRANSFER_SRC_OPTIMAL</c> for a blit — whose
+        /// <c>oldLayout</c> is the layout the evaluate leaves it in, so the
+        /// layer checks the exit-layout contract. (A same-layout barrier is
+        /// not a transition and the layer does not check it.)
+        /// </summary>
+        /// <remarks>
+        /// Inputs exit in <c>SHADER_READ_ONLY_OPTIMAL</c> and outputs in
+        /// <c>GENERAL</c>, as they entered — <b>except the Backbuffer, which
+        /// exits in <c>GENERAL</c> when <c>OutputReal</c> is bound</b>. NGX
+        /// transitions it for its Backbuffer → OutputReal copy and does not
+        /// restore it: assuming <c>SHADER_READ_ONLY_OPTIMAL</c> here is
+        /// <c>VUID-VkImageMemoryBarrier2-oldLayout-01197</c>. With
+        /// <c>OutputReal</c> unbound the Backbuffer exits as it entered.
+        /// Measured on an RTX 4070 Ti / driver 616.92 (#253 PR B).
+        /// </remarks>
+        public void RecordPostEvaluateBarrier(ref CommandRecorder recorder)
+        {
+            Span<ImageBarrier> barriers =
+            [
+                ImageBarrier.Transition(
+                    in _backbuffer, VkImageLayout.VK_IMAGE_LAYOUT_GENERAL, VkImageLayout.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    Stage.ComputeShader | Stage.AllTransfer, Access.ShaderRead | Access.TransferRead,
+                    Stage.AllTransfer, Access.TransferRead),
+                ImageBarrier.Transition(
+                    in _depth, VkImageLayout.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VkImageLayout.VK_IMAGE_LAYOUT_GENERAL,
+                    Stage.ComputeShader | Stage.AllTransfer, Access.ShaderRead | Access.TransferRead,
+                    Stage.AllTransfer, Access.TransferRead,
+                    VkImageAspectFlagBits.VK_IMAGE_ASPECT_DEPTH_BIT),
+                FromShaderRead(in _motionVectors),
+                FromShaderRead(in _hudless),
+                FromShaderRead(in _ui),
+                FromGeneral(in _outputInterpolated),
+                FromGeneral(in _outputReal),
+            ];
+
+            recorder.PipelineBarrier(barriers);
+
+            static ImageBarrier FromShaderRead(in Image image)
+                => ImageBarrier.Transition(
+                    in image, VkImageLayout.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VkImageLayout.VK_IMAGE_LAYOUT_GENERAL,
+                    Stage.ComputeShader | Stage.AllTransfer, Access.ShaderRead | Access.TransferRead,
+                    Stage.AllTransfer, Access.TransferRead);
+
+            static ImageBarrier FromGeneral(in Image image)
+                => ImageBarrier.Transition(
+                    in image, VkImageLayout.VK_IMAGE_LAYOUT_GENERAL, VkImageLayout.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    Stage.ComputeShader | Stage.AllTransfer, Access.ShaderWrite | Access.TransferWrite,
+                    Stage.AllTransfer, Access.TransferRead);
+        }
+
+        public void Dispose()
+        {
+            Backbuffer.Dispose();
+            Depth.Dispose();
+            MotionVectors.Dispose();
+            Hudless.Dispose();
+            Ui.Dispose();
+            OutputInterpolated.Dispose();
+            OutputReal.Dispose();
+            _backbuffer.Dispose();
+            _depth.Dispose();
+            _motionVectors.Dispose();
+            _hudless.Dispose();
+            _ui.Dispose();
+            _outputInterpolated.Dispose();
+            _outputReal.Dispose();
+        }
+    }
 
     /// <summary>Instance, NVIDIA device, queue, command pool and NGX context.</summary>
     private sealed class DlssHost : IDisposable

@@ -34,6 +34,35 @@ a `new` array, a boxed enum — is a defect, not a style preference. The
 benchmark that pins it is `DlssEvaluateBenchmarks`; it is host-gated and must
 never be folded into `CommandRecorderBenchmarks`.
 
+## `DlssFrameGenerationFeature.Evaluate` is the second hot path
+
+Frame Generation's evaluate (#253) carries the same rule, through the same four
+properties: stack-local `NVSDK_NGX_Resource_VK` values (seven of them), names as
+`static readonly Utf8Name` fields in `NgxParameterNames`, one parameter map per
+feature, and `ref CommandRecorder`. Plus three things SR does not have:
+
+- **The matrices are stack locals too** (#253 spec D7.1). The map stores a
+  `void*` to each of the five camera matrices (`SetVoidPointer(…CameraViewToClip…)`),
+  exactly as it does for the resources. `inputs` is an `in` parameter that may
+  alias heap storage — a field of a class — and a pointer into the heap is not
+  stable across a GC. So `EvaluateCore` **copies** each `Matrix4x4` to a local
+  before taking its address: 320 bytes of stack, no pinning. Taking
+  `&inputs.Camera.ViewToClip` directly is the bug this rule exists to prevent.
+- **Twelve pointer keys are cleared in the `finally`** — seven resources and five
+  matrices — for the same dangling-pointer reason SR clears its six. An absent
+  optional slot is written as `null`, never skipped.
+- **Jitter is clip space, not SR's render-pixel space**
+  (`nvsdk_ngx_defs_dlssg.h:138-140`). `DlssFrameGenerationInputs` and
+  `DlssEvaluateInputs` are separate types precisely so that copying one into the
+  other does not compile.
+
+The matrix orientation and `MvecScale` semantics are measured in #253 PR C;
+`EvaluateCore` copies the matrices as-is and carries the MEASURE hook comment
+where a transpose would go. The benchmark is
+`DlssFrameGenerationEvaluateBenchmarks`, its own host-gated class — never folded
+into `DlssEvaluateBenchmarks` (a host with SR but no FG must still run that one)
+or `CommandRecorderBenchmarks`.
+
 ## Three invariants, three different answers
 
 Recorded here because the obvious reading of each is wrong:
