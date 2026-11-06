@@ -8,10 +8,11 @@ namespace Ahjo.Vulkan.Samples.HelloRayQuery;
 /// build the compute pipeline and push-descriptor layout it needs.
 /// </summary>
 /// <remarks>
-/// <para>Compiled at run time rather than precompiled with <c>glslc</c>: ray
-/// query in GLSL needs <c>GL_EXT_ray_query</c>, and the repository is moving
-/// off glslc. It also means this sample exercises <c>Ahjo.Vulkan.Slang</c> on
-/// a path that matters rather than on a hello-triangle.</para>
+/// <para>Compiled at run time: ray query in GLSL needs
+/// <c>GL_EXT_ray_query</c>; the other samples precompile through the
+/// pinned-Slang build step (#171), and this one deliberately exercises
+/// <c>Ahjo.Vulkan.Slang</c> at run time, on a path that matters rather than on
+/// a hello-triangle.</para>
 /// <para><b>The capability declaration is load-bearing.</b> A ray-query entry
 /// point uses <c>spvRayQueryKHR</c>, which the default <c>spirv_1_5</c> profile
 /// does not carry. Without declaring it Slang still compiles — it upgrades the

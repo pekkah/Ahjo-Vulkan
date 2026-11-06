@@ -15,9 +15,8 @@
   </ItemGroup>
 
   <!--
-    No glslc target, unlike the other headless samples: ray query in GLSL needs
-    GL_EXT_ray_query, and the repository is moving off glslc anyway. The shader
-    is compiled at run time by Ahjo.Vulkan.Slang, so it only has to be copied.
+    No SlangShader items: compiled at run time by Ahjo.Vulkan.Slang on
+    purpose, so the shader only has to be copied.
   -->
   <ItemGroup>
     <None Include="Shaders\rayquery.slang"

@@ -132,10 +132,19 @@ jobs:
       # archive is fetched here too — but keyed on exactly what determines its
       # content, so it is downloaded once per pin and restored thereafter.
       # Same path and key shape as build-slang-native.yml's cache.
-      - name: Cache staged Slang binaries
+      #
+      # The samples and tests also compile their shaders at build time with
+      # the pinned slangc (#171), staged from the same archive into
+      # native/slang/tool/win-x64, so that is cached too. The path list must
+      # stay identical to build-slang-native.yml's: the two entries share a
+      # key, and a mismatch means a hit restores only part of what the lane
+      # needs and it re-downloads the archive on every run.
+      - name: Cache staged Slang binaries + build-time slangc
         uses: actions/cache@v6
         with:
-          path: native/slang/staged/win-x64
+          path: |
+            native/slang/staged/win-x64
+            native/slang/tool/win-x64
           key: slang-win-x64-${{ hashFiles('Directory.Build.props', 'src/Ahjo.Vulkan.Slang.Native/Ahjo.Vulkan.Slang.Native.csproj', '.github/workflows/build-slang-native.yml') }}
 
       # SkipKtxNativeBuild keeps libktx's cmake build off this job's
@@ -233,9 +242,16 @@ jobs:
           $failed   = @($results | Where-Object { $_.outcome -eq "Failed" })
           $executed = $total - $skipped.Count
 
+          # The driverless proof that the build compiled the SPIR-V fixtures
+          # with the pinned slangc (#171). Unanchored on purpose: the trx
+          # writer's testName shape (fully qualified or not) is not part of
+          # any contract, and this check fails closed if it stops matching.
+          $shaderTests    = @($results | Where-Object { $_.testName -match 'CompiledShaderTests\.' })
+          $shaderExecuted = @($shaderTests | Where-Object { $_.outcome -eq "Passed" -or $_.outcome -eq "Failed" }).Count
+
           # Gap classes need a tier to be provable; platform/feature are correct
           # and permanent wherever they fire.
-          $needs = [ordered]@{ driver = 1; hardware = 2; validation = 3; spirv = -1; platform = -1; feature = -1 }
+          $needs = [ordered]@{ driver = 1; hardware = 2; validation = 3; platform = -1; feature = -1 }
           $counts = [ordered]@{}
           foreach ($c in $needs.Keys) { $counts[$c] = 0 }
           $unclassified = @()
@@ -255,12 +271,11 @@ jobs:
             }
           }
 
-          $gap = $counts["driver"] + $counts["hardware"] + $counts["validation"] + $counts["spirv"]
+          $gap = $counts["driver"] + $counts["hardware"] + $counts["validation"]
 
           $meaning = @{}
           foreach ($c in $needs.Keys) {
             $meaning[$c] = switch ($c) {
-              "spirv"    { "NOT PROVEN — glslc absent (follow-up)" }
               "platform" { "expected and permanent on this OS" }
               "feature"  { "device does not advertise the feature" }
               default    {
@@ -281,6 +296,7 @@ jobs:
           $md += "| Executed | $executed |"
           $md += "| Skipped | $($skipped.Count) |"
           $md += "| Failed | $($failed.Count) |"
+          $md += "| SPIR-V fixtures | compiled at build time by the pinned slangc; CompiledShaderTests executed $shaderExecuted |"
           $md += ""
           $md += "### Skips by class"
           $md += "| Class | Count | Meaning at declared tier ``$declared`` |"
@@ -313,6 +329,10 @@ jobs:
               Write-Output "::error::gate class '$c' skipped $($counts[$c]) tests, but AHJO_VULKAN_TIER=$declared declares that capability present. A tier-aware gate is miswired."
               $bad = $true
             }
+          }
+          if ($shaderExecuted -eq 0) {
+            Write-Output "::error::CompiledShaderTests did not execute, so nothing proves the build compiled the SPIR-V fixtures (#171)."
+            $bad = $true
           }
           if ($bad) { exit 1 }
 

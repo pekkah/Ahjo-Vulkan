@@ -46,8 +46,7 @@ internal static unsafe class Program
         }
         catch (SlangCompilationException ex)
         {
-            // 2 stays "no usable shader bytes"; it just gets them from Slang
-            // now instead of from a .spv glslc may or may not have written.
+            // 2 stays "no usable shader bytes".
             Console.Error.WriteLine($"Slang failed to compile {slangPath}:\n{ex.Diagnostics}");
             return 2;
         }
@@ -295,6 +294,9 @@ internal static unsafe class Program
         uint chosen = uint.MaxValue;
         var gpu = instance.PickPhysicalDevice((in PhysicalDeviceInfo info) =>
         {
+            // CreateDevice below enables shaderDrawParameters (#168); skip a
+            // device that does not advertise it rather than fail vkCreateDevice.
+            if (info.Features11.shaderDrawParameters == 0) return false;
             for (int i = 0; i < info.QueueFamilies.Length; i++)
             {
                 if (info.QueueFamilies[i].SupportsGraphics)

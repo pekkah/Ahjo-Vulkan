@@ -34,7 +34,7 @@ public class GraphicsPipelineBuilderBenchmarks
         if (!File.Exists(vertSpv) || !File.Exists(fragSpv))
             throw new FileNotFoundException(
                 $"GraphicsPipelineBuilderBenchmarks needs compiled triangle shaders at {shadersDir}. " +
-                "Build the benchmark project once with the Vulkan SDK on PATH (or VULKAN_SDK env var set) so glslc compiles them.");
+                "They are produced by the SlangShader build step; rebuild the benchmark project and check its build log for AHJOSLANG errors.");
 
         _instance = Instance.Create(default);
 

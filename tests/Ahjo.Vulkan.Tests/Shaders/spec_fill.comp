@@ -5,6 +5,14 @@
 // arbitrary uint tag round-tripped to the output buffer so the test
 // can check that the second map entry was wired up too.
 
+// The explicit constant_id = 0 declaration is what gives the workgroup
+// x-size a default of 1. Slang's GLSL frontend otherwise defaults a bare
+// local_size_x_id to 0 (glslang used 1), and it ignores a local_size_x = 1
+// next to it — "local_size_x = 1, local_size_x_id = 0" keeps the default at
+// 0, and the reverse order drops the spec constant altogether. Measured on
+// Slang 2026.19; CompiledShaderTests pins the default. int, not uint: the
+// constant feeds the workgroup-size vector Slang builds as ivec3.
+layout(constant_id = 0) const int kLocalSizeX = 1;
 layout(local_size_x_id = 0) in;
 layout(constant_id = 1) const uint kTag = 0xDEADu;
 

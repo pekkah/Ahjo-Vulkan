@@ -95,6 +95,27 @@
     <_SlangStagedGlslang>$(_SlangStagedDir)$(_SlangGlslangFile)</_SlangStagedGlslang>
 
     <_SlangStageNeeded Condition="'$(_SlangRid)' != '' and (!Exists('$(_SlangStagedPrimary)') or !Exists('$(_SlangStagedGlslang)'))">true</_SlangStageNeeded>
+
+    <!-- Build-time slangc (#171): staged from the same verified archive into
+         a directory that is never packed and never copied to consumers. The
+         samples and tests compile their shaders with it through
+         tools/msbuild/Ahjo.Vulkan.SlangShaders.targets. -->
+    <_SlangToolDir>$(_SlangSrcDir)tool\$(_SlangRid)\</_SlangToolDir>
+    <_SlangcFile Condition="'$(_SlangRid)' == 'win-x64'">slangc.exe</_SlangcFile>
+    <_SlangcFile Condition="'$(_SlangRid)' == 'linux-x64'">slangc</_SlangcFile>
+    <_SlangToolStamp>$(_SlangToolDir)slangc.version</_SlangToolStamp>
+
+    <!-- The tool's equivalent of _SlangStageNeeded. Existence alone is not
+         enough here: the Windows file names carry no version, so after a
+         SlangVersion bump a stale slangc.exe would still satisfy an
+         existence check. The stamp records which version was staged; a
+         mismatch re-stages. Two groups, so ReadAllText only ever runs on a
+         stamp that exists. -->
+    <_SlangToolNeeded Condition="'$(_SlangRid)' != '' and (!Exists('$(_SlangToolDir)$(_SlangcFile)') or !Exists('$(_SlangToolStamp)'))">true</_SlangToolNeeded>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(_SlangRid)' != '' and '$(_SlangToolNeeded)' != 'true'">
+    <_SlangToolNeeded Condition="'$([System.IO.File]::ReadAllText(`$(_SlangToolStamp)`).Trim())' != '$(_SlangVersionNumber)'">true</_SlangToolNeeded>
   </PropertyGroup>
 
   <ItemGroup>
@@ -176,7 +197,7 @@
   -->
   <Target Name="FetchSlang"
           BeforeTargets="AssignTargetPaths"
-          DependsOnTargets="ValidateSlangHost;DownloadSlangArchive;ExtractSlangArchive;StageSlangBinaries;StageSlangHeaders" />
+          DependsOnTargets="ValidateSlangHost;DownloadSlangArchive;ExtractSlangArchive;StageSlangBinaries;StageSlangCompiler;StageSlangHeaders" />
 
   <Target Name="ValidateSlangHost" Condition="'$(SkipSlangNativeFetch)' != 'true'">
     <Error Condition="'$(_SlangRid)' == ''"
@@ -192,7 +213,7 @@
   -->
   <Target Name="DownloadSlangArchive"
           DependsOnTargets="ValidateSlangHost"
-          Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangStageNeeded)' == 'true'">
+          Condition="'$(SkipSlangNativeFetch)' != 'true' and ('$(_SlangStageNeeded)' == 'true' or '$(_SlangToolNeeded)' == 'true')">
     <MakeDir Directories="$(_SlangDownloadDir)" />
 
     <DownloadFile SourceUrl="$(_SlangArchiveUrl)"
@@ -211,7 +232,7 @@
 
   <Target Name="ExtractSlangArchive"
           DependsOnTargets="DownloadSlangArchive"
-          Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangStageNeeded)' == 'true'">
+          Condition="'$(SkipSlangNativeFetch)' != 'true' and ('$(_SlangStageNeeded)' == 'true' or '$(_SlangToolNeeded)' == 'true')">
     <MakeDir Directories="$(_SlangExtractDir)" />
 
     <Unzip Condition="'$(_SlangRid)' == 'win-x64'"
@@ -259,7 +280,10 @@
         EMBEDDED in the compiler binary; a full compile was verified with
         none of this tree present.
       - bin/, share/doc/, lib/cmake/, lib/pkgconfig/ — the CLI tools and
-        their docs. We call the library, not slangc.
+        their docs. slangc is instead staged as a BUILD TOOL into
+        native/slang/tool/<rid>/ by StageSlangCompiler below. It is never
+        packed and never copied to consumers; the samples and tests
+        compile their shaders with it (#171).
   -->
   <Target Name="StageSlangBinaries"
           DependsOnTargets="ExtractSlangArchive"
@@ -303,6 +327,58 @@
           SkipUnchangedFiles="true" />
 
     <Message Importance="high" Text="Staged Slang $(SlangVersion) for $(_SlangRid): $(_SlangStagedDir)" />
+  </Target>
+
+  <!--
+    Stage slangc into native/slang/tool/<rid>/ as a build tool (#171).
+    Separate from staged/ on purpose: staged/ is the shipped artifact and
+    the CI cache key, and on Linux slangc cannot load beside the renamed
+    libslang.so there — its NEEDED entry is libslang-compiler.so.0.<ver>
+    and its RUNPATH includes $ORIGIN, so it is copied next to that library
+    under its soname, unrenamed.
+
+    The version check is what makes the stamp honest: the stamp is only
+    written once the staged slangc has reported the pinned version.
+  -->
+  <Target Name="StageSlangCompiler"
+          DependsOnTargets="ExtractSlangArchive"
+          Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangToolNeeded)' == 'true'">
+    <ItemGroup Condition="'$(_SlangRid)' == 'win-x64'">
+      <_SlangToolFile Include="$(_SlangExtractDir)bin\slangc.exe" />
+      <_SlangToolFile Include="$(_SlangExtractDir)bin\slang.dll" />
+      <_SlangToolFile Include="$(_SlangExtractDir)bin\slang-compiler.dll" />
+      <_SlangToolFile Include="$(_SlangExtractDir)bin\slang-glslang.dll" />
+    </ItemGroup>
+    <ItemGroup Condition="'$(_SlangRid)' == 'linux-x64'">
+      <_SlangToolFile Include="$(_SlangExtractDir)bin\slangc" />
+      <_SlangToolFile Include="$(_SlangExtractDir)lib\libslang-compiler.so.0.$(_SlangVersionNumber)" />
+      <_SlangToolFile Include="$(_SlangExtractDir)lib\$(_SlangGlslangFile)" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(_SlangToolFile)"
+          DestinationFolder="$(_SlangToolDir)"
+          SkipUnchangedFiles="true" />
+
+    <Exec Condition="'$(_SlangRid)' == 'linux-x64'"
+          Command="chmod +x &quot;$(_SlangToolDir)$(_SlangcFile)&quot;" />
+
+    <Exec Command="&quot;$(_SlangToolDir)$(_SlangcFile)&quot; -v"
+          ConsoleToMSBuild="true"
+          IgnoreExitCode="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="_SlangcVersionRc" />
+      <Output TaskParameter="ConsoleOutput" PropertyName="_SlangcVersionOut" />
+    </Exec>
+
+    <Error Condition="'$(_SlangcVersionRc)' != '0' or '$(_SlangcVersionOut.Trim())' != '$(_SlangVersionNumber)'"
+           Text="The staged slangc at $(_SlangToolDir) reports '$(_SlangcVersionOut)' but SlangVersion is $(SlangVersion). Delete $(_SlangToolDir) and rebuild; if it recurs the release layout changed — re-check StageSlangCompiler against the archive." />
+
+    <WriteLinesToFile File="$(_SlangToolStamp)"
+                      Lines="$(_SlangVersionNumber)"
+                      Overwrite="true" />
+
+    <Message Importance="high" Text="Staged slangc $(SlangVersion) for $(_SlangRid): $(_SlangToolDir)" />
   </Target>
 
   <!--

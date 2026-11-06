@@ -36,7 +36,7 @@ public class SpecializationInfoBenchmarks
         if (!File.Exists(spv))
             throw new FileNotFoundException(
                 $"SpecializationInfoBenchmarks needs the compiled spec_fill.comp shader at {shadersDir}. " +
-                "Build the benchmark project once with the Vulkan SDK on PATH (or VULKAN_SDK env var set) so glslc compiles it.");
+                "It is produced by the SlangShader build step; rebuild the benchmark project and check its build log for AHJOSLANG errors.");
 
         _instance = Instance.Create(default);
 
@@ -56,6 +56,18 @@ public class SpecializationInfoBenchmarks
         _device = gpu.CreateDevice(new DeviceDescription
         {
             Queues = [new QueueRequest(family, count: 1, priority: 1.0f)],
+
+            // maintenance4 for spec_fill.comp's LocalSizeId — see the comment
+            // on SpecializationInfoTests.CreateGraphicsDevice.
+            ConfigureFeatures = static (
+                ref ChainBuilder<VkDeviceCreateInfo> _,
+                ref VkPhysicalDeviceFeatures2        _,
+                ref VkPhysicalDeviceVulkan12Features _,
+                ref VkPhysicalDeviceVulkan13Features f13,
+                ref VkPhysicalDeviceVulkan14Features _) =>
+            {
+                f13.maintenance4 = 1;
+            },
         });
 
         using var blob = SpirvBlob.Load(spv);

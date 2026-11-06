@@ -1,0 +1,213 @@
+<Project>
+
+  <!--
+    Shared shader build step (#171 + #172). Compiles SlangShader items to
+    SPIR-V at build time with the PINNED slangc — the one
+    src/Ahjo.Vulkan.Slang.Native stages into native/slang/tool/<rid>/ from
+    the same hash-verified archive it ships the runtime from. Imported by the
+    repo-root Directory.Build.targets; inert in any project that declares no
+    SlangShader items.
+
+    Design: docs/design/specs/2026-11-06-issue-171-172-slang-shader-build-design.md
+
+    Item contract (spec A3):
+      <SlangShader Include="Shaders\*.vert;Shaders\*.frag;Shaders\*.comp" />
+        GLSL (any extension but .slang). Entry 'main'; output
+        %(Filename)%(Extension).spv, so every pre-existing .spv name is kept.
+      <SlangShader Include="Shaders\x.slang" EntryPoint="vertexMain" OutputName="x.vert.spv" />
+        Slang. One item per entry point; OutputName is required.
+    Outputs land in $(IntermediateOutputPath)Shaders\ and are copied to
+    Shaders\<OutputName> next to the binary, on build and on publish.
+
+    Why Exec and not a task assembly: a task hosting the Slang library stays
+    loaded (and locked) in reused MSBuild nodes, cannot load in Visual
+    Studio's .NET Framework MSBuild, and would see the Vulkan SDK's
+    slang-glslang.dll through PATH. slangc is upstream's own driver of the
+    same verified library. See the spec's Part A alternatives.
+
+    Matrix layout (spec E4): Slang's GLSL frontend defaults to the transpose
+    of glslc's meaning, and its flag naming is inverted relative to GLSL. So
+    GLSL items get -matrix-layout-row-major (which restores glslc's
+    column-major meaning) and .slang items get NO flag — they follow
+    HelloDlaa's `row_major float4x4` + mul(v, m) source convention instead.
+    One global flag would silently transpose one of the two languages.
+
+    Two GLSL differences from glslc have no slangc flag and are handled in the
+    sources instead (tools/CLAUDE.md): push-constant blocks must say std430
+    (Slang's GLSL default is std140), and a local_size_x_id needs an explicit
+    constant_id declaration to default to 1 rather than 0.
+
+    Error codes (nothing here uses ContinueOnError):
+      AHJOSLANG001  slangc failed; the message is the compiler's own text.
+      AHJOSLANG002  the pinned slangc is missing (unsupported host RID, or
+                    -p:SkipSlangNativeFetch=true).
+      AHJOSLANG003  a .slang item has no OutputName.
+      AHJOSLANG004  two items share an OutputName.
+  -->
+
+  <PropertyGroup>
+    <!-- Must match SlangCompiler.cs:90 (the run-time default profile), so a
+         .slang compiled here and one compiled at run time by
+         Ahjo.Vulkan.Slang target the same SPIR-V version. -->
+    <SlangShaderProfile Condition="'$(SlangShaderProfile)' == ''">spirv_1_5</SlangShaderProfile>
+
+    <!-- Keep in step with _SlangRid in
+         src/Ahjo.Vulkan.Slang.Native/Ahjo.Vulkan.Slang.Native.csproj. -->
+    <_AhjoSlangRid Condition="'$(_AhjoSlangRid)' == '' and $([MSBuild]::IsOSPlatform('Windows')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">win-x64</_AhjoSlangRid>
+    <_AhjoSlangRid Condition="'$(_AhjoSlangRid)' == '' and $([MSBuild]::IsOSPlatform('Linux')) and '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'X64'">linux-x64</_AhjoSlangRid>
+
+    <_AhjoSlangcPath Condition="'$(_AhjoSlangcPath)' == '' and '$(_AhjoSlangRid)' == 'win-x64'">$(NativeDir)slang\tool\$(_AhjoSlangRid)\slangc.exe</_AhjoSlangcPath>
+    <_AhjoSlangcPath Condition="'$(_AhjoSlangcPath)' == '' and '$(_AhjoSlangRid)' == 'linux-x64'">$(NativeDir)slang/tool/$(_AhjoSlangRid)/slangc</_AhjoSlangcPath>
+
+    <_AhjoSlangShaderDir Condition="'$(_AhjoSlangShaderDir)' == ''">$(IntermediateOutputPath)Shaders\</_AhjoSlangShaderDir>
+    <_AhjoSlangStamp Condition="'$(_AhjoSlangStamp)' == ''">$(IntermediateOutputPath)ahjo-slang-shaders.stamp</_AhjoSlangStamp>
+  </PropertyGroup>
+
+  <!--
+    1. Expand SlangShader into the working item with its derived metadata,
+       reject the item shapes the contract forbids, and refresh the stamp
+       that makes a SlangVersion / profile / flag change recompile
+       everything.
+  -->
+  <Target Name="_AhjoSlangShaderPrepare"
+          Condition="'$(DesignTimeBuild)' != 'true' and '@(SlangShader)' != ''">
+    <ItemGroup>
+      <_AhjoSlangShader Include="@(SlangShader)">
+        <Language Condition="'%(Extension)' == '.slang'">Slang</Language>
+        <Language Condition="'%(Extension)' != '.slang'">GLSL</Language>
+      </_AhjoSlangShader>
+      <!-- Inside a target, an item element with no Include modifies every
+           existing item of that type. -->
+      <_AhjoSlangShader>
+        <OutputName Condition="'%(_AhjoSlangShader.OutputName)' == '' and '%(_AhjoSlangShader.Language)' == 'GLSL'">%(_AhjoSlangShader.Filename)%(_AhjoSlangShader.Extension).spv</OutputName>
+      </_AhjoSlangShader>
+      <_AhjoSlangShader>
+        <OutputFile>$(_AhjoSlangShaderDir)%(_AhjoSlangShader.OutputName)</OutputFile>
+        <LanguageArgs Condition="'%(_AhjoSlangShader.Language)' == 'GLSL'">-matrix-layout-row-major</LanguageArgs>
+      </_AhjoSlangShader>
+    </ItemGroup>
+
+    <Error Condition="'%(_AhjoSlangShader.Language)' == 'Slang' and '%(_AhjoSlangShader.OutputName)' == ''"
+           Code="AHJOSLANG003"
+           File="%(_AhjoSlangShader.FullPath)"
+           Text="SlangShader '%(_AhjoSlangShader.Identity)' is a .slang file; set OutputName (one SlangShader item per entry point, e.g. OutputName=&quot;name.vert.spv&quot;)." />
+
+    <PropertyGroup>
+      <_AhjoSlangItemCount>@(_AhjoSlangShader->Count())</_AhjoSlangItemCount>
+      <_AhjoSlangDistinctOutputCount>@(_AhjoSlangShader->'%(OutputName)'->Distinct()->Count())</_AhjoSlangDistinctOutputCount>
+    </PropertyGroup>
+
+    <Error Condition="'$(_AhjoSlangItemCount)' != '$(_AhjoSlangDistinctOutputCount)'"
+           Code="AHJOSLANG004"
+           File="$(MSBuildProjectFullPath)"
+           Text="Two SlangShader items write the same Shaders\&lt;name&gt; (OutputNames: @(_AhjoSlangShader->'%(OutputName)', ', ')); give each entry point a distinct OutputName." />
+
+    <Error Condition="!Exists('$(_AhjoSlangcPath)')"
+           Code="AHJOSLANG002"
+           Text="This project compiles shaders with the pinned slangc ($(SlangVersion)), which was not found at $(_AhjoSlangcPath). It is staged by src/Ahjo.Vulkan.Slang.Native (target StageSlangCompiler) for win-x64 and linux-x64 only; SkipSlangNativeFetch=true also suppresses it." />
+
+    <MakeDir Directories="$(_AhjoSlangShaderDir)" />
+
+    <ItemGroup>
+      <_AhjoSlangStampLine Include="$(SlangVersion)" />
+      <_AhjoSlangStampLine Include="$(SlangShaderProfile)" />
+      <_AhjoSlangStampLine Include="-warnings-as-errors all -diagnostic-color never" />
+      <_AhjoSlangStampLine Include="glsl:-matrix-layout-row-major" />
+    </ItemGroup>
+
+    <WriteLinesToFile File="$(_AhjoSlangStamp)"
+                      Lines="@(_AhjoSlangStampLine)"
+                      Overwrite="true"
+                      WriteOnlyWhenDifferent="true" />
+
+    <ItemGroup>
+      <FileWrites Include="$(_AhjoSlangStamp)" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    2. One batch per output. The output is deleted first, so a failed
+       compile can never leave a stale file behind that satisfies the
+       up-to-date check next time. slangc's diagnostics do not match
+       MSBuild's canonical-error format, so failure is reported through
+       <Error> carrying the compiler's own text (spec E2).
+  -->
+  <Target Name="_AhjoSlangShaderCompile"
+          Condition="'$(DesignTimeBuild)' != 'true' and '@(SlangShader)' != ''"
+          DependsOnTargets="_AhjoSlangShaderPrepare"
+          Inputs="@(_AhjoSlangShader);$(_AhjoSlangcPath);$(_AhjoSlangStamp)"
+          Outputs="%(_AhjoSlangShader.OutputFile)">
+    <ItemGroup>
+      <_AhjoSlangOut Remove="@(_AhjoSlangOut)" />
+    </ItemGroup>
+
+    <Delete Files="%(_AhjoSlangShader.OutputFile)" />
+
+    <Exec Command="&quot;$(_AhjoSlangcPath)&quot; &quot;%(_AhjoSlangShader.FullPath)&quot; -target spirv -profile $(SlangShaderProfile) -entry %(_AhjoSlangShader.EntryPoint) %(_AhjoSlangShader.LanguageArgs) -warnings-as-errors all -diagnostic-color never -o &quot;%(_AhjoSlangShader.OutputFile)&quot;"
+          IgnoreExitCode="true"
+          ConsoleToMSBuild="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low"
+          EchoOff="false">
+      <Output TaskParameter="ExitCode" PropertyName="_AhjoSlangRc" />
+      <Output TaskParameter="ConsoleOutput" ItemName="_AhjoSlangOut" />
+    </Exec>
+
+    <Error Condition="'$(_AhjoSlangRc)' != '0'"
+           Code="AHJOSLANG001"
+           File="%(_AhjoSlangShader.FullPath)"
+           Text="slangc ($(SlangVersion)) failed for entry point '%(_AhjoSlangShader.EntryPoint)' (exit $(_AhjoSlangRc)):%0A@(_AhjoSlangOut, '%0A')" />
+
+    <Error Condition="'$(_AhjoSlangRc)' == '0' and !Exists('%(_AhjoSlangShader.OutputFile)')"
+           Code="AHJOSLANG001"
+           File="%(_AhjoSlangShader.FullPath)"
+           Text="slangc reported success but wrote no output" />
+  </Target>
+
+  <!--
+    3. Entry point. Hooked where FetchSlang hooks: after
+       ResolveProjectReferences (so the referenced Slang.Native project has
+       staged slangc) and before copy-to-output is computed. Registering the
+       outputs as None + Link is what keeps every binary-relative
+       Shaders/<name>.spv path in the C# unchanged and makes dotnet publish
+       carry them.
+  -->
+  <Target Name="AhjoSlangShaders"
+          Condition="'$(DesignTimeBuild)' != 'true' and '@(SlangShader)' != ''"
+          BeforeTargets="AssignTargetPaths"
+          DependsOnTargets="_AhjoSlangShaderCompile">
+    <!-- Batched over _AhjoSlangShader rather than a transform: an
+         unqualified %(OutputName) on a None element would batch over every
+         existing None item, most of which have no such metadata. -->
+    <ItemGroup>
+      <None Include="%(_AhjoSlangShader.OutputFile)"
+            Link="Shaders\%(_AhjoSlangShader.OutputName)"
+            CopyToOutputDirectory="PreserveNewest"
+            CopyToPublishDirectory="PreserveNewest"
+            Visible="false" />
+      <FileWrites Include="@(_AhjoSlangShader->'%(OutputFile)')" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Evaluation-time items. Last in the file, so they see the project's
+       SlangShader items. -->
+  <ItemDefinitionGroup>
+    <SlangShader>
+      <EntryPoint>main</EntryPoint>
+    </SlangShader>
+  </ItemDefinitionGroup>
+
+  <!--
+    Orders the Slang.Native project (and so StageSlangCompiler) ahead of any
+    project that compiles shaders, through the normal project graph — which
+    is race-free under -m. Measured (spec E8): ReferenceOutputAssembly=false
+    alone still copies the referenced project's CopyToOutputDirectory items,
+    i.e. ~32 MB of Slang DLLs into every sample; Private=false stops that.
+  -->
+  <ItemGroup Condition="'@(SlangShader)' != '' and '$(MSBuildProjectName)' != 'Ahjo.Vulkan.Slang.Native'">
+    <ProjectReference Include="$(MSBuildThisFileDirectory)..\..\src\Ahjo.Vulkan.Slang.Native\Ahjo.Vulkan.Slang.Native.csproj"
+                      ReferenceOutputAssembly="false"
+                      Private="false" />
+  </ItemGroup>
+
+</Project>

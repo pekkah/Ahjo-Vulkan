@@ -280,6 +280,9 @@ native/slang/downloaded/
 # native/ktx/staged/.
 native/slang/staged/
 
+# Build-time slangc, staged from the verified archive; never shipped (#171).
+native/slang/tool/
+
 # NVIDIA DLSS (NGX) SDK files fetched per-file by tools/setup-ngx.ps1 at the
 # NgxVersion tag and verified against native/ngx/pins.sha256 (committed).
 # Headers staged at native/ngx/include/ and NGX-LICENSE.txt are committed;

@@ -10,7 +10,9 @@ layout(set = 0, binding = 0) buffer Out {
     uint values[];
 } buf;
 
-layout(push_constant) uniform Pc {
+// std430 is explicit: Slang's GLSL frontend lays push constants out std140
+// unless told otherwise (glslc used std430). See tools/CLAUDE.md.
+layout(push_constant, std430) uniform Pc {
     uint count;
 } pc;
 

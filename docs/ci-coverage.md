@@ -49,7 +49,6 @@ which prefixes the reason with its class:
 | `[gate:driver]` | `TestGate.RequireDriver()` | coverage gap — needs tier `software` |
 | `[gate:hardware]` | `TestGate.RequireHardwareDriver(reason)` | coverage gap — needs tier `hardware` |
 | `[gate:validation]` | `TestGate.RequireValidationLayer()` | coverage gap — needs tier `validation` |
-| `[gate:spirv]` | `TestGate.RequireSpirv(path)` | toolchain gap — `glslc` absent at build time |
 | `[gate:platform]` | `TestGate.RequirePlatform(cond, reason)` | correct and permanent on this OS / window system |
 | `[gate:feature]` | `TestGate.RequireDeviceFeature(cond, reason)`, `TestGate.Unsupported(reason)` | correct — the device does not advertise it |
 
@@ -214,9 +213,12 @@ guard.
 
 - **#152** — the Windows lane's SwiftShader ICD does not answer. This design is
   independent of the root cause and gives it a finish line.
-- **Provision `glslc` on the Windows lane** and add a declared SPIR-V
-  requirement. Worthless before #152: no shader test reaches its `[gate:spirv]`
-  check while the driver gate fires first.
+- **Resolved by #171** (was: provision the SDK's shader compiler on the Windows
+  lane). The SPIR-V fixtures are compiled at build time by the pinned `slangc`,
+  or the build fails, so the `[gate:spirv]` class is gone. `CompiledShaderTests`
+  reads the compiled fixtures without a driver, so the coverage summary's
+  **SPIR-V fixtures** line is proof at tier `none`; the step fails if that
+  suite did not execute.
 - **Whether SwiftShader-on-Windows may run the submitting tests**, i.e. whether
   the hardware gate should narrow from "all software ICDs" to "lavapipe on
   Linux". Needs a working ICD first, and its own evidence.

@@ -46,8 +46,6 @@ public sealed class DepthClampTests
     private static RenderResult Render(Configure configure)
     {
         TestGate.RequireDriver();
-        TestGate.RequireSpirv(VertSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         var errors = new List<DebugMessage>();
         using var instance = Instance.Create(new InstanceDescription

@@ -21,8 +21,8 @@
   </ItemGroup>
 
   <!--
-    No glslc target, like HelloRayQuery: the shader is compiled at run time by
-    Ahjo.Vulkan.Slang, so it only has to be copied.
+    No SlangShader items: compiled at run time by Ahjo.Vulkan.Slang on
+    purpose, so the shader only has to be copied.
   -->
   <ItemGroup>
     <None Include="Shaders\cube.slang"

@@ -49,8 +49,6 @@ public sealed class GraphicsPipelineTests
     public void Builder_MissingDynamicRendering_Throws()
     {
         TestGate.RequireDriver();
-        TestGate.RequireSpirv(VertSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -68,8 +66,6 @@ public sealed class GraphicsPipelineTests
     public void Builder_TrianglePipeline_RoundTrips()
     {
         TestGate.RequireDriver();
-        TestGate.RequireSpirv(VertSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -99,8 +95,6 @@ public sealed class GraphicsPipelineTests
     public void Builder_AlphaBlend_Msaa4x_DynamicLineWidth_Builds()
     {
         TestGate.RequireDriver();
-        TestGate.RequireSpirv(VertSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -143,8 +137,6 @@ public sealed class GraphicsPipelineTests
     public void Builder_BlendAttachmentCount_MismatchedColorFormats_Throws()
     {
         TestGate.RequireDriver();
-        TestGate.RequireSpirv(VertSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -187,8 +179,6 @@ public sealed class GraphicsPipelineTests
     public void Builder_BlendAttachmentCount_FewerThanColorFormats_Throws()
     {
         TestGate.RequireDriver();
-        TestGate.RequireSpirv(VertSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -224,8 +214,6 @@ public sealed class GraphicsPipelineTests
     public void Builder_TessellationStages_RequireBoth()
     {
         TestGate.RequireDriver();
-        TestGate.RequireSpirv(VertSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -267,8 +255,6 @@ public sealed class GraphicsPipelineTests
     public void Builder_TessellationStages_WithoutPatchControlPoints_Throws()
     {
         TestGate.RequireDriver();
-        TestGate.RequireSpirv(VertSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -312,8 +298,6 @@ public sealed class GraphicsPipelineTests
     public void Builder_WithDepthBias_BuildsDepthOnlyPipeline()
     {
         TestGate.RequireDriver();
-        TestGate.RequireSpirv(VertSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
@@ -348,8 +332,6 @@ public sealed class GraphicsPipelineTests
     public void Builder_NoDepthBias_BuildsPipelineWithDefaultRasterizationState()
     {
         TestGate.RequireDriver();
-        TestGate.RequireSpirv(VertSpvPath);
-        TestGate.RequireSpirv(FragSpvPath);
 
         using var instance = Instance.Create(default);
         using var device   = CreateGraphicsDevice(instance);
