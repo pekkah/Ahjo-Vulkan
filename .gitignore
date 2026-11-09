@@ -310,6 +310,14 @@ native/ngx/build/
 samples/HelloDlaa/nvngx_dlss.dll
 samples/HelloDlaa/libnvidia-ngx-dlss.so*
 
+# The same for samples/HelloFrameGen (#253): the Frame Generation library and,
+# optionally, the Super Resolution one. Never committed; see
+# docs/ngx-frame-generation-notes.md.
+samples/HelloFrameGen/nvngx_dlssg.dll
+samples/HelloFrameGen/nvngx_dlss.dll
+samples/HelloFrameGen/libnvidia-ngx-dlssg.so*
+samples/HelloFrameGen/libnvidia-ngx-dlss.so*
+
 # Verify snapshot workflow produces .received.* files on mismatch; they're
 # intentionally transient. .verified.* files are committed and ARE tracked.
 *.received.*

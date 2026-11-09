@@ -56,9 +56,12 @@ feature, and `ref CommandRecorder`. Plus three things SR does not have:
   `DlssEvaluateInputs` are separate types precisely so that copying one into the
   other does not compile.
 
-The matrix orientation and `MvecScale` semantics are measured in #253 PR C;
-`EvaluateCore` copies the matrices as-is and carries the MEASURE hook comment
-where a transpose would go. The benchmark is
+The matrix orientation and `MvecScale` semantics were measured in #253 PR C
+(`docs/ngx-frame-generation-notes.md` §4): System.Numerics matrices go in
+as-is, with no transpose, and `MvecScale` is a pixel-unit rescale (default
+`1.0f` over pixel vectors), not a `[-1, 1]` normalization. `EvaluateCore`
+carries the measurement next to the matrix copies; don't add a transpose
+without re-running the step 19a visualizer check. The benchmark is
 `DlssFrameGenerationEvaluateBenchmarks`, its own host-gated class — never folded
 into `DlssEvaluateBenchmarks` (a host with SR but no FG must still run that one)
 or `CommandRecorderBenchmarks`.

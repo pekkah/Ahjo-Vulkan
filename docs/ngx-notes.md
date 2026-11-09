@@ -10,7 +10,8 @@ rather than read in a header say so, with the driver version, because that
 provenance is the difference between a rule and a rumour.
 
 `samples/HelloDlaa` is the worked call site for all of it. DLSS Frame
-Generation has its own page: [ngx-frame-generation-notes.md](ngx-frame-generation-notes.md).
+Generation has its own page, [ngx-frame-generation-notes.md](ngx-frame-generation-notes.md),
+and its own sample, `samples/HelloFrameGen`.
 
 ---
 
@@ -34,8 +35,8 @@ directory it searched**:
 DLSS is unavailable: the NVIDIA feature library was not found.
 Expected file: nvngx_dlss.dll
 Searched:
-  C:\p\ahjo-vulkan\samples\HelloDlaa\bin\Release\net10.0\
   C:\p\ahjo-vulkan\native\ngx\staged\win-x64\rel
+  C:\p\ahjo-vulkan\samples\HelloDlaa\bin\Release\net10.0\
 This library is NOT shipped by Ahjo.Vulkan.Ngx — the application supplies it
 from NVIDIA's DLSS SDK (https://github.com/NVIDIA/DLSS, lib/<plat>/rel/).
 See docs/ngx-notes.md.

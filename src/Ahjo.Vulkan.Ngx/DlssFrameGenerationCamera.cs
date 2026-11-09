@@ -11,12 +11,16 @@ namespace Ahjo.Vulkan.Ngx;
 /// jitter offset" (<c>nvsdk_ngx_defs_dlssg.h:125</c>). Build them from the same
 /// projection the motion vectors were built from, not from the jittered one an
 /// upscaler wants.</para>
-/// <para><b>Orientation is measured in #253 PR C, not asserted here.</b> NVIDIA
-/// documents the matrices as "float[4][4] in row-major order (assuming
-/// post-multiplication)" (DLSS-FG guide), which does not say on which side the
-/// vector sits. Whether a <see cref="Matrix4x4"/> (row-major, <c>v * M</c>)
-/// goes in as-is or transposed is decided by the dev DLL's Clip-to-Previous-Clip
-/// visualizer; see <c>docs/ngx-frame-generation-notes.md</c>.</para>
+/// <para><b>Pass System.Numerics matrices as they are: row-vector form
+/// (<c>v * M</c>), no transpose.</b> NVIDIA documents the matrices as
+/// "float[4][4] in row-major order (assuming post-multiplication)" (DLSS-FG
+/// guide), which does not say on which side the vector sits, so this was
+/// measured: with the matrices as-is, the dev DLL's "Camera ClipToPrevClip
+/// Matrix" visualizer leaves static geometry un-annotated under a moving
+/// camera; transposed, it annotates the whole frame (#253 PR C step 19a, RTX
+/// 4070 Ti / driver 616.92). Compose them the same way:
+/// <c>ClipToPrevClip = Invert(view * proj) * prevView * prevProj</c>. See
+/// <c>docs/ngx-frame-generation-notes.md</c> §4.</para>
 /// <para>A plain <c>readonly struct</c>; the explicit parameterless constructor
 /// runs the valid-by-default initializer (<see cref="ClipToLensClip"/> is
 /// <see cref="Matrix4x4.Identity"/>), which CS8983 requires — the
@@ -31,8 +35,8 @@ public readonly struct DlssFrameGenerationCamera
     public DlssFrameGenerationCamera() { }
 
     /// <summary>View space to clip space — the unjittered projection
-    /// (<c>DLSSG.CameraViewToClip</c>). Orientation: see
-    /// <c>docs/ngx-frame-generation-notes.md</c> (measured in #253 PR C).</summary>
+    /// (<c>DLSSG.CameraViewToClip</c>). Row-vector form, as-is (measured; see
+    /// the type remarks).</summary>
     public Matrix4x4 ViewToClip { get; init; }
 
     /// <summary>Clip space to view space — the inverse of

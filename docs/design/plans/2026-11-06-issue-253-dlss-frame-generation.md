@@ -705,7 +705,31 @@ HelloFrameGen [--mode fg|off] [--present fifo|immediate] [--frames N]
               [--throttle-ms N]
               [--capture-generated <png>] [--capture-real <png>]
               [--freeze] [--require-fg] [--no-validation]
+              [--reflex off|on|boost] [--latency-report N]
+              [--reflex-interval-us N|frame]
+              [--diagnostic-fg-without-reflex] [--skip-sleep]
 ```
+
+The last three options were added 2026-11-07 for spec F5 / OPEN-9 (step 19j):
+
+- **`--reflex-interval-us N|frame`**: sets
+  `LatencySleepMode.MinimumIntervalUs`. `N` is literal microseconds. `frame`
+  means `ceil(M × 1 000 000 / refreshHz)` with M = 2 under `--mode fg` and 1
+  under `--mode off`. `refreshHz` comes from SDL3's
+  `SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window))->refresh_rate`.
+  Print the value used. The default stays 0, today's behaviour, until 19j
+  decides; step 19j then states what the default becomes. **19j decided
+  (2026-11-09, user): `frame` under `--mode fg --present fifo`, 0 otherwise;
+  `--reflex-interval-us 0` turns it off** (`docs/ngx-frame-generation-notes.md`
+  §5, 19j).
+- **`--diagnostic-fg-without-reflex`**: **diagnostic only, user-approved
+  2026-11-07.** It lifts the `--mode fg --reflex off` command-line error so
+  FIFO's own cost can be told apart from a pacing failure. Print
+  `"DIAGNOSTIC: Frame Generation with Reflex off violates the RTX UI Developer Guidelines (UI l. 149-150); measurement only."`
+  at start. Without the flag the exit-2 rule of step 17b still applies.
+- **`--skip-sleep`**: diagnostic only, as HelloCube's. The loop does not call
+  `LatencySleep`. Print
+  `"Reflex: sleep skipped (diagnostic; not a valid Reflex integration)"`.
 
 `--throttle-ms N` makes the render thread spin-wait N ms after the scene
 submit, which forces the base rate below refresh/2. That reproduces spec F3's
@@ -822,7 +846,11 @@ step refer to the **#261 spec** unless they say otherwise.
   - Add `--reflex off|on|boost`, default `on`. Map these once after swapchain
     creation to `swap.SetLatencySleepMode(LatencySleepMode.Off / .On / .OnPlusBoost)`.
   - Combining `--mode fg --reflex off` is a command-line error, exit 2, with a
-    message citing the guideline.
+    message citing the guideline, **unless** `--diagnostic-fg-without-reflex`
+    is given (step 17, spec F5).
+  - `--reflex-interval-us` feeds `LatencySleepMode.MinimumIntervalUs` in the
+    same `SetLatencySleepMode` call. It is not a separate call, and it is
+    re-applied by the wrapper on `Recreate` (#261 D3).
   - `--mode off --reflex off` is allowed, because it is the latency baseline.
   - If `device.IsNvLowLatency2Enabled` is false (non-NVIDIA, or a driver
     without the extension), do not call `SetLatencySleepMode`, because it
@@ -933,8 +961,8 @@ measure.
 - **`--present fifo --mode fg --throttle-ms T`**, with T chosen so the
   unthrottled base rate falls to about 0.4 × refresh. This is spec F3's
   breakdown row.
-- If the panel supports VRR, repeat the first and fourth runs with VRR on
-  (OPEN-5). Otherwise record "VRR not measured".
+- The measurement panel has no G-Sync/VRR (user, 2026-11-07), so record
+  **"VRR not measured"** (OPEN-5 stays open).
 
 Report the following in a table: mean and p99 of `MsBetweenDisplayChange`,
 displayed frames per second, and the rendered rate (`BackbufferFrameId` delta
@@ -1012,6 +1040,52 @@ the result, and do not interpret it as certification. Record windowed or
 borderless next to every number, because the utility expects fullscreen
 exclusive (#261 spec, OPEN section).
 
+**j. FG + FIFO latency diagnosis (spec F5, OPEN-9; added 2026-11-07).** This
+runs before the PresentMon runs of 19d and 19i.
+
+**Instrumentation first.** Extend `--latency-report` (no allocation; stack
+locals and `Stopwatch.GetTimestamp`) to print, per report window:
+- the mean duration of `LatencySleep`;
+- the mean time blocked in acquire 0 and in acquire 1, separately;
+- the existing sim → GPU end and OS-queue wait.
+
+**Runs.** 1920×1080 windowed, then borderless, 60 s each, `--latency-report 120`:
+
+| # | Command | Answers |
+|---|---|---|
+| J1 | `--mode fg --present fifo --reflex on` | Baseline with the new breakdown. The hypothesis predicts sleep ≈ 16.7 ms and acquire 1 ≈ 16.7 ms per rendered frame |
+| J2 | `--mode fg --present fifo --reflex off --diagnostic-fg-without-reflex` | FIFO with the sleep in mode Off |
+| J3 | `--mode fg --present fifo --reflex off --diagnostic-fg-without-reflex --skip-sleep` | Pure FIFO, no sleep |
+| J4 | `--mode fg --present fifo --reflex on --reflex-interval-us frame` | Sleep told the rendered interval (2 × refresh) |
+| J5 | `--mode fg --present fifo --reflex on --reflex-interval-us <frame + 500>` | Slightly slower than the display, so a standing queue can drain |
+| J6 | `--mode off --present fifo --reflex on --reflex-interval-us frame` | The control: the interval must not hurt the one-present loop |
+
+**Decision rule, record verbatim in the notes:**
+- **J4 or J5 bring the OS-queue wait to about one refresh or less.** Make
+  `frame` (or `frame + 500 µs`, whichever won) the default under `--mode fg`
+  with FIFO. State it in the consumer contract as an application rule for FG
+  over FIFO (spec F5). No wrapper change. This also requires:
+  - sim → GPU end ≲ 2 refreshes;
+  - 60 displayed fps;
+  - the CPU block moves from acquire 1 into `LatencySleep`.
+- **J2/J3 ≈ J1 and J4/J5 do not help.** **Stop and report** (OPEN-9). The
+  latency is FIFO's and needs a pacer. PR C then ships with the numbers and
+  the statement "FG over FIFO is high-latency on this driver; a pacer is
+  future work". Do not add a pacer in PR C.
+- **Any other outcome**, for example J4 helps but drops below 60 displayed fps:
+  **stop and report** with all six rows.
+
+**Then PresentMon (19d/19i)** on J1, J3 and the winning interval run, with
+PC-latency tracking enabled (check `PresentMon.exe --help` for the exact flag
+name in the installed version). Capture `PresentMode`, `MsBetweenDisplayChange`,
+`MsUntilDisplayed`, `MsInPresentAPI` and the PC-latency column.
+- `PresentMode` must be **"Hardware: Independent Flip"** for the borderless
+  run. If it reads "Composed", note it, because Streamline expects high
+  latency with VSync + FG there (`ProgrammingGuideDLSS_G.md:1163-1176`).
+- `MsBetweenDisplayChange` should alternate about 16.7 ms, generated then real.
+- PC latency is compared with the 3.0-5.7× band against the **displayed**
+  frame time (50-95 ms at 60 Hz).
+
 ## 20. `docs/ngx-frame-generation-notes.md` (fill the PR B stub)
 
 Use the `docs/ngx-notes.md` style: cited or measured, with provenance on every
@@ -1058,9 +1132,23 @@ Also add a cross-link line to `docs/ngx-notes.md`'s intro, and a
 
 ## 21. PR C description
 
-- "Closes #253".
+- **"Refs #253"**, not "Closes" (user decision 2026-11-07; spec D11). State
+  that the Reflex Test Utility (OPEN-6) is deferred to the step 22 follow-up.
+- The 19j table and its decision.
 - The D9 measurement table (19a–i) and the driver version.
 - "Depends on #261", which is merged.
 - The `/run-bench` table from PR B, linked.
 - A statement that CI builds but does not run the sample.
 - OPEN-4 and OPEN-6 restated for the human.
+
+## 22. Follow-up PR — Reflex Test Utility, closes #253 (added 2026-11-07)
+
+- Branch from `main` after PR C merges.
+- Run `Reflex_Verification/ReflexTest.exe` (Reflex guide §4.2) with
+  `--mode fg --reflex on`, then `boost`, using the step 19j default interval.
+  Use borderless or fullscreen, VSync per the guide's expectation. Record
+  pass or warnings verbatim, the presentation mode, and the driver version in
+  `docs/ngx-frame-generation-notes.md` §5 (OPEN-6 = #261 OPEN-2).
+- **If warnings point at the integration path rather than marker placement,
+  stop and report** (#261 OPEN-2).
+- The PR description says "Closes #253".

@@ -21,9 +21,10 @@ namespace Ahjo.Vulkan.Ngx;
 ///   <c>BeginRendering</c> scope.</description></item>
 /// </list>
 /// <para>These are the layouts the Super Resolution path established
-/// (<see cref="DlssEvaluateInputs"/>). The validation-layer run of #253 PR C
-/// confirms them for Frame Generation, and any further requirement it finds is
-/// recorded in <c>docs/ngx-frame-generation-notes.md</c>.</para>
+/// (<see cref="DlssEvaluateInputs"/>). <c>samples/HelloFrameGen</c> runs them
+/// with every slot bound and two presents per frame, layer-clean (#253 PR C
+/// step 18); <c>docs/ngx-frame-generation-notes.md</c> §6 records the
+/// findings.</para>
 /// <para><b>Layouts after the evaluate are not all the layouts you set.</b>
 /// Unlike Super Resolution, Frame Generation does not restore every image.
 /// <b>When <see cref="OutputReal"/> is bound, <see cref="Backbuffer"/> exits in
@@ -148,11 +149,21 @@ public readonly struct DlssFrameGenerationInputs
 
     /// <summary>
     /// Scale applied to motion-vector X (<c>DLSSG.MvecScaleX</c>). Defaults to
-    /// <c>1.0f</c>; a literal <c>0f</c> is treated as <c>1.0f</c>. Whether the
-    /// value is a pixel-unit rescale (the DLSS-FG guide) or a normalization to
-    /// [-1, 1] (the header) is measured in #253 PR C; see
-    /// <c>docs/ngx-frame-generation-notes.md</c>.
+    /// <c>1.0f</c>; a literal <c>0f</c> is treated as <c>1.0f</c>.
     /// </summary>
+    /// <remarks>
+    /// <b>A pixel-unit rescale, not a normalization.</b> Give
+    /// <see cref="MotionVectors"/> in pixels of the motion-vector resource and
+    /// leave the scale at <c>1.0f</c>, as the DLSS-FG guide says; use the scale
+    /// only to convert vectors stored in some other unit into those pixels.
+    /// The header's "normalize to [-1,1]" reading (<c>1/RenderWidth</c>) is
+    /// wrong for this path: measured with the dev DLL's "Motion Vector
+    /// Resampling" visualizer, <c>(1, 1)</c> over pixel vectors highlights only
+    /// occlusion edges and the screen-static UI, while
+    /// <c>(1/RenderWidth, 1/RenderHeight)</c> highlights the moving texture
+    /// inside the cube's faces (#253 PR C step 19b, RTX 4070 Ti / driver
+    /// 616.92). See <c>docs/ngx-frame-generation-notes.md</c> §4.
+    /// </remarks>
     public float MotionVectorScaleX { get; init; } = 1f;
 
     /// <summary>Scale applied to motion-vector Y. Defaults to <c>1.0f</c>; see

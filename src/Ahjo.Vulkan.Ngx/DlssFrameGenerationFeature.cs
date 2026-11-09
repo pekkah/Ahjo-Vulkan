@@ -174,10 +174,12 @@ public sealed unsafe class DlssFrameGenerationFeature : IDisposable
         // field of a class), and a pointer into the heap is not stable across a
         // GC. 320 bytes of stack, no pinning (#253 spec D7.1).
         //
-        // MEASURE hook (#253 plan step 19a): the copies are as-is. If the dev
-        // DLL's Clip-to-Previous-Clip visualizer shows the transposed
-        // orientation is required, these five become Matrix4x4.Transpose(...) —
-        // a change confined to this block, recorded here with the measurement.
+        // AS-IS, no transpose: measured (#253 PR C step 19a, RTX 4070 Ti /
+        // driver 616.92, NGX v310.9.1 dev DLL). With System.Numerics row-vector
+        // matrices (v * M) passed unchanged, the "Camera ClipToPrevClip Matrix"
+        // visualizer leaves the static cube un-annotated under an orbiting
+        // camera; passed transposed, it annotates the whole frame. See
+        // docs/ngx-frame-generation-notes.md §4.
         DlssFrameGenerationCamera camera = inputs.Camera;
         Matrix4x4 viewToClip     = camera.ViewToClip;
         Matrix4x4 clipToView     = camera.ClipToView;

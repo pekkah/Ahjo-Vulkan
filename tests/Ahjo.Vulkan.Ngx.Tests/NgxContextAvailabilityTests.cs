@@ -51,7 +51,7 @@ public sealed class NgxContextAvailabilityTests
         Assert.Equal(
             OperatingSystem.IsWindows() ? "nvngx_dlssg.dll" : "libnvidia-ngx-dlssg.so.<version>",
             ex.ExpectedFile);
-        Assert.Equal([AppContext.BaseDirectory, .. Paths], ex.SearchedDirectories);
+        Assert.Equal([.. Paths, AppContext.BaseDirectory], ex.SearchedDirectories);
 
         Assert.StartsWith(
             "DLSS Frame Generation is unavailable: the NVIDIA feature library was not found.\n",
@@ -114,7 +114,7 @@ public sealed class NgxContextAvailabilityTests
                 ? (OperatingSystem.IsWindows() ? "nvngx_dlssg.dll" : "libnvidia-ngx-dlssg.so.<version>")
                 : (OperatingSystem.IsWindows() ? "nvngx_dlss.dll" : "libnvidia-ngx-dlss.so.<version>"),
             ex.ExpectedFile);
-        Assert.Equal([AppContext.BaseDirectory, .. Paths], ex.SearchedDirectories);
+        Assert.Equal([.. Paths, AppContext.BaseDirectory], ex.SearchedDirectories);
     }
 
     [Fact]
@@ -131,16 +131,16 @@ public sealed class NgxContextAvailabilityTests
         Assert.Equal(
             OperatingSystem.IsWindows() ? "nvngx_dlss.dll" : "libnvidia-ngx-dlss.so.<version>",
             ex.ExpectedFile);
-        Assert.Equal([AppContext.BaseDirectory, .. Paths], ex.SearchedDirectories);
+        Assert.Equal([.. Paths, AppContext.BaseDirectory], ex.SearchedDirectories);
 
         // The regression guard: the pre-#253 message, byte for byte.
         string expected =
             "DLSS is unavailable: the NVIDIA feature library was not found.\n" +
             "Expected file: " + ex.ExpectedFile + "\n" +
             "Searched:\n" +
-            "  " + AppContext.BaseDirectory + "\n" +
             "  " + Paths[0] + "\n" +
             "  " + Paths[1] + "\n" +
+            "  " + AppContext.BaseDirectory + "\n" +
             "This library is NOT shipped by Ahjo.Vulkan.Ngx — the application supplies it from NVIDIA's DLSS SDK " +
             "(https://github.com/NVIDIA/DLSS, lib/<plat>/rel/). See docs/ngx-notes.md.";
         Assert.Equal(expected, ex.Message);
