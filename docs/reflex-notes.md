@@ -144,8 +144,11 @@ open `OUT_OF_BAND_PRESENT_START` to its id, which "allows frame generation
 implementations to map multiple `vkQueuePresentKHR` calls to the same
 presentID" (wsi l. 9578-9597). This sequence runs validation-clean on the
 measurement host (`WindowedValidationTests.FrameGenerationMarkerSequence_IsValidationClean`,
-30 frames, 0 errors). Whether the revision-2 driver attributes both presents to
-N is measured by #253 PR C, not here.
+30 frames, 0 errors). #253 PR C measured the rest on the same driver
+(`samples/HelloFrameGen`, [ngx-frame-generation-notes.md §5](ngx-frame-generation-notes.md#5-present-ownership)):
+`GetLatencyTimings` reports **one** entry per rendered frame id with populated
+present stamps, at the rendered rate, and the driver writes **two** PCL 11/12
+pairs per rendered frame id (#261 OPEN-3 timings and OPEN-8 pass).
 
 ### KHR present ids are not frame ids
 
@@ -385,16 +388,22 @@ record the presentation mode next to every number.
   sees any marker 11 (spec E6) will therefore do so on this driver even for a
   single-present application. Measured once, 2026-11-06, driver 616.92.
   Because of this, `Swapchain.SetLatencyMarker` no longer forwards the
-  out-of-band present markers to PCL on a low-latency swapchain (§4); how the
-  driver's 11/12 behave with two presents per rendered frame is OPEN-8, measured
-  in #253 PR C step 19i.
+  out-of-band present markers to PCL on a low-latency swapchain (§4).
+  **With two presents per rendered frame (OPEN-8), measured in #253 PR C step
+  19i:** over 600 rendered frames of `HelloFrameGen --mode fg --present fifo
+  --reflex on`, the driver's thread wrote exactly two 11/12 pairs for every
+  rendered frame id, all with the application's ids, and the application's
+  thread wrote none ([ngx-frame-generation-notes.md §5](ngx-frame-generation-notes.md#5-present-ownership)).
 
 ### 7.6 Not measured here
 
-- **PresentMon PC latency** (mean, p99) for 7.1 and on the AMD iGPU —
-  **deferred to #253 PR C step 19i.**
-- **The Reflex Test Utility** (Reflex On, On + Boost; OPEN-2) — **deferred to
-  #253 PR C step 19i.**
+- **PresentMon PC latency** (mean, p99) for 7.1 and on the AMD iGPU — **still
+  not measured.** #253 PR C measures it for the frame-generation loop
+  (step 19d/19i, [ngx-frame-generation-notes.md §5](ngx-frame-generation-notes.md#5-present-ownership));
+  the single-present and AMD numbers are not part of that.
+- **The Reflex Test Utility** (Reflex On, On + Boost, and with frame
+  generation; OPEN-2 = #253 OPEN-6) — **deferred** to the #253 closing
+  follow-up PR (#253 plan step 22).
 - **The NVIDIA Control Panel settings** for 7.2 (Max Frame Rate, Vertical
   sync, Low Latency Mode, Vulkan/OpenGL present method) — **not captured.**
 

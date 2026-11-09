@@ -48,8 +48,9 @@ public sealed class NgxFeatureLibraryNotFoundException : NgxException
     /// <summary>The file NGX looked for, e.g. <c>nvngx_dlssg.dll</c>.</summary>
     public string ExpectedFile { get; }
 
-    /// <summary>Every directory searched, in order: the application directory
-    /// first, then each <see cref="NgxDescription.DlssSearchPaths"/> entry.</summary>
+    /// <summary>Every directory searched, in NGX's measured order: each
+    /// <see cref="NgxDescription.DlssSearchPaths"/> entry, then the application
+    /// directory (NGX's own fallback).</summary>
     public IReadOnlyList<string> SearchedDirectories { get; }
 
     public NgxFeatureLibraryNotFoundException(

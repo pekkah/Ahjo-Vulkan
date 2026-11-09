@@ -689,9 +689,13 @@ rule.
 | **C** | `samples/HelloFrameGen` with Reflex wired in, `docs/ngx-frame-generation-notes.md` with the D9 measurements, README updates | **B merged and R merged** |
 
 The current branch `issue-253-dlss-frame-generation` carries this spec and plan
-plus PR A, which closes nothing. PR C closes #253, and it branches from `main`
-only after both PR B and the #261 PR have merged. Neither one is
-stacked on the other.
+plus PR A, which closes nothing. PR C branches from `main` only after both PR B
+and the #261 PR have merged. Neither one is stacked on the other.
+
+**User decision, 2026-11-07: PR C ships as "Refs #253", not "Closes #253".**
+The Reflex Test Utility (OPEN-6) is deferred. A small follow-up PR, also
+branched from `main`, records its result in `docs/ngx-frame-generation-notes.md`
+and closes #253 (plan step 22).
 
 ---
 
@@ -905,7 +909,76 @@ MEASURE steps as priors, not answers:
   which agrees with the NGX header and not the FG guide
   (`ProgrammingGuide.md:1174-1177`; spec E7).
 
----
+### F5. Latency of the FIFO two-present loop (added 2026-11-07, from PR C measurements)
+
+**What was measured.** RTX 4070 Ti, driver 616.92, LL2 revision 2, 60 Hz,
+windowed and borderless (`docs/ngx-frame-generation-notes.md` §5, 19i).
+`GetLatencyTimings` sim → GPU end:
+- `--mode fg --present fifo --reflex on` (and Boost, borderless, and 2, 3 or
+  4 swapchain images): **about 99 ms, of which about 66 ms is OS render-queue
+  wait**;
+- `--mode off`: about 1.3 ms;
+- FG + IMMEDIATE: 1.7 → 5.9 ms and rising.
+
+The CPU blocks in the **second acquire**, not in `LatencySleep`. The timings
+report the rendered 30 fps, and the driver writes two PCL 11/12 pairs per
+rendered frame, so #261 OPEN-3 and OPEN-8 pass. The driver's real OS presents
+land about 70 and 87 ms after the application's `PresentEnd` (the 19i ETW
+capture).
+
+**What is inherent.** Interpolation holds the real frame back "by the time
+taken to generate and present frame 1.5" (FG guide l. 114-118). At 60 Hz with
+2x that is about one refresh, 16.7 ms. Under FIFO a generated frame shown one
+vblank after the previous real one adds at most about one more refresh. **About
+66 ms of queue wait is roughly three refreshes more than either.** It is the
+classic VSync back-pressure Reflex exists to move into the sleep: "you should
+never hit a stall in Present, since you are effectively moving that delay to
+this Sleep call" (Reflex l. 522-523). With one present per frame, the same
+loop and driver do move it (`--mode off`: 0.5 ms queue wait).
+
+**Root-cause hypothesis (not yet proven; OPEN-9).** The driver's sleep paces
+against the swapchain's *present* cadence, while the FG loop issues two
+presents per sleep. The evidence:
+1. The spec defines the sleep interval per present: `minimumIntervalUs` "is
+   the microseconds between `vkQueuePresentKHR` calls … that `vkLatencySleepNV`
+   will enforce" (wsi l. 9175-9177, 9181). Nothing in the LL2 text says how the
+   low-latency logic weights two presents attributed to one frame (wsi
+   l. 9124-9132, 9578-9597 define attribution, not pacing).
+2. The one open-source LL2 integration does not rely on the driver to find the
+   VSync interval. With low latency On, DXVK raises `minimumIntervalUs` to the
+   display's frame interval itself (`doitsujin/dxvk` @ `829e377d`,
+   `src/dxvk/dxvk_presenter.cpp:152-167`).
+3. NVIDIA does not ship this configuration. Streamline: "**Vulkan**: VSync
+   with Frame Generation is only supported on D3D12"
+   (`ProgrammingGuideDLSS_G.md:1159` at v2.14.16). VSync with FG "relies on
+   Independent Flip … If VSync is enabled with Frame Generation on a system
+   that does not support IFLIP, high latency is expected" (`:1163-1176`). On
+   Vulkan, SL presents asynchronously through its own pacer
+   (`:628`, `:813-831`), not through FIFO. For a fixed rate it points to
+   `frameLimitUs`, the field that becomes `minimumIntervalUs`
+   (`:769`; `sl.chi/vknvll2.cpp:210-225`).
+4. The swapchain image count does not matter, so the backlog lives in the
+   driver's or OS's present queue, not in `VkSwapchainKHR` images. That
+   matches the driver's deferred present thread seen in the ETW capture.
+
+**Consequence for D5, narrowly.** D5's present ownership and marker sequence
+stand, and so does F3 row 1's *spacing* claim. What D5 did not state is that
+FIFO spacing alone does not bound latency. Under FG + FIFO the application must
+also tell the sleep the rendered interval:
+`LatencySleepMode.MinimumIntervalUs = M × refresh period`, plus a small margin
+so a standing queue can drain. The value is set through #261's existing
+`SetLatencySleepMode`, so **no `Ahjo.Vulkan` API change**. This is adopted only
+if OPEN-9's measurements confirm it.
+
+If they do not, the remedy is a real pacer (F3's `VK_EXT_present_timing` row,
+or present-wait gating, which needs a `Swapchain.WaitForPresent` the wrapper
+does not have, #261 D4). That is a design for a new issue, not a PR C change.
+
+**Why not the other levers.**
+- **Out-of-band queues.** The loop has one queue, and marking one changes
+  frame delimiting device-wide (#261 E5).
+- **Fewer swapchain images.** Already measured to make no difference.
+- **MAILBOX.** It drops the generated frame (F3).
 
 ## OPEN
 
@@ -941,13 +1014,34 @@ MEASURE steps as priors, not answers:
 - **OPEN-5 (new, F3).** FIFO pacing under VRR (G-Sync / adaptive sync) is not
   stated by any source found. Measure it with PresentMon if a VRR panel is
   available (plan step 19d). Otherwise the contract says "unmeasured on VRR".
+  **2026-11-07: the user reports the measurement panel has no G-Sync/VRR. Record
+  "VRR not measured"; OPEN-5 stays open for a future VRR host.**
 - **OPEN-6 (new, F1).** Does NVIDIA's Reflex verification (ReflexTest.exe, the
   Reflex QA checklist) accept a native `VK_NV_low_latency2` integration, or
   does it require `NvLowLatencyVk.dll` (the Reflex SDK's documented Vulkan
   path)? It is answerable by running the Reflex Test Utility against the
   OPEN-3 implementation, or by asking NVIDIA. It belongs to #261, where it is
   #261 OPEN-2. #261 runs the Reflex On and On + Boost passes; the FG-on pass
-  is plan step 19i.
+  is plan step 19i. **2026-11-07: deferred by the user.** PR C ships "Refs #253";
+  the follow-up PR (plan step 22) runs the utility with FG on, records the
+  result verbatim, and closes #253.
+- **OPEN-9 (new, F5; measured in PR C, plan step 19j).** Is the about 66 ms
+  queue wait under FG + FIFO + Reflex On a pacing failure that
+  `MinimumIntervalUs = M × refresh period` fixes, or FIFO's inherent cost with
+  Reflex making no difference? Decide it from a no-Reflex diagnostic run and
+  the interval runs. **If no interval brings the queue wait down to about one
+  refresh or less, stop and report.** The fix is then a pacer, a new design,
+  and PR C ships with the measured numbers and that statement.
+  **Measured 2026-11-09 (two rounds, `docs/ngx-frame-generation-notes.md` §5,
+  19j):** neither branch of the rule. Without an interval the sleep does not
+  hold the CPU and the loop is frame-fence bound with the queue full (the F5
+  hypothesis of a per-present sleep blocking in acquire 1 is not what
+  happens). An interval of one rendered frame keeps 60 displayed fps but only
+  holds the queue at its startup depth (17-28 ms borderless, 45-83 ms
+  windowed); frame + 500 µs drains it (11-17 ms) but repeats a frame about
+  every 1.3 s. **Resolved by the user:** the sample defaults to one rendered
+  frame under FG + FIFO, that interval is the application rule for FG over
+  FIFO, and a queue-depth pacer is follow-up work outside #253 (#266).
 - **OPEN-7 (new, F2).** NVIDIA has published nothing either way on the NGX FG
   path's long-term status. Tag history shows active maintenance since v310.4.0,
   and the only public channel (the repo tracker) is disabled. Re-check at

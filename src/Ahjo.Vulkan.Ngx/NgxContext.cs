@@ -960,15 +960,23 @@ public sealed unsafe class NgxContext : IDisposable
         throw new NgxException(reported, NgxResult.Format(reported, operation));
     }
 
-    /// <summary>The application directory, then each search path, in order —
+    /// <summary>Each search path, in order, then the application directory —
     /// what NGX searched and what the exception reports.</summary>
+    /// <remarks>
+    /// The order is NGX's measured preference, not an assumption: the wrapper
+    /// passes only the <see cref="NgxDescription.DlssSearchPaths"/> entries as
+    /// <c>FeatureSearchPaths</c>, and with the same <c>nvngx_dlssg.dll</c> name
+    /// in a search path and beside the executable, NGX loaded the search-path
+    /// copy (RTX 4070 Ti / driver 616.92 / NGX v310.9.1, #253 PR C). The
+    /// application directory is NGX's own fallback, so it is listed last.
+    /// </remarks>
     private static string[] BuildSearchedDirectories(IReadOnlyList<string>? searchPaths)
     {
         int count = searchPaths?.Count ?? 0;
         var searched = new string[count + 1];
-        searched[0] = AppContext.BaseDirectory;
         for (int i = 0; i < count; i++)
-            searched[i + 1] = searchPaths![i];
+            searched[i] = searchPaths![i];
+        searched[count] = AppContext.BaseDirectory;
         return searched;
     }
 

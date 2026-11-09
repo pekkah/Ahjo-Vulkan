@@ -1,0 +1,92 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Ahjo.Vulkan.Samples.HelloFrameGen</RootNamespace>
+    <AssemblyName>HelloFrameGen</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan\Ahjo.Vulkan.csproj" />
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan.Slang\Ahjo.Vulkan.Slang.csproj" />
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan.Ngx\Ahjo.Vulkan.Ngx.csproj" />
+    <ProjectReference Include="..\..\src\Ahjo.Vulkan.Utilities\Ahjo.Vulkan.Utilities.csproj" />
+    <PackageReference Include="ppy.SDL3-CS" />
+  </ItemGroup>
+
+  <!-- Share the SDL3 window shim with the test project (#87 / #88). -->
+  <ItemGroup>
+    <Compile Include="..\..\tests\Ahjo.Vulkan.Tests\SdlWindow.cs" Link="SdlWindow.cs" />
+  </ItemGroup>
+
+  <!--
+    No SlangShader items: compiled at run time by Ahjo.Vulkan.Slang on
+    purpose (the HelloDlaa shape), so the shaders only have to be copied.
+  -->
+  <ItemGroup>
+    <None Include="Shaders\cube.slang"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Include="Shaders\overlay.slang"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    ==================================================================
+    The NVIDIA feature libraries: nvngx_dlssg.dll (Frame Generation) and,
+    optionally, nvngx_dlss.dll. Linux: libnvidia-ngx-dlssg.so / -dlss.so.
+    ==================================================================
+    Nothing in this file ever downloads them. They are proprietary and the
+    consumer's to supply (#214). See docs/ngx-frame-generation-notes.md.
+
+    This sample uses no Super Resolution, so it creates its NgxContext with
+    RequiredFeatures = FrameGeneration and does not need nvngx_dlss.dll. The
+    SR items are here only so the same drop-in layout as HelloDlaa works.
+
+    Three candidates per DLL, in order. The first two are MSBuild items and
+    BOTH are Condition'ed on Exists(...), because CI builds this sample with
+    no feature DLL anywhere and TreatWarningsAsErrors=true means a missing
+    file must not even warn:
+
+      1. An explicit override on the command line:
+           -p:NvidiaDlssgDll=C:\path\nvngx_dlssg.dll
+           -p:NvidiaDlssDll=C:\path\nvngx_dlss.dll
+      2. The file dropped beside this csproj (git-ignored, see .gitignore).
+      3. NOT an MSBuild item: the run-time NgxDescription.DlssSearchPaths
+         fallback to native/ngx/staged/<rid>/rel, built by
+         Program.BuildSearchPaths(). A developer-machine convenience for THIS
+         repository, not the deployment model.
+  -->
+  <PropertyGroup>
+    <_FrameGenWindows Condition="$([MSBuild]::IsOSPlatform('Windows'))">true</_FrameGenWindows>
+  </PropertyGroup>
+
+  <!-- nvngx_dlssg (Frame Generation). -->
+  <ItemGroup Condition="'$(NvidiaDlssgDll)' != '' and Exists('$(NvidiaDlssgDll)')">
+    <None Include="$(NvidiaDlssgDll)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(NvidiaDlssgDll)' == '' and '$(_FrameGenWindows)' == 'true' and Exists('$(MSBuildProjectDirectory)\nvngx_dlssg.dll')">
+    <None Include="nvngx_dlssg.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(NvidiaDlssgDll)' == '' and '$(_FrameGenWindows)' != 'true'">
+    <None Include="libnvidia-ngx-dlssg.so*" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <!-- nvngx_dlss (Super Resolution; optional for this sample). -->
+  <ItemGroup Condition="'$(NvidiaDlssDll)' != '' and Exists('$(NvidiaDlssDll)')">
+    <None Include="$(NvidiaDlssDll)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(NvidiaDlssDll)' == '' and '$(_FrameGenWindows)' == 'true' and Exists('$(MSBuildProjectDirectory)\nvngx_dlss.dll')">
+    <None Include="nvngx_dlss.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(NvidiaDlssDll)' == '' and '$(_FrameGenWindows)' != 'true'">
+    <None Include="libnvidia-ngx-dlss.so*" Exclude="libnvidia-ngx-dlssg.so*" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+</Project>
