@@ -2,7 +2,7 @@ namespace Ahjo.Vulkan.Native;
 
 /// <summary>
 /// Hand-authored Vulkan sentinel constants. ClangSharp's
-/// <c>generate-unmanaged-constants</c> mode picks up <c>#define</c>s that
+/// <c>unmanaged-constants</c> mode picks up <c>#define</c>s that
 /// expand to clean integer literals but skips macros with operator/cast
 /// expansions like <c>#define VK_WHOLE_SIZE (~0ULL)</c>, which is why these
 /// four don't show up in <c>Generated/Vk.cs</c>. The values are spec-stable

@@ -21,9 +21,9 @@ native/include/vk_video/vulkan_video_codec_vp9std_decode.h
 native/include/vk_video/vulkan_video_codecs_common.h
 --namespace
 Ahjo.Vulkan.Native
---methodClassName
+--method-class-name
 Vk
---libraryPath
+--library-path
 vulkan-1
 --output
 src/Ahjo.Vulkan.Native/Generated
@@ -37,15 +37,17 @@ c
 --generate
 generated-code=none
 --config
-latest-codegen
-generate-helper-types
-generate-file-scoped-namespaces
-generate-unmanaged-constants
-generate-disable-runtime-marshalling
-generate-aggressive-inlining
-exclude-enum-operators
-strip-enum-member-type-name
-multi-file
+codegen=latest
+--generate
+helper-types
+file-scoped-namespaces
+unmanaged-constants
+disable-runtime-marshalling
+aggressive-inlining
+enum-operators=false
+enum-member-type-name=false
+--config
+file=multi
 # Platform-specific Vulkan extensions (VK_KHR_win32_surface,
 # VK_KHR_xlib_surface, VK_EXT_metal_surface, VK_KHR_android_surface, …)
 # are intentionally NOT enabled here. Each one pulls in a system header
