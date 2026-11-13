@@ -1078,4 +1078,7 @@ public static unsafe partial class NgxApi
 
     [NativeTypeName("#define NVSDK_NGX_DLSSG_Parameter_UserInterfaceRecompositionEnabled \"DLSSG.UserInterfaceRecompositionEnabled\"")]
     public static ReadOnlySpan<byte> NVSDK_NGX_DLSSG_Parameter_UserInterfaceRecompositionEnabled => "DLSSG.UserInterfaceRecompositionEnabled"u8;
+
+    [NativeTypeName("#define NVSDK_NGX_DLSSG_Parameter_LiteCandidateBlendingEnabled \"DLSSG.LiteCandidateBlendingEnabled\"")]
+    public static ReadOnlySpan<byte> NVSDK_NGX_DLSSG_Parameter_LiteCandidateBlendingEnabled => "DLSSG.LiteCandidateBlendingEnabled"u8;
 }
