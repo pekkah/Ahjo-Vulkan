@@ -19,9 +19,9 @@ Ahjo.Vulkan.Slang.Native
 # NOT "Slang": a type named Slang inside namespace Ahjo.Vulkan.Slang.Native is
 # unreachable from namespace Ahjo.Vulkan.Slang, because the identifier binds to
 # the enclosing namespace before any imported type.
---methodClassName
+--method-class-name
 SlangApi
---libraryPath
+--library-path
 slang
 --output
 src/Ahjo.Vulkan.Slang.Native/Generated
@@ -35,31 +35,44 @@ c++
 # to linux-gnu changes nothing at runtime and keeps the output host-independent.
 --additional
 --target=x86_64-unknown-linux-gnu
+# Collapses SLANG_API to nothing for the parse (slang.h:230-262: with
+# SLANG_STATIC defined, SLANG_DYNAMIC is not, so SLANG_API is empty). Under the
+# linux-gnu target above it would otherwise expand to
+# __attribute__((__visibility__("default"))), which ClangSharp reports as
+# "Unsupported attribute: 'Visibility'" on every sp* declaration in
+# slang-deprecated.h. 279 warnings is exit code 279, and Regenerate fails
+# (issue #273). The attribute carries nothing a P/Invoke can express, and
+# --library-path still names the shared library. tools/generate-ngx.rsp does the
+# same for AHJO_NGX_API.
+--define-macro
+SLANG_STATIC
 # ClangSharp >= 21.1.8.4 emits [assembly: GeneratedCode("ClangSharp", "<ver>")]
 # by default. Opt out: it would churn every package on each tool bump, and
 # an assembly-wide marker could change how analyzers treat hand-written code.
 --generate
 generated-code=none
 --config
-latest-codegen
-implicit-vtbls
+codegen=latest
+vtbls=implicit
 # --target above pins what clang PARSES, but not how ClangSharp MAPS C types:
 # without an explicit choice it falls back to the host OS, so `long` comes out
 # as nint on Linux and int on Windows (ISlangProfiler::getEntryTimeMS flips).
-# unix-types matches the linux-gnu parse target and the committed output.
-unix-types
-generate-vtbl-index-attribute
-generate-native-inheritance-attribute
-generate-callconv-member-function
-generate-helper-types
-generate-file-scoped-namespaces
-generate-unmanaged-constants
-generate-disable-runtime-marshalling
-generate-aggressive-inlining
-exclude-enum-operators
-exclude-funcs-with-body
-strip-enum-member-type-name
-multi-file
+# types=unix matches the linux-gnu parse target and the committed output.
+types=unix
+--generate
+vtbl-index-attribute
+native-inheritance-attribute
+callconv-member-function
+helper-types
+file-scoped-namespaces
+unmanaged-constants
+disable-runtime-marshalling
+aggressive-inlining
+enum-operators=false
+funcs-with-body=false
+enum-member-type-name=false
+--config
+file=multi
 # slang::Attribute (slang.h:2402) shadows System.Attribute inside the generated
 # namespace, which makes every [NativeTypeName] a CS0616. 2032 errors from one
 # name collision.

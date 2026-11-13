@@ -300,7 +300,7 @@
           SkipUnchangedFiles="true" />
 
     <!-- Rename, not symlink. Copy dereferences; the destination name is
-         what the .rsp's libraryPath of 'slang' resolves to via
+         what the .rsp's library path of 'slang' resolves to via
          NativeLibrary's lib<name>.so probe. -->
     <Copy Condition="'$(_SlangRid)' == 'linux-x64'"
           SourceFiles="$(_SlangExtractDir)lib\libslang-compiler.so.0.$(_SlangVersionNumber)"

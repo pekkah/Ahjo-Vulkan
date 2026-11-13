@@ -134,7 +134,7 @@ public sealed unsafe class NgxSmokeTests
         // NGX SDK staged at all.
         //
         // The 204 NVSDK_NGX_Parameter_* constants are the reason
-        // tools/generate-ngx.rsp turns generate-macro-bindings on. They are
+        // tools/generate-ngx.rsp turns `--generate macro-bindings` on. They are
         // emitted as `ReadOnlySpan<byte> … => "Width"u8;`, and Phase 2 will
         // hand them to NVSDK_NGX_Parameter_SetUI and friends as `const char*`
         // straight out of `fixed`, per-frame, with no copy and no

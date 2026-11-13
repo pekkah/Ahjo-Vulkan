@@ -41,9 +41,9 @@ Excluding the wchar_t-taking *functions* is not enough either: `NVSDK_NGX_PathLi
 
 ## Two rsp deltas, both forced
 
-`tools/generate-ngx.rsp` is the only rsp here that turns `generate-macro-bindings` **on** and the only one that leaves `strip-enum-member-type-name` **off**. Neither was a style choice.
+`tools/generate-ngx.rsp` is the only rsp here that turns `--generate macro-bindings` **on** and the only one that does **not** pass `--generate enum-member-type-name=false`. Neither was a style choice.
 
-**`generate-macro-bindings` on.** Without it, **zero** of the 204 `NVSDK_NGX_Parameter_*` string macros are emitted — measured. With it they come out as `public static ReadOnlySpan<byte> NVSDK_NGX_Parameter_Width => "Width"u8;`, which is exactly the UTF-8 literal form the repo's invariant 1 requires. Hand-writing them instead is the drift this project exists to avoid.
+**`--generate macro-bindings` on.** Without it, **zero** of the 204 `NVSDK_NGX_Parameter_*` string macros are emitted — measured. With it they come out as `public static ReadOnlySpan<byte> NVSDK_NGX_Parameter_Width => "Width"u8;`, which is exactly the UTF-8 literal form the repo's invariant 1 requires. Hand-writing them instead is the drift this project exists to avoid.
 
 The cost is that it also emits 74 `NVSDK_NGX_EParameter_*` constants whose values embed raw `0x01`–`0x1f` bytes (ClangSharp escapes `\t`, `\n`, `\r`, `\0` and emits the rest literally). They are deprecated aliases of the names above, nothing in the DLSS path uses them, and committing raw control characters into a `.cs` file under `text=auto eol=lf` normalization is a hazard with no upside — so they are excluded. After a pin bump, regenerate that exclusion list mechanically rather than editing it:
 
@@ -52,7 +52,7 @@ grep -o '^#define \(NVSDK_NGX_EParameter_[A-Za-z0-9_]*\)' \
   native/ngx/include/nvsdk_ngx_defs.h | sed 's/^#define //'
 ```
 
-**`strip-enum-member-type-name` off.** With it, the output does not compile. `NVSDK_NGX_Result` is a bitwise-or chain off one member, and the stripper rewrites member *names* but not initializer expressions that reference sibling members — 18 × `CS0103`. Enum members therefore keep their `NVSDK_NGX_`-prefixed names in this one project. Don't "fix" that.
+**No `enum-member-type-name=false`.** With it, the output does not compile. `NVSDK_NGX_Result` is a bitwise-or chain off one member, and the stripper rewrites member *names* but not initializer expressions that reference sibling members — 18 × `CS0103`. Enum members therefore keep their `NVSDK_NGX_`-prefixed names in this one project. Don't "fix" that.
 
 ## The shim build is opt-in, and an absent SDK is not an error
 

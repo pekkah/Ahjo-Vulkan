@@ -3,8 +3,8 @@
 # READ THIS BEFORE EDITING. This rsp deviates from the house style in three
 # places, and every one of them was forced by a measured failure rather than
 # chosen. The comment blocks below say which. In particular: do not "restore"
-# strip-enum-member-type-name for consistency with the other rsps, and do not
-# drop generate-macro-bindings as an optimisation.
+# enum-member-type-name=false for consistency with the other rsps, and do not
+# drop `--generate macro-bindings` as an optimisation.
 #
 # The parse root is OUR header, not NVIDIA's. native/ngx/src/ahjo_ngx.h
 # includes <vulkan/vulkan.h> and then nvsdk_ngx_vk.h (the NGX headers do not
@@ -52,12 +52,12 @@ Ahjo.Vulkan.Ngx.Native
 # unreachable from namespace Ahjo.Vulkan.Ngx, because the identifier binds to
 # the enclosing namespace before any imported type. That is the #166 lesson,
 # recorded at tools/generate-slang.rsp:19-21.
---methodClassName
+--method-class-name
 NgxApi
 # The shim, not the NGX client library: NVIDIA ships a static archive with no
 # DLL to P/Invoke, so all 27 entry points resolve against ahjo_ngx.dll /
 # libahjo_ngx.so. native/ngx/src/ahjo_ngx.def and .map are the export lists.
---libraryPath
+--library-path
 ahjo_ngx
 --output
 src/Ahjo.Vulkan.Ngx.Native/Generated
@@ -90,14 +90,15 @@ c
 --generate
 generated-code=none
 --config
-latest-codegen
-generate-helper-types
-generate-file-scoped-namespaces
-# DELTA 1 — generate-macro-bindings, which no other rsp in this repo turns on.
+codegen=latest
+--generate
+helper-types
+file-scoped-namespaces
+# DELTA 1 — --generate macro-bindings, which no other rsp in this repo turns on.
 #
 # nvsdk_ngx_defs.h defines 204 NVSDK_NGX_Parameter_* string macros ("Width",
 # "Color", "Jitter.Offset.X", "DLSS.Hint.Render.Preset.DLAA", …). With
-# generate-unmanaged-constants alone, ZERO of them are emitted — measured, by
+# unmanaged-constants alone, ZERO of them are emitted — measured, by
 # grepping the generated tree for "Width" and matching only struct fields.
 # With this flag they come out as
 #
@@ -110,12 +111,12 @@ generate-file-scoped-namespaces
 #
 # The cost is DELTA 3 below: it also emits the legacy hash-encoded alias
 # family, which has to be excluded.
-generate-macro-bindings
-generate-unmanaged-constants
-generate-disable-runtime-marshalling
-generate-aggressive-inlining
-exclude-enum-operators
-# DELTA 2 — strip-enum-member-type-name is ABSENT, and must stay absent.
+macro-bindings
+unmanaged-constants
+disable-runtime-marshalling
+aggressive-inlining
+enum-operators=false
+# DELTA 2 — enum-member-type-name=false is ABSENT, and must stay absent.
 #
 # All three other rsps use it. Here it does not compile. NVSDK_NGX_Result is a
 # bitwise-or chain off one member (nvsdk_ngx_defs.h:96-178):
@@ -131,7 +132,8 @@ exclude-enum-operators
 #
 # The consequence is that enum members keep their NVSDK_NGX_-prefixed names in
 # this one project. That is deliberate; do not "fix" it.
-multi-file
+--config
+file=multi
 # Collapses AHJO_NGX_API to nothing for the parse (native/ngx/src/ahjo_ngx.h).
 # Under the linux-gnu target above it would otherwise expand to
 # __attribute__((visibility("default"))), which ClangSharp reports as
@@ -227,7 +229,7 @@ NVSDK_NGX_DLDenoise_Create_Params
 #
 # GROUP 6 — the three function-like macros DELTA 1 also trips over.
 # NVSDK_NGX_ARRAY_LEN (nvsdk_ngx_defs.h:48), NVSDK_NGX_SUCCEED (:183) and
-# NVSDK_NGX_FAILED (:184) take arguments, and generate-macro-bindings cannot
+# NVSDK_NGX_FAILED (:184) take arguments, and `--generate macro-bindings` cannot
 # express that, so each produces
 #
 #     Warning: Function like macro definition records are not supported
