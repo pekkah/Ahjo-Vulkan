@@ -10,4 +10,4 @@ dotnet build src/Ahjo.Vulkan.Ktx.Native -t:Regenerate   # needs git; cmake to bu
 
 The libktx feature set is defined ONCE as `KtxCMakeFeatureFlags` in `Directory.Build.props` — both the local host build and every CI job use it, so flags can't drift. The contract is "read a KTX2 container and transcode Basis Universal": both GL and Vulkan uploaders are OFF, so the binary must not need a graphics API or ICD. The `ktx-native` CI lane builds + tests each RID's binary with no loader installed, on purpose — if a test suddenly needs one, something got linked in that shouldn't be. See `.github/AGENTS.md`.
 
-The staged binary under `native/ktx/staged/<rid>/` is both the CI cache key and the release artifact.
+The staged binary under `native/ktx/staged/<rid>/` is both the CI cache key and the release artifact. A shipped RID's binary missing from there fails `dotnet pack` with `AHJOPACK001`, and `ci.yml`'s `native-pack` job verifies the built nupkg on every PR (#169, `tools/AGENTS.md`).

@@ -8,6 +8,6 @@ To change the bindings: edit `tools/generate-vma.rsp` (notes in `tools/generate-
 dotnet build src/Ahjo.Vulkan.Vma.Native -t:Regenerate   # needs cmake on PATH
 ```
 
-The package ships prebuilt `vma.dll` / `libvma.so` built from `native/vma/`. `-p:SkipVmaNativeBuild=true` skips the cmake step when consuming a pre-staged binary.
+The package ships prebuilt `vma.dll` / `libvma.so` built from `native/vma/`. `-p:SkipVmaNativeBuild=true` skips the cmake step when consuming a pre-staged binary. A shipped RID's binary missing from `native/vma/build/<rid>/` fails `dotnet pack` with `AHJOPACK001`, and `ci.yml`'s `native-pack` job verifies the built nupkg on every PR (#169, `tools/CLAUDE.md`).
 
 Linux binaries are exercised by the `vma-linux` CI lane (lavapipe, allocation-only) before they reach NuGet — issue #144 shipped a `libvma.so` that SIGSEGVed on first use because nothing ever executed it. Don't remove or bypass that lane; see `.github/CLAUDE.md`.

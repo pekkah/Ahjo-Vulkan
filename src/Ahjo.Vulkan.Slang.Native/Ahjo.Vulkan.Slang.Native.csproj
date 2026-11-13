@@ -26,6 +26,7 @@
     <PackageTags>slang;shader;spirv;hlsl;compiler;reflection;gpu;interop;native;pinvoke;bindings</PackageTags>
     <MinVerTagPrefix>v</MinVerTagPrefix>
     <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+    <AhjoNativePackDependsOn>PackSlangRuntimes</AhjoNativePackDependsOn>
   </PropertyGroup>
 
   <!--
@@ -416,10 +417,15 @@
     downloading build-slang-native.yml's upload-artifact outputs into those
     directories before invoking dotnet pack.
 
-    Local pack only includes the host's RID — that's intentional. Producing
-    a fully cross-RID nupkg requires the CI matrix.
+    This target only DECLARES the shipped files as AhjoNativePackFile items;
+    the shared AhjoPackNativeFiles target (tools/msbuild/
+    Ahjo.Vulkan.NativePack.targets) runs it via AhjoNativePackDependsOn,
+    packs the items and writes the manifest CI verifies the nupkg against.
+    Pack is strict: a declared file that is missing fails with AHJOPACK001.
+    A local host-RID-only pack needs -p:AhjoAllowPartialNativePack=true.
+    See docs/design/specs/2026-11-13-issue-169-native-pack-completeness-design.md.
   -->
-  <Target Name="PackSlangRuntimes" BeforeTargets="_GetPackageFiles;GenerateNuspec" Condition="'$(IsPackable)' == 'true'">
+  <Target Name="PackSlangRuntimes" Condition="'$(IsPackable)' == 'true'">
     <ItemGroup>
       <_SlangPackFile Include="slang.dll">          <Rid>win-x64</Rid>   </_SlangPackFile>
       <_SlangPackFile Include="slang-compiler.dll"> <Rid>win-x64</Rid>   </_SlangPackFile>
@@ -432,19 +438,13 @@
     </ItemGroup>
 
     <ItemGroup>
-      <None Include="$(_SlangStagedRootDir)%(_SlangPackFile.Rid)\%(_SlangPackFile.Identity)"
-            Condition="Exists('$(_SlangStagedRootDir)%(_SlangPackFile.Rid)\%(_SlangPackFile.Identity)')">
-        <Pack>true</Pack>
+      <AhjoNativePackFile Include="$(_SlangStagedRootDir)%(_SlangPackFile.Rid)\%(_SlangPackFile.Identity)">
         <PackagePath>runtimes\%(_SlangPackFile.Rid)\native\%(_SlangPackFile.Identity)</PackagePath>
-        <Visible>false</Visible>
-      </None>
+      </AhjoNativePackFile>
 
-      <None Include="$(_SlangSrcDir)SLANG-LICENSE.txt"
-            Condition="Exists('$(_SlangSrcDir)SLANG-LICENSE.txt')">
-        <Pack>true</Pack>
-        <PackagePath>\</PackagePath>
-        <Visible>false</Visible>
-      </None>
+      <AhjoNativePackFile Include="$(_SlangSrcDir)SLANG-LICENSE.txt">
+        <PackagePath>SLANG-LICENSE.txt</PackagePath>
+      </AhjoNativePackFile>
     </ItemGroup>
 
     <Message Importance="high" Text="Slang pack: included RIDs from $(_SlangStagedRootDir)" />

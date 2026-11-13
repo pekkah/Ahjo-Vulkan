@@ -6,7 +6,7 @@ name: Build VMA Native
 # and aggregates them into a single multi-RID nupkg.
 #
 # Triggers:
-#   - workflow_call: invoked by publish.yml before pack
+#   - workflow_call: invoked by ci.yml (native-pack, on PRs) and publish.yml (artifacts)
 #   - workflow_dispatch: manual run to refresh artifacts during dev
 #   - push to main, paths-filtered: rebuild whenever the impl TU,
 #     CMake setup, or pinned VMA version changes.
