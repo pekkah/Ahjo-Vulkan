@@ -51,6 +51,10 @@ Conventions and the quality bar: `docs/design/CLAUDE.md`.
 
 Commits: `<area>: <imperative>` — e.g. `CI: enable auto-publish`, `Packaging: add LICENSE + Source Link`. PRs reference their issue (`Closes #NN`) and merge to `main`.
 
+## Codex mirror
+
+`AGENTS.md` (root + scoped), `.codex/agents/*.toml` and `.agents/skills/` are generated from the CLAUDE.md files, `.claude/agents/` and `.claude/skills/`. Edit the Claude side, then run `python tools/sync-codex.py` and commit both. `--check` exits 1 when the mirror is stale.
+
 ## What lives in `~/.claude/projects/.../memory/` (auto-memory)
 
 Long-running project context that's likely to drift (issue numbers, design decisions in flight, user-specific preferences) lives in auto-memory, not in this file. The CLAUDE.md layer (this file + the scoped ones) is **stable** — invariants that hold across sessions and that anyone working in the repo should follow.

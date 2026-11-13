@@ -44,7 +44,7 @@ The plan is authoritative, but reality wins over paper:
 
 - Every plan step executed or explicitly reported as deviated/blocked.
 - `dotnet build Ahjo.Vulkan.slnx` clean, `dotnet test` green (driver-dependent tests may skip without a device — skips are fine, failures are not).
-- If a hot path changed: the matching benchmark (mapping table in `.Codex/agents/bench-coverage-checker.md`) run in Release, `Allocated` still `-`.
+- If a hot path changed: the matching benchmark (mapping table in `.codex/agents/bench-coverage-checker.toml`) run in Release, `Allocated` still `-`.
 - Docs the plan names (e.g. `docs/benchmarks.md`, migration guide) updated.
 
 ## Final report

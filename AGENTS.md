@@ -10,7 +10,7 @@ Full details live in scoped AGENTS.md files that load automatically when you wor
 
 1. **UTF-8 string literals** — Vulkan `const char*` takes `Utf8Name.FromLiteral("…"u8)`; never round-trip through `string` + `Encoding.UTF8.GetBytes`. → `src/Ahjo.Vulkan/AGENTS.md`
 2. **Native AOT stays clean** — no reflection discovery, no dynamic codegen, nothing trim-unsafe reachable from the wrapper; CI publishes `samples/AotSmoke` with `PublishAot=true`. → `src/Ahjo.Vulkan/AGENTS.md`, `docs/aot-notes.md`
-3. **Zero per-frame allocations** on `Recording/`, `Sync/`, `Pools/`, `Memory/` hot paths — and anything else called per frame, e.g. `Ahjo.Vulkan.Ngx`'s `DlssFeature.Evaluate`; setup-time allocation is fine. → `src/Ahjo.Vulkan/AGENTS.md`, `src/Ahjo.Vulkan.Ngx/AGENTS.md`
+3. **Zero per-frame allocations** on `Recording/`, `Sync/`, `Pools/`, `Memory/` hot paths — and anything else called per frame, e.g. `Ahjo.Vulkan.Ngx`'s `DlssFeature.Evaluate` and `DlssFrameGenerationFeature.Evaluate`; setup-time allocation is fine. → `src/Ahjo.Vulkan/AGENTS.md`, `src/Ahjo.Vulkan.Ngx/AGENTS.md`
 4. **Generated code is generated** — never hand-edit `src/*/Generated/`, `native/downloaded/`, `native/ktx/downloaded/`, `native/slang/downloaded/`; edit `tools/*.rsp` + regenerate (`/regen-bindings`). → per-project AGENTS.md files
 5. **`TreatWarningsAsErrors=true`** repo-wide with `AnalysisLevel=latest`. Fix the diagnostic; don't `#pragma`-suppress to get green.
 
@@ -31,7 +31,7 @@ Publishing: preview packages on `push:main`, stable on GitHub release; one `v0.x
 
 ## Roles: architect and implementer
 
-Non-trivial work splits into two roles, each a subagent in `.Codex/agents/`:
+Non-trivial work splits into two roles, each a subagent in `.codex/agents/`:
 
 - **architect** — turns a GitHub issue into a paired design spec + implementation plan under `docs/design/`. Explores the code, weighs options, decides. Touches docs only, never `src/`.
 - **implementer** — executes an approved plan step by step: edits code, builds, tests. Doesn't redesign; deviations from the plan get reported back, not improvised.
@@ -51,6 +51,10 @@ Conventions and the quality bar: `docs/design/AGENTS.md`.
 
 Commits: `<area>: <imperative>` — e.g. `CI: enable auto-publish`, `Packaging: add LICENSE + Source Link`. PRs reference their issue (`Closes #NN`) and merge to `main`.
 
-## What lives in `~/.Codex/projects/.../memory/` (auto-memory)
+## Codex mirror
 
-Long-running project context that's likely to drift (issue numbers, design decisions in flight, user-specific preferences) lives in auto-memory, not in this file. The AGENTS.md layer (this file + the scoped ones) is **stable** — invariants that hold across sessions and that anyone working in the repo should follow.
+This file, the scoped AGENTS.md files, `.codex/agents/*.toml` and `.agents/skills/` are **generated** from the Claude Code layer (the CLAUDE.md files, `.claude/agents/` and `.claude/skills/`) by `tools/sync-codex.py`. Don't edit them directly: edit the Claude side, re-run the script and commit both. `--check` exits 1 when the mirror is stale.
+
+## What stays out of this file
+
+Long-running project context that's likely to drift (issue numbers, design decisions in flight, user-specific preferences) lives in agent memory or the issue tracker, not in this file. The AGENTS.md layer (this file + the scoped ones) is **stable** — invariants that hold across sessions and that anyone working in the repo should follow.
