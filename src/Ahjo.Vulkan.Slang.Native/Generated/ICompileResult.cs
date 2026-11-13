@@ -50,7 +50,7 @@ public unsafe partial struct ICompileResult
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [VtblIndex(5)]
     [return: NativeTypeName("SlangResult")]
-    public int getItemData([NativeTypeName("uint32_t")] uint index, [NativeTypeName("IBlob **")] ISlangBlob** outblob)
+    public int getItemData([NativeTypeName("uint32_t")] uint index, [NativeTypeName("slang::IBlob **")] ISlangBlob** outblob)
     {
         return ((delegate* unmanaged[MemberFunction]<ICompileResult*, uint, ISlangBlob**, int>)(lpVtbl[5]))((ICompileResult*)Unsafe.AsPointer(ref this), index, outblob);
     }
@@ -58,7 +58,7 @@ public unsafe partial struct ICompileResult
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [VtblIndex(6)]
     [return: NativeTypeName("SlangResult")]
-    public int getMetadata(IMetadata** outMetadata)
+    public int getMetadata([NativeTypeName("slang::IMetadata **")] IMetadata** outMetadata)
     {
         return ((delegate* unmanaged[MemberFunction]<ICompileResult*, IMetadata**, int>)(lpVtbl[6]))((ICompileResult*)Unsafe.AsPointer(ref this), outMetadata);
     }

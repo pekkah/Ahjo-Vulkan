@@ -80,7 +80,7 @@ public unsafe partial struct IByteCodeRunner
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [VtblIndex(9)]
-    public void getErrorString([NativeTypeName("IBlob **")] ISlangBlob** outBlob)
+    public void getErrorString([NativeTypeName("slang::IBlob **")] ISlangBlob** outBlob)
     {
         ((delegate* unmanaged[MemberFunction]<IByteCodeRunner*, ISlangBlob**, void>)(lpVtbl[9]))((IByteCodeRunner*)Unsafe.AsPointer(ref this), outBlob);
     }

@@ -36,7 +36,7 @@ public unsafe partial struct IGlobalSession
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [VtblIndex(3)]
     [return: NativeTypeName("SlangResult")]
-    public int createSession([NativeTypeName("const SessionDesc &")] SessionDesc* desc, ISession** outSession)
+    public int createSession([NativeTypeName("const slang::SessionDesc &")] SessionDesc* desc, [NativeTypeName("slang::ISession **")] ISession** outSession)
     {
         return ((delegate* unmanaged[MemberFunction]<IGlobalSession*, SessionDesc*, ISession**, int>)(lpVtbl[3]))((IGlobalSession*)Unsafe.AsPointer(ref this), desc, outSession);
     }

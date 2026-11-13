@@ -6,8 +6,8 @@ namespace Ahjo.Vulkan.Slang.Native;
 
 public unsafe partial struct SpecializationArg
 {
-    [NativeTypeName("slang::SpecializationArg::Kind")]
-    public SpecializationArg.Kind kind;
+    [NativeTypeName("slang::Kind")]
+    public Kind kind;
 
     [NativeTypeName("__AnonymousRecord_slang_L5936_C5")]
     public _Anonymous_e__Union Anonymous;

@@ -43,7 +43,7 @@ public unsafe partial struct IEntryPoint
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [VtblIndex(4)]
     [return: NativeTypeName("slang::ProgramLayout *")]
-    public ShaderReflection* getLayout([NativeTypeName("SlangInt")] long targetIndex = 0, [NativeTypeName("IBlob **")] ISlangBlob** outDiagnostics = null)
+    public ShaderReflection* getLayout([NativeTypeName("SlangInt")] long targetIndex = 0, [NativeTypeName("slang::IBlob **")] ISlangBlob** outDiagnostics = null)
     {
         return ((delegate* unmanaged[MemberFunction]<IEntryPoint*, long, ISlangBlob**, ShaderReflection*>)(lpVtbl[4]))((IEntryPoint*)Unsafe.AsPointer(ref this), targetIndex, outDiagnostics);
     }
@@ -59,7 +59,7 @@ public unsafe partial struct IEntryPoint
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [VtblIndex(6)]
     [return: NativeTypeName("SlangResult")]
-    public int getEntryPointCode([NativeTypeName("SlangInt")] long entryPointIndex, [NativeTypeName("SlangInt")] long targetIndex, [NativeTypeName("IBlob **")] ISlangBlob** outCode, [NativeTypeName("IBlob **")] ISlangBlob** outDiagnostics = null)
+    public int getEntryPointCode([NativeTypeName("SlangInt")] long entryPointIndex, [NativeTypeName("SlangInt")] long targetIndex, [NativeTypeName("slang::IBlob **")] ISlangBlob** outCode, [NativeTypeName("slang::IBlob **")] ISlangBlob** outDiagnostics = null)
     {
         return ((delegate* unmanaged[MemberFunction]<IEntryPoint*, long, long, ISlangBlob**, ISlangBlob**, int>)(lpVtbl[6]))((IEntryPoint*)Unsafe.AsPointer(ref this), entryPointIndex, targetIndex, outCode, outDiagnostics);
     }
@@ -74,7 +74,7 @@ public unsafe partial struct IEntryPoint
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [VtblIndex(8)]
-    public void getEntryPointHash([NativeTypeName("SlangInt")] long entryPointIndex, [NativeTypeName("SlangInt")] long targetIndex, [NativeTypeName("IBlob **")] ISlangBlob** outHash)
+    public void getEntryPointHash([NativeTypeName("SlangInt")] long entryPointIndex, [NativeTypeName("SlangInt")] long targetIndex, [NativeTypeName("slang::IBlob **")] ISlangBlob** outHash)
     {
         ((delegate* unmanaged[MemberFunction]<IEntryPoint*, long, long, ISlangBlob**, void>)(lpVtbl[8]))((IEntryPoint*)Unsafe.AsPointer(ref this), entryPointIndex, targetIndex, outHash);
     }
@@ -82,7 +82,7 @@ public unsafe partial struct IEntryPoint
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [VtblIndex(9)]
     [return: NativeTypeName("SlangResult")]
-    public int specialize([NativeTypeName("const SpecializationArg *")] SpecializationArg* specializationArgs, [NativeTypeName("SlangInt")] long specializationArgCount, IComponentType** outSpecializedComponentType, ISlangBlob** outDiagnostics = null)
+    public int specialize([NativeTypeName("const slang::SpecializationArg *")] SpecializationArg* specializationArgs, [NativeTypeName("SlangInt")] long specializationArgCount, [NativeTypeName("slang::IComponentType **")] IComponentType** outSpecializedComponentType, ISlangBlob** outDiagnostics = null)
     {
         return ((delegate* unmanaged[MemberFunction]<IEntryPoint*, SpecializationArg*, long, IComponentType**, ISlangBlob**, int>)(lpVtbl[9]))((IEntryPoint*)Unsafe.AsPointer(ref this), specializationArgs, specializationArgCount, outSpecializedComponentType, outDiagnostics);
     }
@@ -90,7 +90,7 @@ public unsafe partial struct IEntryPoint
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [VtblIndex(10)]
     [return: NativeTypeName("SlangResult")]
-    public int link(IComponentType** outLinkedComponentType, ISlangBlob** outDiagnostics = null)
+    public int link([NativeTypeName("slang::IComponentType **")] IComponentType** outLinkedComponentType, ISlangBlob** outDiagnostics = null)
     {
         return ((delegate* unmanaged[MemberFunction]<IEntryPoint*, IComponentType**, ISlangBlob**, int>)(lpVtbl[10]))((IEntryPoint*)Unsafe.AsPointer(ref this), outLinkedComponentType, outDiagnostics);
     }
@@ -106,7 +106,7 @@ public unsafe partial struct IEntryPoint
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [VtblIndex(12)]
     [return: NativeTypeName("SlangResult")]
-    public int renameEntryPoint([NativeTypeName("const char *")] sbyte* newName, IComponentType** outEntryPoint)
+    public int renameEntryPoint([NativeTypeName("const char *")] sbyte* newName, [NativeTypeName("slang::IComponentType **")] IComponentType** outEntryPoint)
     {
         return ((delegate* unmanaged[MemberFunction]<IEntryPoint*, sbyte*, IComponentType**, int>)(lpVtbl[12]))((IEntryPoint*)Unsafe.AsPointer(ref this), newName, outEntryPoint);
     }
@@ -114,7 +114,7 @@ public unsafe partial struct IEntryPoint
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [VtblIndex(13)]
     [return: NativeTypeName("SlangResult")]
-    public int linkWithOptions(IComponentType** outLinkedComponentType, [NativeTypeName("uint32_t")] uint compilerOptionEntryCount, [NativeTypeName("const CompilerOptionEntry *")] CompilerOptionEntry* compilerOptionEntries, ISlangBlob** outDiagnostics = null)
+    public int linkWithOptions([NativeTypeName("slang::IComponentType **")] IComponentType** outLinkedComponentType, [NativeTypeName("uint32_t")] uint compilerOptionEntryCount, [NativeTypeName("const slang::CompilerOptionEntry *")] CompilerOptionEntry* compilerOptionEntries, ISlangBlob** outDiagnostics = null)
     {
         return ((delegate* unmanaged[MemberFunction]<IEntryPoint*, IComponentType**, uint, CompilerOptionEntry*, ISlangBlob**, int>)(lpVtbl[13]))((IEntryPoint*)Unsafe.AsPointer(ref this), outLinkedComponentType, compilerOptionEntryCount, compilerOptionEntries, outDiagnostics);
     }
@@ -122,7 +122,7 @@ public unsafe partial struct IEntryPoint
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [VtblIndex(14)]
     [return: NativeTypeName("SlangResult")]
-    public int getTargetCode([NativeTypeName("SlangInt")] long targetIndex, [NativeTypeName("IBlob **")] ISlangBlob** outCode, [NativeTypeName("IBlob **")] ISlangBlob** outDiagnostics = null)
+    public int getTargetCode([NativeTypeName("SlangInt")] long targetIndex, [NativeTypeName("slang::IBlob **")] ISlangBlob** outCode, [NativeTypeName("slang::IBlob **")] ISlangBlob** outDiagnostics = null)
     {
         return ((delegate* unmanaged[MemberFunction]<IEntryPoint*, long, ISlangBlob**, ISlangBlob**, int>)(lpVtbl[14]))((IEntryPoint*)Unsafe.AsPointer(ref this), targetIndex, outCode, outDiagnostics);
     }
@@ -130,7 +130,7 @@ public unsafe partial struct IEntryPoint
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [VtblIndex(15)]
     [return: NativeTypeName("SlangResult")]
-    public int getTargetMetadata([NativeTypeName("SlangInt")] long targetIndex, IMetadata** outMetadata, [NativeTypeName("IBlob **")] ISlangBlob** outDiagnostics = null)
+    public int getTargetMetadata([NativeTypeName("SlangInt")] long targetIndex, [NativeTypeName("slang::IMetadata **")] IMetadata** outMetadata, [NativeTypeName("slang::IBlob **")] ISlangBlob** outDiagnostics = null)
     {
         return ((delegate* unmanaged[MemberFunction]<IEntryPoint*, long, IMetadata**, ISlangBlob**, int>)(lpVtbl[15]))((IEntryPoint*)Unsafe.AsPointer(ref this), targetIndex, outMetadata, outDiagnostics);
     }
@@ -138,7 +138,7 @@ public unsafe partial struct IEntryPoint
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [VtblIndex(16)]
     [return: NativeTypeName("SlangResult")]
-    public int getEntryPointMetadata([NativeTypeName("SlangInt")] long entryPointIndex, [NativeTypeName("SlangInt")] long targetIndex, IMetadata** outMetadata, [NativeTypeName("IBlob **")] ISlangBlob** outDiagnostics = null)
+    public int getEntryPointMetadata([NativeTypeName("SlangInt")] long entryPointIndex, [NativeTypeName("SlangInt")] long targetIndex, [NativeTypeName("slang::IMetadata **")] IMetadata** outMetadata, [NativeTypeName("slang::IBlob **")] ISlangBlob** outDiagnostics = null)
     {
         return ((delegate* unmanaged[MemberFunction]<IEntryPoint*, long, long, IMetadata**, ISlangBlob**, int>)(lpVtbl[16]))((IEntryPoint*)Unsafe.AsPointer(ref this), entryPointIndex, targetIndex, outMetadata, outDiagnostics);
     }

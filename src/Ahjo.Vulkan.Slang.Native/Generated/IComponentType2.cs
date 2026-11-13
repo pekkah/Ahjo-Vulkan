@@ -35,7 +35,7 @@ public unsafe partial struct IComponentType2
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [VtblIndex(3)]
     [return: NativeTypeName("SlangResult")]
-    public int getTargetCompileResult([NativeTypeName("SlangInt")] long targetIndex, ICompileResult** outCompileResult, [NativeTypeName("IBlob **")] ISlangBlob** outDiagnostics = null)
+    public int getTargetCompileResult([NativeTypeName("SlangInt")] long targetIndex, [NativeTypeName("slang::ICompileResult **")] ICompileResult** outCompileResult, [NativeTypeName("slang::IBlob **")] ISlangBlob** outDiagnostics = null)
     {
         return ((delegate* unmanaged[MemberFunction]<IComponentType2*, long, ICompileResult**, ISlangBlob**, int>)(lpVtbl[3]))((IComponentType2*)Unsafe.AsPointer(ref this), targetIndex, outCompileResult, outDiagnostics);
     }
@@ -43,7 +43,7 @@ public unsafe partial struct IComponentType2
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [VtblIndex(4)]
     [return: NativeTypeName("SlangResult")]
-    public int getEntryPointCompileResult([NativeTypeName("SlangInt")] long entryPointIndex, [NativeTypeName("SlangInt")] long targetIndex, ICompileResult** outCompileResult, [NativeTypeName("IBlob **")] ISlangBlob** outDiagnostics = null)
+    public int getEntryPointCompileResult([NativeTypeName("SlangInt")] long entryPointIndex, [NativeTypeName("SlangInt")] long targetIndex, [NativeTypeName("slang::ICompileResult **")] ICompileResult** outCompileResult, [NativeTypeName("slang::IBlob **")] ISlangBlob** outDiagnostics = null)
     {
         return ((delegate* unmanaged[MemberFunction]<IComponentType2*, long, long, ICompileResult**, ISlangBlob**, int>)(lpVtbl[4]))((IComponentType2*)Unsafe.AsPointer(ref this), entryPointIndex, targetIndex, outCompileResult, outDiagnostics);
     }
