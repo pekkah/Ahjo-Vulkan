@@ -54,6 +54,7 @@
          Same trick as _KtxStagedHeaderDir. These three headers are
          committed: they are the generator input of record. -->
     <_SlangIncludeDir>$(_SlangSrcDir)include\</_SlangIncludeDir>
+    <_SlangHeaderStamp>$(_SlangIncludeDir)slang.version</_SlangHeaderStamp>
 
     <!-- Extraction scratch (throwaway, gitignored) vs. staged output (the
          artifact). Splitting them is what lets one path be the CI cache
@@ -75,13 +76,19 @@
     <_SlangArchiveSha256 Condition="'$(_SlangRid)' == 'win-x64'">$(SlangWinX64Sha256)</_SlangArchiveSha256>
     <_SlangArchiveSha256 Condition="'$(_SlangRid)' == 'linux-x64'">$(SlangLinuxX64Sha256)</_SlangArchiveSha256>
 
-    <!-- Existence of these files IS the cache: nothing is downloaded,
-         verified or extracted once they are staged. Both are checked, not
-         just the primary — a staged tree left over from before
-         slang-glslang joined the shipped set would otherwise satisfy a
-         one-file check and ship a package whose Optimization setting is a
-         silent no-op, which is the exact defect issue #166's OPEN-1 was
-         opened for. -->
+    <!-- Existence of these files PLUS the slang.version stamp beside them
+         is the cache: nothing is downloaded, verified or extracted once
+         both are staged and the stamp equals the pin. Existence alone was
+         not enough (#256): the Windows names carry no version, so a stale
+         tree satisfied the check after a SlangVersion bump, and Linux was
+         only ever refreshed because the glslang file name happens to embed
+         the version. The stamp lives INSIDE staged/<rid>/ so a CI cache hit
+         on that directory restores it with the binaries.
+         Both files are checked, not just the primary — a staged tree left
+         over from before slang-glslang joined the shipped set would
+         otherwise satisfy a one-file check and ship a package whose
+         Optimization setting is a silent no-op, which is the exact defect
+         issue #166's OPEN-1 was opened for. -->
     <_SlangPrimaryFile Condition="'$(_SlangRid)' == 'win-x64'">slang.dll</_SlangPrimaryFile>
     <_SlangPrimaryFile Condition="'$(_SlangRid)' == 'linux-x64'">libslang.so</_SlangPrimaryFile>
     <_SlangStagedPrimary>$(_SlangStagedDir)$(_SlangPrimaryFile)</_SlangStagedPrimary>
@@ -94,8 +101,9 @@
     <_SlangGlslangFile Condition="'$(_SlangRid)' == 'win-x64'">slang-glslang.dll</_SlangGlslangFile>
     <_SlangGlslangFile Condition="'$(_SlangRid)' == 'linux-x64'">libslang-glslang-$(_SlangVersionNumber).so</_SlangGlslangFile>
     <_SlangStagedGlslang>$(_SlangStagedDir)$(_SlangGlslangFile)</_SlangStagedGlslang>
+    <_SlangStageStamp>$(_SlangStagedDir)slang.version</_SlangStageStamp>
 
-    <_SlangStageNeeded Condition="'$(_SlangRid)' != '' and (!Exists('$(_SlangStagedPrimary)') or !Exists('$(_SlangStagedGlslang)'))">true</_SlangStageNeeded>
+    <_SlangStageNeeded Condition="'$(_SlangRid)' != '' and (!Exists('$(_SlangStagedPrimary)') or !Exists('$(_SlangStagedGlslang)') or !Exists('$(_SlangStageStamp)'))">true</_SlangStageNeeded>
 
     <!-- Build-time slangc (#171): staged from the same verified archive into
          a directory that is never packed and never copied to consumers. The
@@ -106,17 +114,29 @@
     <_SlangcFile Condition="'$(_SlangRid)' == 'linux-x64'">slangc</_SlangcFile>
     <_SlangToolStamp>$(_SlangToolDir)slangc.version</_SlangToolStamp>
 
-    <!-- The tool's equivalent of _SlangStageNeeded. Existence alone is not
-         enough here: the Windows file names carry no version, so after a
-         SlangVersion bump a stale slangc.exe would still satisfy an
-         existence check. The stamp records which version was staged; a
-         mismatch re-stages. Two groups, so ReadAllText only ever runs on a
-         stamp that exists. -->
+    <!-- The tool's equivalent of _SlangStageNeeded, with the same stamp
+         rule: missing file, missing stamp or a stamp that differs from the
+         pin re-stages. -->
     <_SlangToolNeeded Condition="'$(_SlangRid)' != '' and (!Exists('$(_SlangToolDir)$(_SlangcFile)') or !Exists('$(_SlangToolStamp)'))">true</_SlangToolNeeded>
+    <_SlangHeadersNeeded Condition="'$(_SlangRid)' != '' and (!Exists('$(_SlangIncludeDir)slang.h') or !Exists('$(_SlangHeaderStamp)'))">true</_SlangHeadersNeeded>
   </PropertyGroup>
 
+  <!-- Stamp checks. Separate groups, so ReadAllText only ever runs on a
+       stamp that exists. -->
   <PropertyGroup Condition="'$(_SlangRid)' != '' and '$(_SlangToolNeeded)' != 'true'">
     <_SlangToolNeeded Condition="'$([System.IO.File]::ReadAllText(`$(_SlangToolStamp)`).Trim())' != '$(_SlangVersionNumber)'">true</_SlangToolNeeded>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(_SlangRid)' != '' and '$(_SlangStageNeeded)' != 'true'">
+    <_SlangStageNeeded Condition="'$([System.IO.File]::ReadAllText(`$(_SlangStageStamp)`).Trim())' != '$(_SlangVersionNumber)'">true</_SlangStageNeeded>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(_SlangRid)' != '' and '$(_SlangHeadersNeeded)' != 'true'">
+    <_SlangHeadersNeeded Condition="'$([System.IO.File]::ReadAllText(`$(_SlangHeaderStamp)`).Trim())' != '$(_SlangVersionNumber)'">true</_SlangHeadersNeeded>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <_SlangArchiveNeeded Condition="'$(_SlangStageNeeded)' == 'true' or '$(_SlangToolNeeded)' == 'true' or '$(_SlangHeadersNeeded)' == 'true'">true</_SlangArchiveNeeded>
   </PropertyGroup>
 
   <ItemGroup>
@@ -214,7 +234,7 @@
   -->
   <Target Name="DownloadSlangArchive"
           DependsOnTargets="ValidateSlangHost"
-          Condition="'$(SkipSlangNativeFetch)' != 'true' and ('$(_SlangStageNeeded)' == 'true' or '$(_SlangToolNeeded)' == 'true')">
+          Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangArchiveNeeded)' == 'true'">
     <MakeDir Directories="$(_SlangDownloadDir)" />
 
     <DownloadFile SourceUrl="$(_SlangArchiveUrl)"
@@ -233,7 +253,8 @@
 
   <Target Name="ExtractSlangArchive"
           DependsOnTargets="DownloadSlangArchive"
-          Condition="'$(SkipSlangNativeFetch)' != 'true' and ('$(_SlangStageNeeded)' == 'true' or '$(_SlangToolNeeded)' == 'true')">
+          Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangArchiveNeeded)' == 'true'">
+    <RemoveDir Directories="$(_SlangExtractDir)" />
     <MakeDir Directories="$(_SlangExtractDir)" />
 
     <Unzip Condition="'$(_SlangRid)' == 'win-x64'"
@@ -285,10 +306,21 @@
         native/slang/tool/<rid>/ by StageSlangCompiler below. It is never
         packed and never copied to consumers; the samples and tests
         compile their shaders with it (#171).
+
+    The directory is cleared first so a re-stage replaces it instead of
+    overlaying it, and the staged files are Touched afterwards: the consumer
+    items copy them with PreserveNewest, which compares mtimes, and staged
+    files keep the archive's entry times — so without the Touch, re-staging
+    an OLDER pin would leave the newer DLLs in every bin/ (#256 spec E4).
+    slang.version is written last, so a stage that fails partway leaves no
+    stamp and the next build retries.
   -->
   <Target Name="StageSlangBinaries"
           DependsOnTargets="ExtractSlangArchive"
           Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangStageNeeded)' == 'true'">
+    <RemoveDir Directories="$(_SlangStagedDir)" />
+    <MakeDir Directories="$(_SlangStagedDir)" />
+
     <ItemGroup Condition="'$(_SlangRid)' == 'win-x64'">
       <_SlangShippedFile Include="$(_SlangExtractDir)bin\slang.dll" />
       <_SlangShippedFile Include="$(_SlangExtractDir)bin\slang-compiler.dll" />
@@ -320,12 +352,28 @@
     <Error Condition="!Exists('$(_SlangStagedGlslang)')"
            Text="The $(SlangVersion) archive extracted, but $(_SlangStagedGlslang) was not produced. Without it every SlangOptimizationLevel above None is a silent no-op, so this is an error and not a warning; re-check the file list in StageSlangBinaries against the archive." />
 
+    <ItemGroup Condition="'$(_SlangRid)' == 'win-x64'">
+      <_SlangStagedShipped Include="$(_SlangStagedDir)slang.dll" />
+      <_SlangStagedShipped Include="$(_SlangStagedDir)slang-compiler.dll" />
+      <_SlangStagedShipped Include="$(_SlangStagedDir)slang-glslang.dll" />
+    </ItemGroup>
+    <ItemGroup Condition="'$(_SlangRid)' == 'linux-x64'">
+      <_SlangStagedShipped Include="$(_SlangStagedPrimary)" />
+      <_SlangStagedShipped Include="$(_SlangStagedGlslang)" />
+    </ItemGroup>
+
+    <Touch Files="@(_SlangStagedShipped)" />
+
     <!-- Apache-2.0 WITH LLVM-exception. Packed at the nupkg root next to
          our own MIT LICENSE, because the nupkg carries someone else's
          binary. -->
     <Copy SourceFiles="$(_SlangExtractDir)LICENSE"
           DestinationFiles="$(_SlangSrcDir)SLANG-LICENSE.txt"
           SkipUnchangedFiles="true" />
+
+    <WriteLinesToFile File="$(_SlangStageStamp)"
+                      Lines="$(_SlangVersionNumber)"
+                      Overwrite="true" />
 
     <Message Importance="high" Text="Staged Slang $(SlangVersion) for $(_SlangRid): $(_SlangStagedDir)" />
   </Target>
@@ -344,6 +392,9 @@
   <Target Name="StageSlangCompiler"
           DependsOnTargets="ExtractSlangArchive"
           Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangToolNeeded)' == 'true'">
+    <RemoveDir Directories="$(_SlangToolDir)" />
+    <MakeDir Directories="$(_SlangToolDir)" />
+
     <ItemGroup Condition="'$(_SlangRid)' == 'win-x64'">
       <_SlangToolFile Include="$(_SlangExtractDir)bin\slangc.exe" />
       <_SlangToolFile Include="$(_SlangExtractDir)bin\slang.dll" />
@@ -387,10 +438,15 @@
     native/slang/include/ so a regen does not depend on a download, and so
     a `git diff` after a SlangVersion bump shows what actually changed in
     the API before the generated output is re-derived from it.
+
+    slang.version beside them is committed too, not cached: include/ is
+    tracked and sits in no CI cache path, so an untracked stamp would be
+    missing on every checkout and every CI run would re-fetch (#256 spec
+    E2). A stale or missing stamp re-stages the headers in a plain build.
   -->
   <Target Name="StageSlangHeaders"
           DependsOnTargets="ExtractSlangArchive"
-          Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangRid)' != '' and !Exists('$(_SlangIncludeDir)slang.h')">
+          Condition="'$(SkipSlangNativeFetch)' != 'true' and '$(_SlangHeadersNeeded)' == 'true'">
     <ItemGroup>
       <_SlangHeader Include="$(_SlangExtractDir)include\slang.h" />
       <_SlangHeader Include="$(_SlangExtractDir)include\slang-deprecated.h" />
@@ -402,6 +458,12 @@
            Text="Expected slang.h, slang-deprecated.h and slang-image-format-defs.h under $(_SlangExtractDir)include after extracting $(SlangVersion); found only @(_SlangHeaderFound->'%(Filename)%(Extension)', ', ')." />
 
     <Copy SourceFiles="@(_SlangHeaderFound)" DestinationFolder="$(_SlangIncludeDir)" SkipUnchangedFiles="true" />
+
+    <WriteLinesToFile File="$(_SlangHeaderStamp)"
+                      Lines="$(_SlangVersionNumber)"
+                      Overwrite="true" />
+
+    <Message Importance="high" Text="Staged Slang $(SlangVersion) headers into $(_SlangIncludeDir). Generated/ is derived from them by -t:Regenerate; commit the headers, slang.version and the regenerated output together." />
   </Target>
 
   <Target Name="RunClangSharpSlangGenerator" DependsOnTargets="FetchSlang">

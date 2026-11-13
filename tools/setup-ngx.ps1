@@ -17,6 +17,12 @@
         native/ngx/staged/<rid>/dev/        development feature DLLs (debug overlay; NEVER ship)
         native/ngx/doc/                     programming guide PDFs (-IncludeDocs)
 
+    Each staged platform is stamped with the tag in
+    native/ngx/staged/<rid>/ngx.version, and the build refuses a staged SDK
+    whose stamp is missing or differs from <NgxVersion> (issue #256).
+    The stamp vouches for the static client library only: feature DLLs from
+    an earlier run may remain under rel/ and dev/ after -SkipFeatureDll.
+
     Everything under downloaded/, staged/ and doc/ is git-ignored. The feature
     DLLs (nvngx_dlss.dll for Super Resolution, nvngx_dlssg.dll for Frame
     Generation) are deliberately not part of any Ahjo package: consumers supply it
@@ -274,6 +280,19 @@ if ($UpdatePins) {
     foreach ($k in ($merged.Keys | Sort-Object)) { $lines += "$($merged[$k])  $k" }
     Set-Content -LiteralPath $PinsFile -Value $lines -Encoding utf8NoBOM
     Write-Host "  wrote  $PinsFile ($($merged.Count) entries)" -ForegroundColor Green
+}
+
+# Version stamps, written only once every file above verified and staged:
+# a failed run leaves the old stamp, or none. The build checks them against
+# <NgxVersion> and refuses a mismatch (issue #256).
+$stampRids = @()
+if ($wantWin)   { $stampRids += 'win-x64' }
+if ($wantLinux) { $stampRids += 'linux-x64' }
+foreach ($rid in $stampRids) {
+    $stampDir = Join-Path $NgxRoot 'staged' $rid
+    if (-not (Test-Path -LiteralPath $stampDir)) { New-Item -ItemType Directory -Path $stampDir -Force | Out-Null }
+    Set-Content -LiteralPath (Join-Path $stampDir 'ngx.version') -Value $Bare -Encoding utf8NoBOM
+    $staged += "staged/$rid/ngx.version"
 }
 
 Write-Host ""

@@ -46,7 +46,9 @@
 
     <_KtxSrcDir>$(NativeDir)ktx\</_KtxSrcDir>
     <_KtxDownloadedRoot>$(_KtxSrcDir)downloaded\</_KtxDownloadedRoot>
-    <_KtxSourceDir>$(_KtxDownloadedRoot)KTX-Software\</_KtxSourceDir>
+    <!-- Versioned on purpose (#256): a KtxVersion bump clones into a new
+         directory, so CloneKtx's existence check is version-correct. -->
+    <_KtxSourceDir>$(_KtxDownloadedRoot)KTX-Software-$(KtxVersion)\</_KtxSourceDir>
 
     <!-- Stable header staging path (version-independent) so
          tools/generate-ktx.rsp doesn't have to embed the KTX tag.
@@ -64,6 +66,27 @@
     <_KtxBuildDir>$(_KtxBuildRootDir)$(_KtxRid)\</_KtxBuildDir>
     <_KtxStagedRootDir>$(_KtxSrcDir)staged\</_KtxStagedRootDir>
     <_KtxStagedBinary>$(_KtxStagedRootDir)$(_KtxRid)\$(_KtxLibFile)</_KtxStagedBinary>
+
+    <!-- Version stamps (#256). The staged headers are tracked, so they
+         always exist on a clone; the staged binary's path carries no
+         version. ktx.version beside the headers is committed; ktx.version
+         beside the binary is cached with it in CI. -->
+    <_KtxVersionNumber>$(KtxVersion.TrimStart('v'))</_KtxVersionNumber>
+    <_KtxHeaderStamp>$(_KtxStagedHeaderDir)ktx.version</_KtxHeaderStamp>
+    <_KtxStagedDir>$(_KtxStagedRootDir)$(_KtxRid)\</_KtxStagedDir>
+    <_KtxBinaryStamp>$(_KtxStagedDir)ktx.version</_KtxBinaryStamp>
+    <_KtxHeadersNeeded Condition="!Exists('$(_KtxStagedHeaderDir)ktx.h') or !Exists('$(_KtxHeaderStamp)')">true</_KtxHeadersNeeded>
+    <_KtxBinaryNeeded Condition="'$(_KtxRid)' != '' and (!Exists('$(_KtxStagedBinary)') or !Exists('$(_KtxBinaryStamp)'))">true</_KtxBinaryNeeded>
+  </PropertyGroup>
+
+  <!-- Stamp checks. Separate groups, so ReadAllText only ever runs on a
+       stamp that exists. -->
+  <PropertyGroup Condition="'$(_KtxHeadersNeeded)' != 'true'">
+    <_KtxHeadersNeeded Condition="'$([System.IO.File]::ReadAllText(`$(_KtxHeaderStamp)`).Trim())' != '$(_KtxVersionNumber)'">true</_KtxHeadersNeeded>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(_KtxRid)' != '' and '$(_KtxBinaryNeeded)' != 'true'">
+    <_KtxBinaryNeeded Condition="'$([System.IO.File]::ReadAllText(`$(_KtxBinaryStamp)`).Trim())' != '$(_KtxVersionNumber)'">true</_KtxBinaryNeeded>
   </PropertyGroup>
 
   <ItemGroup>
@@ -103,10 +126,22 @@
     images. tests/CMakeLists.txt itself has to stay, because the top-level
     CMakeLists calls add_subdirectory(tests) UNCONDITIONALLY and only the
     inner file gates on KTX_FEATURE_TESTS.
-  -->
-  <Target Name="FetchKtx" DependsOnTargets="CloneKtx;StageKtxHeaders" />
 
+    Hooked before AssignTargetPaths on its own, not only as
+    BuildKtxForHost's dependency, so a stale header stamp re-stages the
+    tracked headers in a plain build even when the binary stamp matches
+    (#256 OPEN-2). CI never triggers it while the committed stamp matches.
+  -->
+  <Target Name="FetchKtx"
+          BeforeTargets="AssignTargetPaths"
+          Condition="'$(SkipKtxNativeBuild)' != 'true' and ('$(_KtxHeadersNeeded)' == 'true' or '$(_KtxBinaryNeeded)' == 'true')"
+          DependsOnTargets="CloneKtx;StageKtxHeaders" />
+
+  <!-- A KtxVersion bump clones into a new KTX-Software-<tag> directory;
+       downloaded/ is cleared first so earlier clones (~170 MB each) do not
+       pile up. -->
   <Target Name="CloneKtx" Condition="!Exists('$(_KtxSourceDir)CMakeLists.txt')">
+    <RemoveDir Directories="$(_KtxDownloadedRoot)" />
     <MakeDir Directories="$(_KtxDownloadedRoot)" />
 
     <Exec Command="git clone --depth 1 --branch $(KtxVersion) --filter=blob:none --no-checkout https://github.com/KhronosGroup/KTX-Software.git &quot;$(_KtxSourceDir.TrimEnd('\'))&quot;"
@@ -119,7 +154,7 @@
           WorkingDirectory="$(_KtxSourceDir)" />
   </Target>
 
-  <Target Name="StageKtxHeaders" DependsOnTargets="CloneKtx" Condition="!Exists('$(_KtxStagedHeaderDir)ktx.h')">
+  <Target Name="StageKtxHeaders" DependsOnTargets="CloneKtx" Condition="'$(_KtxHeadersNeeded)' == 'true'">
     <ItemGroup>
       <_KtxHeader Include="$(_KtxSourceDir)include\ktx.h" />
       <_KtxKhrHeader Include="$(_KtxSourceDir)include\KHR\khr_df.h" />
@@ -130,6 +165,12 @@
 
     <Copy SourceFiles="@(_KtxHeader)" DestinationFolder="$(_KtxStagedHeaderDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_KtxKhrHeader)" DestinationFolder="$(_KtxStagedHeaderDir)KHR\" SkipUnchangedFiles="true" />
+
+    <WriteLinesToFile File="$(_KtxHeaderStamp)"
+                      Lines="$(_KtxVersionNumber)"
+                      Overwrite="true" />
+
+    <Message Importance="high" Text="Staged KTX $(KtxVersion) headers into $(_KtxStagedHeaderDir). Generated/ is derived from them by -t:Regenerate; commit the headers, ktx.version and the regenerated output together." />
   </Target>
 
   <Target Name="RunClangSharpKtxGenerator" DependsOnTargets="FetchKtx">
@@ -141,8 +182,11 @@
 
   <!--
     Build the host-RID ktx binary before the project's build step copies
-    Content items. Exists($(_KtxStagedBinary)) IS the cache: a staged
-    binary is never rebuilt, so the cost is paid once per KtxVersion bump.
+    Content items. The staged binary PLUS staged/<rid>/ktx.version is the
+    cache: a binary whose stamp matches KtxVersion is never rebuilt, so the
+    cost is paid once per KtxVersion bump, locally as well as in CI (#256).
+    A stale stamp rebuilds in a cleared build dir — CMakeCache.txt pins the
+    old -S and cmake rejects a different one — and a cleared staged dir.
     CI cross-builds the other RIDs and drops their artifacts into
     $(_KtxStagedRootDir)<rid>\ before the pack job runs.
 
@@ -153,11 +197,12 @@
   -->
   <Target Name="BuildKtxForHost"
           BeforeTargets="AssignTargetPaths"
-          Condition="'$(_KtxLibFile)' != '' and !Exists('$(_KtxStagedBinary)') and '$(SkipKtxNativeBuild)' != 'true'"
+          Condition="'$(_KtxLibFile)' != '' and '$(_KtxBinaryNeeded)' == 'true' and '$(SkipKtxNativeBuild)' != 'true'"
           DependsOnTargets="FetchKtx">
     <Error Condition="'$(_KtxRid)' == ''"
            Text="Unsupported host for the KTX native build: OS='$([System.Runtime.InteropServices.RuntimeInformation]::OSDescription)' Arch='$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)'. Only win-x64 and linux-x64 are built; pass -p:SkipKtxNativeBuild=true to skip." />
 
+    <RemoveDir Directories="$(_KtxBuildDir);$(_KtxStagedDir)" />
     <MakeDir Directories="$(_KtxBuildDir)" />
 
     <Exec Command="cmake -S &quot;$(_KtxSourceDir.TrimEnd('\'))&quot; -B &quot;$(_KtxBuildDir.TrimEnd('\'))&quot; -DCMAKE_BUILD_TYPE=Release $(KtxCMakeFeatureFlags)"
@@ -187,6 +232,10 @@
     <Copy SourceFiles="@(_KtxProducedBinaryFound)"
           DestinationFolder="$(_KtxStagedRootDir)$(_KtxRid)\"
           SkipUnchangedFiles="true" />
+
+    <WriteLinesToFile File="$(_KtxBinaryStamp)"
+                      Lines="$(_KtxVersionNumber)"
+                      Overwrite="true" />
 
     <Message Importance="high" Text="Staged KTX $(KtxVersion) for $(_KtxRid): $(_KtxStagedBinary)" />
   </Target>

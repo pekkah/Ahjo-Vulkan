@@ -63,9 +63,22 @@
     <_NgxStaticLib Condition="'$(_NgxRid)' == 'win-x64'">$(_NgxStagedDir)nvsdk_ngx_s.lib</_NgxStaticLib>
     <_NgxStaticLib Condition="'$(_NgxRid)' == 'linux-x64'">$(_NgxStagedDir)libnvsdk_ngx.a</_NgxStaticLib>
 
+    <!-- Written by tools/setup-ngx.ps1 beside the static library (#256). A
+         staged SDK whose stamp is missing or differs from NgxVersion is
+         stale: the library's path carries no version, so a developer who
+         pulls a pin bump would otherwise keep linking the old one. -->
+    <_NgxSdkStamp>$(_NgxStagedDir)ngx.version</_NgxSdkStamp>
+    <_NgxSdkStale Condition="'$(_NgxRid)' != '' and Exists('$(_NgxStaticLib)') and !Exists('$(_NgxSdkStamp)')">true</_NgxSdkStale>
+
     <!-- Path to Vulkan-Headers staging from the sibling Ahjo.Vulkan.Native
          project, same as VMA uses: ahjo_ngx.h includes vulkan/vulkan.h. -->
     <_VulkanHeadersIncludeDir>$(NativeDir)include\</_VulkanHeadersIncludeDir>
+  </PropertyGroup>
+
+  <!-- Stamp check. Separate group, so ReadAllText only ever runs on a stamp
+       that exists. -->
+  <PropertyGroup Condition="'$(_NgxRid)' != '' and Exists('$(_NgxStaticLib)') and '$(_NgxSdkStale)' != 'true'">
+    <_NgxSdkStale Condition="'$([System.IO.File]::ReadAllText(`$(_NgxSdkStamp)`).Trim())' != '$(NgxVersion.TrimStart(`v`))'">true</_NgxSdkStale>
   </PropertyGroup>
 
   <ItemGroup>
@@ -158,13 +171,17 @@
     every listed source and reruns it when any of them changes. The staged
     static library is an input too: restaging a different NgxVersion must
     relink the shim. The .def and .map are inputs because they ARE the export
-    surface — changing one changes the produced binary.
+    surface — changing one changes the produced binary. ngx.version is an
+    input as well: setup-ngx.ps1 rewrites it on every run, while Copy-Item
+    keeps a cached download's old mtime on the library, so the stamp is what
+    guarantees a re-stage relinks (#256 spec E8). A stale SDK never links;
+    ErrorNgxSdkStale fails the build instead.
   -->
   <Target Name="BuildNgxForHost"
           BeforeTargets="AssignTargetPaths"
-          Condition="'$(_NgxRid)' != '' and '$(SkipNgxNativeBuild)' != 'true' and Exists('$(_NgxStaticLib)')"
+          Condition="'$(_NgxRid)' != '' and '$(SkipNgxNativeBuild)' != 'true' and Exists('$(_NgxStaticLib)') and '$(_NgxSdkStale)' != 'true'"
           DependsOnTargets="EnsureVulkanHeaders"
-          Inputs="$(_NgxSrcDir)src\ahjo_ngx.cpp;$(_NgxSrcDir)src\ahjo_ngx.h;$(_NgxSrcDir)src\ahjo_ngx.def;$(_NgxSrcDir)src\ahjo_ngx.map;$(_NgxSrcDir)CMakeLists.txt;$(_NgxStaticLib)"
+          Inputs="$(_NgxSrcDir)src\ahjo_ngx.cpp;$(_NgxSrcDir)src\ahjo_ngx.h;$(_NgxSrcDir)src\ahjo_ngx.def;$(_NgxSrcDir)src\ahjo_ngx.map;$(_NgxSrcDir)CMakeLists.txt;$(_NgxStaticLib);$(_NgxSdkStamp)"
           Outputs="$(_NgxStagedBinary)">
     <MakeDir Directories="$(_NgxBuildDir)" />
 
@@ -203,6 +220,22 @@
     AHJO_NGX_REQUIRE_SHIM=1 — which the CI lane sets, so a lane cannot report
     green while executing nothing.
   -->
+  <!--
+    The stale-SDK path (#256). A staged SDK whose ngx.version is missing or
+    differs from NgxVersion fails the build rather than being treated like an
+    absent one (OPEN-3): the developer opted into DLSS by staging it, linking
+    a different version than the committed headers and bindings is the
+    defect, and a skip would turn Ahjo.Vulkan.Ngx.Native.Tests into
+    green-on-nothing locally. An Error, not a Warning, because
+    TreatWarningsAsErrors would make a Warning fail anyway, only less
+    clearly. The build never fetches the SDK itself (#214).
+  -->
+  <Target Name="ErrorNgxSdkStale"
+          BeforeTargets="AssignTargetPaths"
+          Condition="'$(_NgxRid)' != '' and '$(SkipNgxNativeBuild)' != 'true' and '$(_NgxSdkStale)' == 'true'">
+    <Error Text="The NGX SDK staged at $(_NgxStagedDir) is not $(NgxVersion) (ngx.version is missing or different). Re-run ./tools/setup-ngx.ps1 (add -SkipFeatureDll if you only build the shim). The build never fetches the SDK itself (#214)." />
+  </Target>
+
   <Target Name="WarnNgxSdkMissing"
           BeforeTargets="AssignTargetPaths"
           Condition="'$(_NgxRid)' != '' and '$(SkipNgxNativeBuild)' != 'true' and !Exists('$(_NgxStaticLib)')">

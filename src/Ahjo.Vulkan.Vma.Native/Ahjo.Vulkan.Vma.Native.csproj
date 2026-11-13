@@ -47,7 +47,7 @@
     <_VmaSrcDir>$(NativeDir)vma\</_VmaSrcDir>
     <_VmaDownloadedRoot>$(_VmaSrcDir)downloaded\</_VmaDownloadedRoot>
     <_VmaZipPath>$(_VmaDownloadedRoot)VulkanMemoryAllocator-$(VmaVersion).zip</_VmaZipPath>
-    <_VmaExtractDir>$(_VmaDownloadedRoot)VulkanMemoryAllocator-$(VmaVersion)\</_VmaExtractDir>
+    <_VmaExtractDir>$(_VmaDownloadedRoot)VulkanMemoryAllocator-$(VmaVersion.TrimStart('v'))\</_VmaExtractDir>
     <_VmaHeadersDir>$(_VmaExtractDir)include\</_VmaHeadersDir>
 
     <_VmaBuildRootDir>$(_VmaSrcDir)build\</_VmaBuildRootDir>
@@ -60,10 +60,32 @@
          native/include/vulkan/. -->
     <_VmaStagedHeaderDir>$(_VmaSrcDir)include\</_VmaStagedHeaderDir>
 
+    <!-- Version stamps (#256). Existence alone is not the cache: the staged
+         header is tracked, so it always exists on a clone, and the binary's
+         path carries no version. vma.version beside the header is committed;
+         vma.version beside the binary records both pins the binary is
+         compiled from (VMA and Vulkan-Headers). -->
+    <_VmaVersionNumber>$(VmaVersion.TrimStart('v'))</_VmaVersionNumber>
+    <_VmaHeaderStamp>$(_VmaStagedHeaderDir)vma.version</_VmaHeaderStamp>
+    <_VmaBinaryStamp>$(_VmaBuildDir)vma.version</_VmaBinaryStamp>
+    <_VmaBinaryKey>$(_VmaVersionNumber);$(VulkanHeadersVersion)</_VmaBinaryKey>
+    <_VmaHeaderNeeded Condition="!Exists('$(_VmaStagedHeaderDir)vk_mem_alloc.h') or !Exists('$(_VmaHeaderStamp)')">true</_VmaHeaderNeeded>
+    <_VmaBinaryNeeded Condition="'$(_VmaLibFile)' != '' and (!Exists('$(_VmaStagedBinary)') or !Exists('$(_VmaBinaryStamp)'))">true</_VmaBinaryNeeded>
+
     <!-- Path to Vulkan-Headers staging from the sibling Ahjo.Vulkan.Native
          project. The Native csproj's CopyGeneratedHeaders already populates
          this directory; VMA's compile uses it as the system include root. -->
     <_VulkanHeadersIncludeDir>$(NativeDir)include\</_VulkanHeadersIncludeDir>
+  </PropertyGroup>
+
+  <!-- Stamp checks. Separate groups, so ReadAllText only ever runs on a
+       stamp that exists. -->
+  <PropertyGroup Condition="'$(_VmaHeaderNeeded)' != 'true'">
+    <_VmaHeaderNeeded Condition="'$([System.IO.File]::ReadAllText(`$(_VmaHeaderStamp)`).Trim())' != '$(_VmaVersionNumber)'">true</_VmaHeaderNeeded>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(_VmaLibFile)' != '' and '$(_VmaBinaryNeeded)' != 'true'">
+    <_VmaBinaryNeeded Condition="'$([System.IO.File]::ReadAllText(`$(_VmaBinaryStamp)`).Trim())' != '$(_VmaBinaryKey)'">true</_VmaBinaryNeeded>
   </PropertyGroup>
 
   <ItemGroup>
@@ -94,8 +116,21 @@
   -->
   <Target Name="Regenerate" DependsOnTargets="FetchVma;EnsureVulkanHeaders;RunClangSharpVmaGenerator" />
 
+  <!--
+    Plain-build hook (#256 OPEN-2): a stale or missing vma.version re-stages
+    the tracked header even when the binary stamp matches, the same shape as
+    FetchKtx. A separate target rather than a BeforeTargets on FetchVma
+    itself, because the vma-native lane calls -t:FetchVma explicitly WITH
+    SkipVmaNativeBuild=true and must still stage. MSBuild runs FetchVma once
+    per build, so this and BuildVmaForHost's dependency never double-run.
+  -->
+  <Target Name="RestageVmaHeader"
+          BeforeTargets="AssignTargetPaths"
+          Condition="'$(SkipVmaNativeBuild)' != 'true' and '$(_VmaHeaderNeeded)' == 'true'"
+          DependsOnTargets="FetchVma" />
+
   <Target Name="FetchVma"
-          Condition="!Exists('$(_VmaStagedHeaderDir)vk_mem_alloc.h')">
+          Condition="'$(_VmaHeaderNeeded)' == 'true'">
     <MakeDir Directories="$(_VmaDownloadedRoot)" />
 
     <DownloadFile
@@ -111,22 +146,29 @@
       OverwriteReadOnlyFiles="true" />
 
     <!-- GitHub's archive strips the leading 'v' from tag names, so a
-         tag 'v3.3.0' extracts to 'VulkanMemoryAllocator-3.3.0/'.
-         Discover the header via wildcard instead of computing the
-         extracted directory name from the tag. -->
+         tag 'v3.3.0' extracts to 'VulkanMemoryAllocator-3.3.0/'. The
+         extracted tree is computed from the tag ($(_VmaHeadersDir), hence
+         the TrimStart) rather than globbed, so trees left over from
+         earlier pins can sit beside it harmlessly. -->
     <ItemGroup>
-      <_VmaExtractedHeader Include="$(_VmaDownloadedRoot)VulkanMemoryAllocator-*\include\vk_mem_alloc.h" />
+      <_VmaExtractedHeader Include="$(_VmaHeadersDir)vk_mem_alloc.h" />
     </ItemGroup>
 
     <Error
-      Condition="'@(_VmaExtractedHeader)' == ''"
-      Text="Could not locate vk_mem_alloc.h under $(_VmaDownloadedRoot) after extracting $(_VmaZipPath)." />
+      Condition="!Exists('$(_VmaHeadersDir)vk_mem_alloc.h')"
+      Text="Could not locate vk_mem_alloc.h under $(_VmaHeadersDir) after extracting $(_VmaZipPath)." />
 
     <MakeDir Directories="$(_VmaStagedHeaderDir)" />
     <Copy
       SourceFiles="@(_VmaExtractedHeader)"
       DestinationFolder="$(_VmaStagedHeaderDir)"
       SkipUnchangedFiles="true" />
+
+    <WriteLinesToFile File="$(_VmaHeaderStamp)"
+                      Lines="$(_VmaVersionNumber)"
+                      Overwrite="true" />
+
+    <Message Importance="high" Text="Staged VMA $(VmaVersion) header into $(_VmaStagedHeaderDir); commit it with vma.version and the regenerated bindings." />
   </Target>
 
   <!-- Vulkan-Headers fetch is owned by Ahjo.Vulkan.Native. Trigger it via
@@ -155,15 +197,26 @@
     BeforeTargets="AssignTargetPaths" matches the wgpu-sharp pattern: the
     target also fires during ProjectReference's GetCopyToOutputDirectoryItems
     flow, so consumers automatically get vma.dll in their bin/ folder.
+
+    The cache is the binary PLUS build/<rid>/vma.version, which records
+    both pins the binary is compiled from ($(VmaVersion) and
+    $(VulkanHeadersVersion)); a missing or different stamp rebuilds.
+    The build dir is cleared first: the staged headers keep their
+    archive's mtimes, so after a re-stage cmake's own mtime-based check can
+    decide nothing changed and keep stale objects (#256 spec E6).
+    CI never reads the stamp: the vma-native lane builds with
+    SkipVmaNativeBuild=true and drives cmake itself, and the other jobs
+    start from an empty build/.
   -->
   <Target Name="BuildVmaForHost"
           BeforeTargets="AssignTargetPaths"
-          Condition="'$(_VmaLibFile)' != '' and !Exists('$(_VmaStagedBinary)') and '$(SkipVmaNativeBuild)' != 'true'"
+          Condition="'$(_VmaLibFile)' != '' and '$(_VmaBinaryNeeded)' == 'true' and '$(SkipVmaNativeBuild)' != 'true'"
           DependsOnTargets="FetchVma;EnsureVulkanHeaders">
     <Error
       Condition="'$(_VmaRid)' == ''"
       Text="Unsupported host for VMA native build: OS='$([System.Runtime.InteropServices.RuntimeInformation]::OSDescription)' Arch='$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)'." />
 
+    <RemoveDir Directories="$(_VmaBuildDir)" />
     <MakeDir Directories="$(_VmaBuildDir)" />
 
     <Exec
@@ -184,6 +237,12 @@
       DestinationFolder="$(_VmaBuildDir)"
       SkipUnchangedFiles="true"
       Condition="Exists('%(_VmaProducedBinary.Identity)')" />
+
+    <!-- Escaped: Lines is an item list, and the key's ';' would otherwise
+         split it into two lines that never match on the next read. -->
+    <WriteLinesToFile File="$(_VmaBinaryStamp)"
+                      Lines="$([MSBuild]::Escape('$(_VmaBinaryKey)'))"
+                      Overwrite="true" />
 
     <Message Importance="high" Text="Built VMA $(VmaVersion) for $(_VmaRid): $(_VmaStagedBinary)" />
   </Target>
