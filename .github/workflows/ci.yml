@@ -366,7 +366,7 @@ jobs:
       - name: AOT smoke run
         shell: pwsh
         run: |
-          $exe = "samples/AotSmoke/bin/x64/Release/net10.0/win-x64/publish/AotSmoke.exe"
+          $exe = "samples/AotSmoke/bin/x64/Release/net11.0/win-x64/publish/AotSmoke.exe"
           if (-not (Test-Path $exe)) { throw "AOT smoke binary missing: $exe" }
           & $exe
           if ($LASTEXITCODE -ne 0) { throw "AOT smoke exited with code $LASTEXITCODE" }

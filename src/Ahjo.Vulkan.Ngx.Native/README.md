@@ -1,6 +1,6 @@
 # Ahjo.Vulkan.Ngx.Native
 
-Raw P/Invoke bindings over NVIDIA's NGX (DLSS) Vulkan C API, for .NET 10.
+Raw P/Invoke bindings over NVIDIA's NGX (DLSS) Vulkan C API, for .NET 11.
 
 ## This package does not contain DLSS
 

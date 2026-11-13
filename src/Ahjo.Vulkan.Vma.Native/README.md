@@ -39,7 +39,7 @@ dotnet add package Ahjo.Vulkan.Vma.Native
 macOS RIDs (`osx-x64`, `osx-arm64`) are not currently shipped — the
 MoltenVK runtime path needs validation before adding them.
 
-TFM: `net10.0`. Native ABI tracks the pinned VMA release version.
+TFM: `net11.0`. Native ABI tracks the pinned VMA release version.
 
 ## Runtime requirements
 

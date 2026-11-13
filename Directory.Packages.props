@@ -12,8 +12,8 @@
   -->
 
   <ItemGroup>
-    <PackageVersion Include="xunit.v3" Version="4.0.1" />
-    <PackageVersion Include="Microsoft.Testing.Extensions.CrashDump" Version="2.4.1" />
+    <PackageVersion Include="xunit.v3" Version="4.0.3" />
+    <PackageVersion Include="Microsoft.Testing.Extensions.CrashDump" Version="2.5.3" />
   </ItemGroup>
 
   <!-- Derives package version from git tags + commit height; see
