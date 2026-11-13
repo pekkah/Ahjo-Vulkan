@@ -165,5 +165,6 @@ public enum CompilerOptionName
     DisableNotes = 161,
     DiagnosticFormat = 162,
     EnableExtendedHLSLBackwardsCompatibility = 163,
+    HLSLMethodsMutatingByDefault = 164,
     CountOf,
 }
