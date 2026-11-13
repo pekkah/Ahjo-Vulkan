@@ -5,7 +5,7 @@ public unsafe partial struct SessionDesc
     [NativeTypeName("size_t")]
     public nuint structureSize;
 
-    [NativeTypeName("const TargetDesc *")]
+    [NativeTypeName("const slang::TargetDesc *")]
     public TargetDesc* targets;
 
     [NativeTypeName("SlangInt")]
@@ -22,7 +22,7 @@ public unsafe partial struct SessionDesc
     [NativeTypeName("SlangInt")]
     public long searchPathCount;
 
-    [NativeTypeName("const PreprocessorMacroDesc *")]
+    [NativeTypeName("const slang::PreprocessorMacroDesc *")]
     public PreprocessorMacroDesc* preprocessorMacros;
 
     [NativeTypeName("SlangInt")]
@@ -34,7 +34,7 @@ public unsafe partial struct SessionDesc
 
     public bool allowGLSLSyntax;
 
-    [NativeTypeName("const CompilerOptionEntry *")]
+    [NativeTypeName("const slang::CompilerOptionEntry *")]
     public CompilerOptionEntry* compilerOptionEntries;
 
     [NativeTypeName("uint32_t")]

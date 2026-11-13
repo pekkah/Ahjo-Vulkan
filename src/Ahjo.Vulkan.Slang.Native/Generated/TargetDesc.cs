@@ -18,7 +18,7 @@ public unsafe partial struct TargetDesc
 
     public bool forceGLSLScalarBufferLayout;
 
-    [NativeTypeName("const CompilerOptionEntry *")]
+    [NativeTypeName("const slang::CompilerOptionEntry *")]
     public CompilerOptionEntry* compilerOptionEntries;
 
     [NativeTypeName("uint32_t")]

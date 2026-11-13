@@ -43,7 +43,7 @@ public unsafe partial struct IModulePrecompileService_Experimental
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [VtblIndex(4)]
     [return: NativeTypeName("SlangResult")]
-    public int getPrecompiledTargetCode(SlangCompileTarget target, [NativeTypeName("IBlob **")] ISlangBlob** outCode, [NativeTypeName("IBlob **")] ISlangBlob** outDiagnostics = null)
+    public int getPrecompiledTargetCode(SlangCompileTarget target, [NativeTypeName("slang::IBlob **")] ISlangBlob** outCode, [NativeTypeName("slang::IBlob **")] ISlangBlob** outDiagnostics = null)
     {
         return ((delegate* unmanaged[MemberFunction]<IModulePrecompileService_Experimental*, SlangCompileTarget, ISlangBlob**, ISlangBlob**, int>)(lpVtbl[4]))((IModulePrecompileService_Experimental*)Unsafe.AsPointer(ref this), target, outCode, outDiagnostics);
     }
@@ -59,7 +59,7 @@ public unsafe partial struct IModulePrecompileService_Experimental
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [VtblIndex(6)]
     [return: NativeTypeName("SlangResult")]
-    public int getModuleDependency([NativeTypeName("SlangInt")] long dependencyIndex, IModule** outModule, [NativeTypeName("IBlob **")] ISlangBlob** outDiagnostics = null)
+    public int getModuleDependency([NativeTypeName("SlangInt")] long dependencyIndex, [NativeTypeName("slang::IModule **")] IModule** outModule, [NativeTypeName("slang::IBlob **")] ISlangBlob** outDiagnostics = null)
     {
         return ((delegate* unmanaged[MemberFunction]<IModulePrecompileService_Experimental*, long, IModule**, ISlangBlob**, int>)(lpVtbl[6]))((IModulePrecompileService_Experimental*)Unsafe.AsPointer(ref this), dependencyIndex, outModule, outDiagnostics);
     }
