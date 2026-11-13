@@ -22,9 +22,12 @@
 >
 > **Read "Prior art upstream" below before filing.** A PR that fixed this
 > incidentally (#11344) was closed unmerged. Its takeover (#13537) merged
-> without the null guard, and the crash is still present in `v2026.21`
-> (re-run 2026-11-06). The ask is therefore "here is a one-line fix, plus the
-> regression test that would have caught the guard being dropped".
+> *with* the null-safe helper, but it was reverted the next day (#13712), and
+> no release has shipped it. The crash is still present in `v2026.22`
+> (re-run 2026-11-13). Its re-land, #13987, is open and null-safe again, but
+> it adds no existential test. The ask is therefore "here is the crash and the
+> regression test #13987 should carry, so the guard cannot be lost a third
+> time".
 
 ---
 
@@ -111,6 +114,34 @@ A regression test would fit naturally alongside
 only exercises ranges that do have a leaf variable.
 
 ## Prior art upstream
+
+> **Update 2026-11-13 — the 2026-11-06 update below misread what happened to
+> #13537. Corrected here, and re-run against `v2026.22`.**
+>
+> - #13537 **did** carry the guard. Its diff adds `_getImageFormat` with
+>   `if (!varDecl) return SLANG_IMAGE_FORMAT_unknown;`, the same helper #11344
+>   had.
+> - It was reverted on 2026-10-16 by
+>   [#13712](https://github.com/shader-slang/slang/pull/13712), "Revert
+>   texture format descriptor types (#13537)" (`8c81b8bd`). Both `v2026.21`
+>   and `v2026.22` contain the revert, so they ship the original pre-#13537
+>   accessor. That is why the 2026-11-06 update found the unguarded
+>   dereference. The guard was not dropped in a respin; the whole change was
+>   backed out.
+> - The re-land,
+>   [#13987](https://github.com/shader-slang/slang/pull/13987), "Restore
+>   texture format types with backward compatibility", is **open** (last
+>   updated 2026-10-30). Its `_getImageFormat` is null-safe again
+>   (`if (varDecl) …`, then `varDecl ? … : SLANG_IMAGE_FORMAT_unknown`). Its
+>   tests add texture cases only, with no existential or interface
+>   `ParameterBlock` range, so point 3 below still holds.
+> - At tag `v2026.22`, `slang-reflection-api.cpp:2833-2834` is still the
+>   unguarded `leafVar->findModifier<FormatAttribute>()`.
+> - The repro still crashes against the official `v2026.22` binaries:
+>   - win-x64: `0xC0000005`, 3/3;
+>   - linux-x64: SIGSEGV, exit 139, 3/3. `gdb` frame 0 is
+>     `spReflectionTypeLayout_getBindingRangeImageFormat`, in
+>     `libslang-compiler.so.0.2026.22`.
 
 > **Update 2026-11-06 — the in-flight fix described below did not land.**
 >

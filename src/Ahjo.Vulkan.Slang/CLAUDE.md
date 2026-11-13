@@ -182,9 +182,21 @@ null-terminated.
     `specialize()` on this shape is broken on both shipped RIDs, which makes
     the decision above stronger.
 
-  `Specialize` stays out, and #170 stays open for the next bump. That re-probe
-  must use the resource-carrying shape, and it must keep a version that
-  crashed (`v2026.21` will do) as the control.
+  **Re-probed 2026-11-13 on `v2026.22`: unchanged.** Same resource-carrying
+  shape, with `v2026.21` as the control. Each version and RID ran 12 times:
+  `getEntryPointCode` and `getTargetCode`, across `[module, fs]` and
+  `[module, vs, fs]`, 3 runs each.
+  - linux-x64 gets SIGSEGV (exit 139) 12/12 on both versions, with the same
+    `IRVarLayout::getTypeLayout()` ← `legalizeTypes` trace.
+  - win-x64 returns `SLANG_OK` 12/12, and every output fails `spirv-val` with
+    `VUID-StandaloneSpirv-UniformConstant-06677`. The SPIR-V is byte-identical
+    between the two versions.
+  - "Legalize resource selections across independent bindings" (#14358),
+    which is in `v2026.22`, does not touch this.
+
+  `Specialize` stays out, and the next Slang bump re-probes it again (#170
+  holds the sequence). That re-probe must use the resource-carrying shape, and
+  it must keep a version that crashed (`v2026.22` will do) as the control.
 
   **No upstream fix exists to wait for — checked 2026-08-18 against
   `v2026.14.1`, which is still Slang's latest release.** #170 was re-scoped from
@@ -321,23 +333,27 @@ proves nothing.
    `docs/upstream/slang-getbindingrangeimageformat-crash.md` and `.cpp`. Tracked
    as #181; the upstream number belongs here once filed.
 
-   **The upstream fix did not survive its re-land, so the crash is still in
-   `master` and in `v2026.21`.** PR
-   [#11344](https://github.com/shader-slang/slang/pull/11344) routed both
-   format getters through a helper that null-checked the variable first, which
-   is the same guard by the same reasoning. It was **closed unmerged on
+   **The upstream fix has merged once and been reverted, so no release has
+   it.** PR [#11344](https://github.com/shader-slang/slang/pull/11344) routed
+   both format getters through a helper that null-checked the variable first,
+   which is the same guard by the same reasoning. It was **closed unmerged on
    2026-10-09**. Its takeover,
-   [#13537](https://github.com/shader-slang/slang/pull/13537), was merged on
-   2026-10-15 and is in `v2026.21`, but **the null guard was dropped**:
-   `spReflectionTypeLayout_getBindingRangeImageFormat` still dereferences
-   `leafVariable` unguarded. **Re-run on 2026-11-06 against `v2026.21`:**
+   [#13537](https://github.com/shader-slang/slang/pull/13537), merged on
+   2026-10-15 **with** that helper. It was **reverted on 2026-10-16** by
+   [#13712](https://github.com/shader-slang/slang/pull/13712), so `v2026.21`
+   and `v2026.22` ship the original unguarded accessor. The re-land,
+   [#13987](https://github.com/shader-slang/slang/pull/13987), is open and
+   null-safe, with no existential test. **Re-run on 2026-11-13 against
+   `v2026.22`:**
    - win-x64 fails 3/3 with `0xC0000005`;
    - linux-x64 fails 3/3 with SIGSEGV (exit 139), and frame 0 is still the
      accessor itself.
 
+   The 2026-11-06 run against `v2026.21` gave the same results.
+
    Both layers stay. They come out when a pinned Slang no longer crashes on the
    repro in `docs/upstream/`, and not when an upstream PR merges: one already
-   merged without the fix.
+   merged and was backed out.
 
 8. **Member offsets come from `SLANG_PARAMETER_CATEGORY_UNIFORM`, and the test
    asserts them against `OpMemberDecorate … Offset`.** A default or wrong

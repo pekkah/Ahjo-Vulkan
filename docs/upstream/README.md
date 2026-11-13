@@ -21,16 +21,16 @@ needed.
 
 | File | Upstream | Status |
 |---|---|---|
-| `slang-getbindingrangeimageformat-crash.{md,cpp}` | shader-slang/slang | Not filed. Tracked as #181. Guard: `SlangReflection.ImageFormatOf`. The incidental fix in PR [#11344](https://github.com/shader-slang/slang/pull/11344) was closed unmerged (2026-10-09). Its takeover [#13537](https://github.com/shader-slang/slang/pull/13537) merged 2026-10-15 **without** the null guard; see "Prior art upstream" in the report. Repro last re-run 2026-11-06 against the pinned `v2026.21`: still crashes on win-x64 (`0xC0000005`, 3/3) and on linux-x64 (SIGSEGV, 3/3). |
+| `slang-getbindingrangeimageformat-crash.{md,cpp}` | shader-slang/slang | Not filed. Tracked as #181. Guard: `SlangReflection.ImageFormatOf`. The incidental fix in PR [#11344](https://github.com/shader-slang/slang/pull/11344) was closed unmerged (2026-10-09). Its takeover [#13537](https://github.com/shader-slang/slang/pull/13537) merged 2026-10-15 with the null-safe helper and was reverted the next day ([#13712](https://github.com/shader-slang/slang/pull/13712)). The re-land, [#13987](https://github.com/shader-slang/slang/pull/13987), is open and null-safe but adds no existential test; see "Prior art upstream" in the report. Repro last re-run 2026-11-13 against the pinned `v2026.22`: still crashes on win-x64 (`0xC0000005`, 3/3) and on linux-x64 (SIGSEGV, 3/3). |
 
 **#170 has no file here yet.** It tracks the `IComponentType::specialize`
 segfault: an interface-typed `ParameterBlock`, crashing in
 `Slang::legalizeTypes`. The process dies on `linux-x64` only. On `win-x64`
 the same shape returns success and emits SPIR-V that fails `spirv-val`. The
-sequence lives in the issue body. Its re-probe on 2026-11-06 against
-`v2026.21` (still crashes; the impl type must carry resources for it to
-reproduce) is recorded in `src/Ahjo.Vulkan.Slang/CLAUDE.md` next to the
-guard. The earlier upstream check is in OPEN-4(c) of the issue-166 spec.
+sequence lives in the issue body. Its re-probes on 2026-11-06 against
+`v2026.21` and on 2026-11-13 against `v2026.22` (both still crash; the impl
+type must carry resources for it to reproduce) are recorded in
+`src/Ahjo.Vulkan.Slang/CLAUDE.md` next to the guard. The earlier upstream check is in OPEN-4(c) of the issue-166 spec.
 
 ## Re-testing after a version bump
 
