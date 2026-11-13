@@ -36,7 +36,7 @@ DLSS is unavailable: the NVIDIA feature library was not found.
 Expected file: nvngx_dlss.dll
 Searched:
   C:\p\ahjo-vulkan\native\ngx\staged\win-x64\rel
-  C:\p\ahjo-vulkan\samples\HelloDlaa\bin\Release\net10.0\
+  C:\p\ahjo-vulkan\samples\HelloDlaa\bin\Release\net11.0\
 This library is NOT shipped by Ahjo.Vulkan.Ngx — the application supplies it
 from NVIDIA's DLSS SDK (https://github.com/NVIDIA/DLSS, lib/<plat>/rel/).
 See docs/ngx-notes.md.

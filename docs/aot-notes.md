@@ -37,7 +37,7 @@ The `[VtblIndex]` and `[NativeTypeName]` attributes ClangSharp emits are `[Condi
 
 dotnet publish samples/AotSmoke/AotSmoke.csproj -c Release -r win-x64 -p:IlcUseEnvironmentalTools=true
 
-samples/AotSmoke/bin/x64/Release/net10.0/win-x64/publish/AotSmoke.exe
+samples/AotSmoke/bin/x64/Release/net11.0/win-x64/publish/AotSmoke.exe
 ```
 
 `-p:IlcUseEnvironmentalTools=true` skips the AOT toolchain's `findvcvarsall.bat` lookup and uses the linker on `PATH` instead. Without it (or without the action that imports the dev environment in CI), the bat's `vswhere.exe`-based discovery can fail on some Visual Studio Build Tools layouts and the publish dies in the native-link stage with `MSB3073` / exit code 123. The bat is fragile around paths containing `(x86)`; the env-var path is the documented escape hatch.

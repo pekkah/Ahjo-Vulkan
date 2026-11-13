@@ -12,8 +12,8 @@
   -->
 
   <ItemGroup>
-    <PackageVersion Include="xunit.v3" Version="4.0.1" />
-    <PackageVersion Include="Microsoft.Testing.Extensions.CrashDump" Version="2.4.1" />
+    <PackageVersion Include="xunit.v3" Version="4.0.3" />
+    <PackageVersion Include="Microsoft.Testing.Extensions.CrashDump" Version="2.5.3" />
   </ItemGroup>
 
   <!-- Derives package version from git tags + commit height; see
@@ -39,9 +39,11 @@
   </ItemGroup>
 
   <!-- On-demand allocation + latency benchmarks. See
-       tests/Ahjo.Vulkan.Benchmarks/ for usage. -->
+       tests/Ahjo.Vulkan.Benchmarks/ for usage. Preview because 0.15.8, the
+       latest stable, cannot launch a net11.0 job (RuntimeMoniker
+       NotRecognized); move back to stable once 0.16.0 ships. -->
   <ItemGroup>
-    <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
+    <PackageVersion Include="BenchmarkDotNet" Version="0.16.0-preview.2" />
   </ItemGroup>
 
 </Project>

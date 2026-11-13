@@ -38,7 +38,7 @@ The loader resolver maps `vulkan-1` to `libvulkan.dylib` so `DllImport`
 resolves cleanly under MoltenVK. End-to-end Mac validation is pending a
 runner with real Vulkan drivers.
 
-TFM: `net10.0`. Native ABI tracks the pinned Vulkan-Headers release
+TFM: `net11.0`. Native ABI tracks the pinned Vulkan-Headers release
 version; bumps are minor-version bumps here.
 
 ## Status

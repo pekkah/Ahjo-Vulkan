@@ -202,8 +202,8 @@ The underlying VMA C++ library version (independent of the package
 version) is pinned in `Directory.Build.props` as `VmaVersion`; bump it
 deliberately and regenerate the bindings.
 
-Building requires the .NET 11 SDK (currently RC1; see `global.json`) and a
-system Vulkan loader. The packages themselves target `net10.0`. Tests run on
+Building requires the .NET 11 SDK (see `global.json`) and a
+system Vulkan loader. The packages themselves target `net11.0`. Tests run on
 Microsoft Testing Platform: `dotnet test`, or `dotnet test --project <csproj>`
 for one suite.
 
