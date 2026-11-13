@@ -26,7 +26,7 @@ Every skip carries a `[gate:driver|hardware|validation|spirv|platform|feature]` 
 
 win-x64 + linux-x64, defined ONCE in `build-ktx-native.yml`, called by both `ci.yml` and `publish.yml` — so the binary a release attaches comes from the definition CI proves. Each job builds libktx for its RID **and runs `Ahjo.Vulkan.Ktx.Native.Tests` against it before uploading the artifact** (#144's lesson applied up front).
 
-It provisions no ICD and no loader on purpose: libktx ships with both uploaders off, so needing one would mean something got linked in that the package's contract says isn't there. The staged binary under `native/ktx/staged/<rid>/` is both the cache key and the artifact; a cache hit skips the clone and cmake but still runs the tests.
+It provisions no ICD and no loader on purpose: libktx ships with both uploaders off, so needing one would mean something got linked in that the package's contract says isn't there. The staged binary under `native/ktx/staged/<rid>/` and its `ktx.version` stamp are the cache; the binary alone is the artifact. A cache hit skips the clone and cmake but still runs the tests.
 
 ## `slang-native` lane — a checksum proves the bytes, not that they run
 
@@ -34,7 +34,7 @@ win-x64 + linux-x64, defined ONCE in `build-slang-native.yml`, called by both `c
 
 The difference from the other native lanes is that nothing is compiled here: the binary is upstream's own release artifact, pinned by tag *and* by SHA-256 in `Directory.Build.props`. The checksum tells you the bytes are the ones we pinned; only the smoke suite tells you they load and compile a shader on this runner. That is why the tests are not optional and why they run on a cache hit too.
 
-It provisions no ICD and no loader on purpose, and `AHJO_VULKAN_TIER` stays unset: Slang compiles shader text to SPIR-V bytes and the package does not even reference `Ahjo.Vulkan.Native`. If a test in this suite ever needs a Vulkan device, something got linked in that the package's contract says isn't there. The staged binaries under `native/slang/staged/<rid>/` are both the cache key and the artifact. The lane also caches `native/slang/tool/<rid>/` (the build-time `slangc`, #171) so that a hit does not re-download; it does not upload or test it.
+It provisions no ICD and no loader on purpose, and `AHJO_VULKAN_TIER` stays unset: Slang compiles shader text to SPIR-V bytes and the package does not even reference `Ahjo.Vulkan.Native`. If a test in this suite ever needs a Vulkan device, something got linked in that the package's contract says isn't there. The staged binaries under `native/slang/staged/<rid>/` are both the cache key and the artifact; the artifact also carries their `slang.version` stamp, which is never packed. The lane also caches `native/slang/tool/<rid>/` (the build-time `slangc`, #171) so that a hit does not re-download; it does not upload or test it.
 
 It is a build-artifact check, not wrapper coverage. **Don't grow it** — wrapper-level Slang tests belong in the Windows `build-test` job with the rest of the wrapper suite.
 

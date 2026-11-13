@@ -65,12 +65,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # The staged binary IS the cache: BuildKtxForHost is conditioned on
-      # its absence, so a hit skips the ~170 MB shallow clone of
-      # KTX-Software and the cmake build entirely. Keyed on every input
-      # that can change the output — the pinned KtxVersion and the cmake
-      # feature flags (both in Directory.Build.props), and the project that
-      # drives the build.
+      # The staged binary AND its ktx.version stamp are the cache:
+      # BuildKtxForHost runs only when either is missing or the stamp
+      # differs from KtxVersion, so a hit skips the ~170 MB shallow clone
+      # of KTX-Software and the cmake build entirely. Without the stamp in
+      # path:, every hit would restore a bare binary and rebuild. Keyed on
+      # every input that can change the output — the pinned KtxVersion and
+      # the cmake feature flags (both in Directory.Build.props), and the
+      # project that drives the build.
       #
       # The smoke tests run on a hit as well as a miss. A cached binary
       # that no longer loads is exactly the thing worth finding out about.
@@ -78,7 +80,9 @@ jobs:
         id: cache-ktx
         uses: actions/cache@v6
         with:
-          path: native/ktx/staged/${{ matrix.rid }}/${{ matrix.lib-file }}
+          path: |
+            native/ktx/staged/${{ matrix.rid }}/${{ matrix.lib-file }}
+            native/ktx/staged/${{ matrix.rid }}/ktx.version
           key: ktx-${{ matrix.rid }}-${{ hashFiles('Directory.Build.props', 'src/Ahjo.Vulkan.Ktx.Native/Ahjo.Vulkan.Ktx.Native.csproj', '.github/workflows/build-ktx-native.yml') }}
 
       - name: Setup .NET

@@ -5,7 +5,7 @@
 To change the bindings: edit `tools/generate-ngx.rsp`, bump `NgxVersion` if needed, then:
 
 ```bash
-./tools/setup-ngx.ps1 -SkipFeatureDll          # only needed once, or after a pin bump
+./tools/setup-ngx.ps1 -SkipFeatureDll          # once, and again after every pin bump (the build enforces it)
 dotnet build src/Ahjo.Vulkan.Ngx.Native -t:Regenerate
 ```
 
@@ -56,7 +56,7 @@ grep -o '^#define \(NVSDK_NGX_EParameter_[A-Za-z0-9_]*\)' \
 
 ## The shim build is opt-in, and an absent SDK is not an error
 
-The SDK is proprietary and licence-encumbered, so **nothing here ever downloads it**. `./tools/setup-ngx.ps1` is an explicit act. `BuildNgxForHost` is conditioned on the staged static library existing; when it does not, `WarnNgxSdkMissing` prints one high-importance `<Message>` — **not** a `<Warning>`, because `TreatWarningsAsErrors=true` is repo-wide and a warning would break `git clone && dotnet build` for every contributor who will never touch DLSS.
+The SDK is proprietary and licence-encumbered, so **nothing here ever downloads it**. `./tools/setup-ngx.ps1` is an explicit act. `BuildNgxForHost` is conditioned on the staged static library existing; when it does not, `WarnNgxSdkMissing` prints one high-importance `<Message>` — **not** a `<Warning>`, because `TreatWarningsAsErrors=true` is repo-wide and a warning would break `git clone && dotnet build` for every contributor who will never touch DLSS. A *stale* SDK is different: when the staged `ngx.version` (written by `setup-ngx.ps1`) is missing or differs from `NgxVersion`, `ErrorNgxSdkStale` fails the build and asks for a re-run of the script, because linking a different SDK than the committed headers is the defect (#256).
 
 The test suite completes that contract: it skips wholesale without a shim, **unless `AHJO_NGX_REQUIRE_SHIM=1`**, which the `ngx-native` CI lane sets. That is what stops the lane reporting green while executing nothing.
 
