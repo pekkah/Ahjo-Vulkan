@@ -62,7 +62,7 @@ The test suite completes that contract: it skips wholesale without a shim, **unl
 
 ## What is never committed, packed or fetched
 
-The feature DLLs — `nvngx_dlss.dll` / `libnvidia-ngx-dlss.so.<version>` (Super Resolution) and `nvngx_dlssg.dll` / `libnvidia-ngx-dlssg.so.<version>` (Frame Generation, #253). Consumers supply them (#214). `native/ngx/staged/` is git-ignored, `PackNgxRuntimes` packs only the shim we compiled plus `NGX-LICENSE.txt`, and CI fetches with `-SkipFeatureDll` so a CI run is structurally incapable of pulling one rather than merely not asked to. The static client library and archive are not packed either.
+The feature DLLs — `nvngx_dlss.dll` / `libnvidia-ngx-dlss.so.<version>` (Super Resolution) and `nvngx_dlssg.dll` / `libnvidia-ngx-dlssg.so.<version>` (Frame Generation, #253). Consumers supply them (#214). `native/ngx/staged/` is git-ignored, `PackNgxRuntimes` packs only the shim we compiled plus `NGX-LICENSE.txt`, and CI fetches with `-SkipFeatureDll` so a CI run is structurally incapable of pulling one rather than merely not asked to. The static client library and archive are not packed either. Both directions are checked: a declared file (shim or `NGX-LICENSE.txt`) that is missing fails `dotnet pack` with `AHJOPACK001`, and `tools/verify-native-nupkgs.py` fails on any undeclared `runtimes/` entry in the built nupkg, on every PR (`ci.yml`'s `native-pack`) and before every push (#169, `tools/AGENTS.md`).
 
 ## The lane
 

@@ -1,4 +1,6 @@
 <Project>
   <!-- Shared shader build step (#171). Inert in any project without SlangShader items. -->
   <Import Project="$(MSBuildThisFileDirectory)tools\msbuild\Ahjo.Vulkan.SlangShaders.targets" />
+  <!-- Native pack completeness (#169). Inert unless a project sets AhjoNativePackDependsOn. -->
+  <Import Project="$(MSBuildThisFileDirectory)tools\msbuild\Ahjo.Vulkan.NativePack.targets" />
 </Project>

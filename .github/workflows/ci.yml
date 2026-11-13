@@ -514,3 +514,105 @@ jobs:
   ngx-native:
     name: NGX native
     uses: ./.github/workflows/build-ngx-native.yml
+
+  # The same reusable workflow publish.yml calls for VMA's per-RID artifacts,
+  # now also called here so native-pack below can pack and inspect the VMA
+  # nupkg on PRs, like the other three (#169). It builds and uploads; it runs
+  # no tests. Wrapper coverage for the shipped binary is still vma-linux's
+  # job above, not this one's.
+  vma-native:
+    name: VMA native
+    uses: ./.github/workflows/build-vma-native.yml
+
+  # Packs the four native packages from the per-RID artifacts the native jobs
+  # above just uploaded, then opens each nupkg and compares it with the pack
+  # list its csproj declared (#169). Two layers: `dotnet pack` itself fails
+  # with AHJOPACK001 on a declared file that is missing
+  # (tools/msbuild/Ahjo.Vulkan.NativePack.targets), and
+  # tools/verify-native-nupkgs.py fails on a missing manifest, a declared
+  # entry absent from the nupkg, or an undeclared runtimes/ entry. publish.yml
+  # runs the same staging script and the same verifier before the NuGet push;
+  # this job moves that discovery to the PR.
+  #
+  # It runs NO test suite and provisions no Vulkan, so it is not a test lane
+  # and declares no AHJO_VULKAN_TIER (.github/CLAUDE.md). Don't grow it into
+  # one. Nothing is uploaded: the nupkgs are throwaway.
+  native-pack:
+    name: Native pack completeness
+    runs-on: ubuntu-latest
+    needs: [vma-native, ktx-native, slang-native, ngx-native]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # Mirrors publish.yml: MinVer walks git history for the version that
+          # names the nupkg, and a shallow clone was never measured here.
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: Directory.Packages.props
+
+      - name: Download VMA native artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: vma-native-*
+          path: ${{ runner.temp }}/vma-artifacts
+
+      - name: Download KTX native artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ktx-native-*
+          path: ${{ runner.temp }}/ktx-artifacts
+
+      - name: Download Slang native artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: slang-native-*
+          path: ${{ runner.temp }}/slang-artifacts
+
+      - name: Download NGX native artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ngx-native-*
+          path: ${{ runner.temp }}/ngx-artifacts
+
+      - name: Stage native binaries for pack
+        run: |
+          sh tools/stage-native-artifacts.sh "${{ runner.temp }}/vma-artifacts" vma
+          sh tools/stage-native-artifacts.sh "${{ runner.temp }}/ktx-artifacts" ktx
+          sh tools/stage-native-artifacts.sh "${{ runner.temp }}/slang-artifacts" slang
+          sh tools/stage-native-artifacts.sh "${{ runner.temp }}/ngx-artifacts" ngx
+
+      # Same Skip flags as publish.yml: the binaries were staged above, and
+      # this runner must not rebuild or re-download the host RID's. VMA packs
+      # without --no-build because no core build precedes it here.
+      - name: Pack native packages
+        run: |
+          dotnet pack src/Ahjo.Vulkan.Vma.Native/Ahjo.Vulkan.Vma.Native.csproj \
+            -c Release \
+            -p:SkipVmaNativeBuild=true \
+            -o "${{ runner.temp }}/nupkgs"
+          dotnet pack src/Ahjo.Vulkan.Ktx.Native/Ahjo.Vulkan.Ktx.Native.csproj \
+            -c Release \
+            -p:SkipKtxNativeBuild=true \
+            -o "${{ runner.temp }}/nupkgs"
+          dotnet pack src/Ahjo.Vulkan.Slang.Native/Ahjo.Vulkan.Slang.Native.csproj \
+            -c Release \
+            -p:SkipSlangNativeFetch=true \
+            -o "${{ runner.temp }}/nupkgs"
+          dotnet pack src/Ahjo.Vulkan.Ngx.Native/Ahjo.Vulkan.Ngx.Native.csproj \
+            -c Release \
+            -p:SkipNgxNativeBuild=true \
+            -o "${{ runner.temp }}/nupkgs"
+
+      - name: Verify native nupkg contents
+        run: >-
+          python3 -I tools/verify-native-nupkgs.py "${{ runner.temp }}/nupkgs"
+          Ahjo.Vulkan.Vma.Native
+          Ahjo.Vulkan.Ktx.Native
+          Ahjo.Vulkan.Slang.Native
+          Ahjo.Vulkan.Ngx.Native

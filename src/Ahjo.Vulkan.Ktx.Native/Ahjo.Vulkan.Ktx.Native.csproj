@@ -27,6 +27,7 @@
     <PackageTags>ktx;ktx2;basis;basisu;texture;transcode;compression;gpu;interop;native;pinvoke;bindings</PackageTags>
     <MinVerTagPrefix>v</MinVerTagPrefix>
     <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+    <AhjoNativePackDependsOn>PackKtxRuntimes</AhjoNativePackDependsOn>
   </PropertyGroup>
 
   <!--
@@ -192,26 +193,28 @@
 
   <!--
     Multi-RID pack. Expects per-RID binaries to exist under
-    native/ktx/lib/<rid>/<libname> by the time pack runs. CI does this by
+    native/ktx/staged/<rid>/<libname> by the time pack runs. CI does this by
     downloading the build matrix's upload-artifact outputs into those
     directories before invoking dotnet pack.
 
-    Local pack only includes the host's RID — that's intentional. Producing
-    a fully cross-RID nupkg requires the CI matrix.
+    This target only DECLARES the shipped files as AhjoNativePackFile items;
+    the shared AhjoPackNativeFiles target (tools/msbuild/
+    Ahjo.Vulkan.NativePack.targets) runs it via AhjoNativePackDependsOn,
+    packs the items and writes the manifest CI verifies the nupkg against.
+    Pack is strict: a declared file that is missing fails with AHJOPACK001.
+    A local host-RID-only pack needs -p:AhjoAllowPartialNativePack=true.
+    See docs/design/specs/2026-11-13-issue-169-native-pack-completeness-design.md.
   -->
-  <Target Name="PackKtxRuntimes" BeforeTargets="_GetPackageFiles;GenerateNuspec" Condition="'$(IsPackable)' == 'true'">
+  <Target Name="PackKtxRuntimes" Condition="'$(IsPackable)' == 'true'">
     <ItemGroup>
       <_KtxPackRid Include="win-x64">   <LibFile>ktx.dll</LibFile>   </_KtxPackRid>
       <_KtxPackRid Include="linux-x64"> <LibFile>libktx.so</LibFile> </_KtxPackRid>
     </ItemGroup>
 
     <ItemGroup>
-      <None Include="$(_KtxStagedRootDir)%(_KtxPackRid.Identity)\%(_KtxPackRid.LibFile)"
-            Condition="Exists('$(_KtxStagedRootDir)%(_KtxPackRid.Identity)\%(_KtxPackRid.LibFile)')">
-        <Pack>true</Pack>
+      <AhjoNativePackFile Include="$(_KtxStagedRootDir)%(_KtxPackRid.Identity)\%(_KtxPackRid.LibFile)">
         <PackagePath>runtimes\%(_KtxPackRid.Identity)\native\%(_KtxPackRid.LibFile)</PackagePath>
-        <Visible>false</Visible>
-      </None>
+      </AhjoNativePackFile>
     </ItemGroup>
 
     <Message Importance="high" Text="KTX pack: included RIDs from $(_KtxStagedRootDir)" />

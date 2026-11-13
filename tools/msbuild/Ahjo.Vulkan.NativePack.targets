@@ -1,0 +1,73 @@
+<Project>
+
+  <!--
+    Native pack completeness (#169). Imported by the repo-root
+    Directory.Build.targets; inert unless a project sets
+    AhjoNativePackDependsOn to the name of its own Pack*Runtimes target.
+
+    Design:
+      docs/design/specs/2026-11-13-issue-169-native-pack-completeness-design.md
+      docs/design/specs/2026-11-13-issue-169-slang-native-module-provenance-design.md
+
+    Item contract (declared by the project's Pack*Runtimes target):
+      <AhjoNativePackFile Include="<source file>" PackagePath="<full entry path>" />
+        Include      the file on disk that ships.
+        PackagePath  the FULL entry path in the nupkg, file name included:
+                     runtimes\<rid>\native\<file>, or <LICENSE>.txt for a
+                     licence at the package root. Not a directory ("\"):
+                     the manifest below needs one line per entry.
+
+    What this target does with the list:
+      AHJOPACK001  one error naming every declared file whose source does
+                   not exist; nothing is written.
+                   Pack is strict by default; a local host-RID-only pack
+                   passes -p:AhjoAllowPartialNativePack=true. Never set that
+                   in a workflow.
+      AHJOPACK002  the project named a Pack*Runtimes target that declared
+                   nothing.
+      Pack items   every declared file that exists becomes a None/Pack item.
+      Manifest     $(PackageOutputPath)$(PackageId).native-files.txt lists
+                   the FULL declared list (not filtered by Exists), one entry
+                   per line with forward slashes. tools/verify-native-nupkgs.py
+                   compares it with the built nupkg, which also catches this
+                   target silently not running (no manifest).
+  -->
+  <Target Name="AhjoPackNativeFiles"
+          BeforeTargets="_GetPackageFiles;GenerateNuspec"
+          DependsOnTargets="$(AhjoNativePackDependsOn)"
+          Condition="'$(IsPackable)' == 'true' and '$(AhjoNativePackDependsOn)' != ''">
+
+    <Error Code="AHJOPACK002"
+           Condition="'@(AhjoNativePackFile)' == ''"
+           Text="$(PackageId): $(AhjoNativePackDependsOn) declared no AhjoNativePackFile items." />
+
+    <!-- Collect first, then ONE Error naming every missing file. A batched
+         per-item Error stops at the first failing batch (measured: only the
+         first missing file was named), and ContinueOnError would let pack go
+         on to write the nupkg. -->
+    <ItemGroup>
+      <_AhjoMissingNativePackFile Include="@(AhjoNativePackFile)"
+                                  Condition="!Exists('%(AhjoNativePackFile.Identity)')" />
+    </ItemGroup>
+
+    <Error Code="AHJOPACK001"
+           Condition="'$(AhjoAllowPartialNativePack)' != 'true' and '@(_AhjoMissingNativePackFile)' != ''"
+           Text="$(PackageId): these files are in the pack list but their sources do not exist: @(_AhjoMissingNativePackFile->'%(PackagePath) (from %(FullPath))', '; '). Refusing to pack an incomplete package; stage every RID (CI: tools/stage-native-artifacts.sh) or pass -p:AhjoAllowPartialNativePack=true for a local host-RID-only pack." />
+
+    <ItemGroup>
+      <None Include="@(AhjoNativePackFile)"
+            Condition="Exists('%(AhjoNativePackFile.Identity)')"
+            Pack="true"
+            Visible="false" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <_AhjoNativeManifestLine Include="@(AhjoNativePackFile->'%(PackagePath)'->Replace('\','/'))" />
+    </ItemGroup>
+
+    <WriteLinesToFile File="$([MSBuild]::EnsureTrailingSlash('$(PackageOutputPath)'))$(PackageId).native-files.txt"
+                      Lines="@(_AhjoNativeManifestLine)"
+                      Overwrite="true" />
+  </Target>
+
+</Project>

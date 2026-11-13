@@ -81,6 +81,19 @@ It is a build-artifact check, not wrapper coverage. **Don't grow it.**
 
 Only `win-x64` and `linux-x64` exist, and that is not the usual "add the lane first, then the RID" note: NVIDIA publishes NGX client libraries for `Windows_x86_64` and `Linux_x86_64` and nothing else, so this matrix is already the complete set.
 
+## `native-pack` job — the nupkg is opened before anything ships
+
+`ci.yml`'s `native-pack` job (ubuntu-latest, #169) runs after `vma-native`, `ktx-native`, `slang-native` and `ngx-native`. It downloads their per-RID artifacts, stages them with `tools/stage-native-artifacts.sh`, packs the four native packages, and runs `tools/verify-native-nupkgs.py` over the result. `vma-native` is `build-vma-native.yml`, the same reusable workflow `publish.yml` calls, so VMA is now called by both workflows like the other three. It builds and uploads only; `vma-linux` is still what executes the Linux binary.
+
+It runs **no test suite** and provisions no Vulkan, so it is not a lane: no `AHJO_VULKAN_TIER`, no artifact upload. Don't grow it into one.
+
+There are two layers, both fed by the pack list each native csproj already declares:
+
+1. **`dotnet pack` refuses an incomplete package.** `tools/msbuild/Ahjo.Vulkan.NativePack.targets` fails with `AHJOPACK001` naming a declared file that is not on disk. `-p:AhjoAllowPartialNativePack=true` is the opt-out for a local host-RID-only pack. **Never set it in a workflow**: it is exactly the silent drop this replaces.
+2. **The built nupkg is compared with the declared list.** The verifier fails when the `<PackageId>.native-files.txt` manifest is missing (the pack target never ran), when a declared entry is absent, or when there is an undeclared `runtimes/` entry (for example the NGX feature DLL, #214).
+
+`publish.yml` runs the same staging script and the same verifier after its last pack and before the upload and the NuGet push. So the gate on PRs is also the last gate before release.
+
 ## Publishing
 
 `publish.yml` ships preview packages on `push:main` (MinVer-derived pre-release version) and stable packages on `release:published` events. Tag with `v0.x.y` → create a GitHub release → every package publishes under that single tag. The publish workflow can override MinVer via `MinVerVersionOverride`.

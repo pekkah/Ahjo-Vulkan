@@ -77,6 +77,8 @@ the check name — deliberate friction.
 | `ktx-native` | — | Outside the system by contract: libktx is built with both uploaders off, so needing a loader would itself be the bug. |
 | `slang-native` | — | Outside the system by contract: Slang compiles shader text to SPIR-V bytes and the package does not even reference `Ahjo.Vulkan.Native`. Its gate is the pinned SHA-256 plus a smoke suite that loads the binary and compiles a shader — a checksum proves the bytes, only running them proves they work. |
 | `ngx-native` | — | Outside the tier system by contract: the `ahjo_ngx` shim links no `vulkan-1` (it only *includes* the headers), so needing a loader would itself be the bug. It proves the shim loads, resolves all 27 exports and agrees with the bindings on every NGX struct layout; it **cannot** evaluate DLSS, which needs an NVIDIA driver that no hosted runner has. It declares one thing instead of a tier — `AHJO_NGX_REQUIRE_SHIM=1`; see below. |
+| `vma-native` | — | Packaging, not Vulkan coverage: `build-vma-native.yml` builds and uploads the per-RID VMA binaries so `native-pack` can pack them on PRs (#169). It runs no tests; `vma-linux` is what executes the Linux binary. |
+| `native-pack` | — | Packaging, not Vulkan coverage: packs the four native packages from the lanes' artifacts and checks each nupkg against its declared pack list (#169). It runs no test suite. |
 
 **Lowering a declared tier to make a lane green is prohibited.** The tier
 describes the host; if the host regressed, fix the host.

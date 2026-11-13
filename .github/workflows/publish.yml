@@ -160,14 +160,7 @@ jobs:
 
       - name: Stage VMA binaries for pack
         if: needs.build-vma.result == 'success'
-        run: |
-          for rid in win-x64 win-arm64 linux-x64 linux-arm64; do
-            mkdir -p "native/vma/build/${rid}"
-            src_dir="${{ github.workspace }}/vma-artifacts/vma-native-${rid}"
-            if [ -d "$src_dir" ]; then
-              cp -v "$src_dir"/* "native/vma/build/${rid}/"
-            fi
-          done
+        run: sh tools/stage-native-artifacts.sh "${{ github.workspace }}/vma-artifacts" vma
 
       # ---- KTX native artifact aggregation (when shipping KTX) ----
       # Same shape as VMA above, staged at native/ktx/staged/<rid>/<libname>,
@@ -184,20 +177,12 @@ jobs:
 
       - name: Stage KTX binaries for pack
         if: needs.build-ktx.result == 'success'
-        run: |
-          for rid in win-x64 linux-x64; do
-            mkdir -p "native/ktx/staged/${rid}"
-            src_dir="${{ github.workspace }}/ktx-artifacts/ktx-native-${rid}"
-            if [ -d "$src_dir" ]; then
-              cp -v "$src_dir"/* "native/ktx/staged/${rid}/"
-            fi
-          done
+        run: sh tools/stage-native-artifacts.sh "${{ github.workspace }}/ktx-artifacts" ktx
 
       # ---- Slang native artifact aggregation (when shipping Slang) ----
       # Same shape as KTX above, staged at native/slang/staged/<rid>/, which
       # is where Ahjo.Vulkan.Slang.Native.csproj's PackSlangRuntimes target
-      # looks. win-x64 carries two files (the forwarder and the compiler), so
-      # the whole directory is copied rather than a named binary.
+      # looks.
       - name: Download Slang native artifacts
         if: needs.build-slang.result == 'success'
         uses: actions/download-artifact@v8
@@ -207,20 +192,13 @@ jobs:
 
       - name: Stage Slang binaries for pack
         if: needs.build-slang.result == 'success'
-        run: |
-          for rid in win-x64 linux-x64; do
-            mkdir -p "native/slang/staged/${rid}"
-            src_dir="${{ github.workspace }}/slang-artifacts/slang-native-${rid}"
-            if [ -d "$src_dir" ]; then
-              cp -v "$src_dir"/* "native/slang/staged/${rid}/"
-            fi
-          done
+        run: sh tools/stage-native-artifacts.sh "${{ github.workspace }}/slang-artifacts" slang
 
       # ---- NGX native artifact aggregation (when shipping NGX) ----
       # Same shape as Slang above, staged at native/ngx/build/<rid>/, which is
       # where Ahjo.Vulkan.Ngx.Native.csproj's PackNgxRuntimes target looks.
-      # The artifact is the cmake build directory, so the whole directory is
-      # copied and the pack target picks the one named library out of it.
+      # The artifact is the cmake build directory; the pack target picks the
+      # one named library out of it.
       #
       # NGX-LICENSE.txt is NOT downloaded here: it is committed under
       # native/ngx/, so the pack step finds it in the checkout. The feature DLL
@@ -235,14 +213,7 @@ jobs:
 
       - name: Stage NGX binaries for pack
         if: needs.build-ngx.result == 'success'
-        run: |
-          for rid in win-x64 linux-x64; do
-            mkdir -p "native/ngx/build/${rid}"
-            src_dir="${{ github.workspace }}/ngx-artifacts/ngx-native-${rid}"
-            if [ -d "$src_dir" ]; then
-              cp -rv "$src_dir"/* "native/ngx/build/${rid}/"
-            fi
-          done
+        run: sh tools/stage-native-artifacts.sh "${{ github.workspace }}/ngx-artifacts" ngx
 
       # ---- Core packages (Ahjo.Vulkan + Ahjo.Vulkan.Native) ----
       # Always packed. src/Ahjo.Vulkan references both Ahjo.Vulkan.Native and
@@ -372,6 +343,29 @@ jobs:
           MinVerVersionOverride: ${{ inputs.version }}
         run: |
           dotnet pack src/Ahjo.Vulkan.Ngx/Ahjo.Vulkan.Ngx.csproj             -c Release             -p:SkipVmaNativeBuild=true             -p:SkipNgxNativeBuild=true             -o "${{ github.workspace }}/artifacts"
+
+      # Last gate before the NuGet push (#169). Each native pack above wrote
+      # <PackageId>.native-files.txt (its full declared list) beside its
+      # nupkg; this opens every native nupkg that was packed and fails on a
+      # declared file that is missing, an undeclared runtimes/ entry, or a
+      # manifest that was never written. Same script as ci.yml's native-pack.
+      - name: Verify native nupkg contents
+        env:
+          VMA_RESULT: ${{ needs.build-vma.result }}
+          KTX_RESULT: ${{ needs.build-ktx.result }}
+          SLANG_RESULT: ${{ needs.build-slang.result }}
+          NGX_RESULT: ${{ needs.build-ngx.result }}
+        run: |
+          set --
+          if [ "$VMA_RESULT" = "success" ]; then set -- "$@" Ahjo.Vulkan.Vma.Native; fi
+          if [ "$KTX_RESULT" = "success" ]; then set -- "$@" Ahjo.Vulkan.Ktx.Native; fi
+          if [ "$SLANG_RESULT" = "success" ]; then set -- "$@" Ahjo.Vulkan.Slang.Native; fi
+          if [ "$NGX_RESULT" = "success" ]; then set -- "$@" Ahjo.Vulkan.Ngx.Native; fi
+          if [ "$#" -eq 0 ]; then
+            echo "No native package was packed; nothing to verify."
+            exit 0
+          fi
+          python3 -I tools/verify-native-nupkgs.py "${{ github.workspace }}/artifacts" "$@"
 
       - name: List artifacts
         run: ls -la ${{ github.workspace }}/artifacts

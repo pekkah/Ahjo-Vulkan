@@ -27,6 +27,7 @@
     <PackageTags>vulkan;dlss;ngx;nvidia;upscaling;dlaa;native;pinvoke;bindings</PackageTags>
     <MinVerTagPrefix>v</MinVerTagPrefix>
     <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+    <AhjoNativePackDependsOn>PackNgxRuntimes</AhjoNativePackDependsOn>
   </PropertyGroup>
 
   <!--
@@ -215,8 +216,13 @@
     downloading build-ngx-native.yml's upload-artifact outputs into those
     directories before invoking dotnet pack.
 
-    Local pack only includes the host's RID — that's intentional. Producing a
-    fully cross-RID nupkg requires the CI matrix.
+    This target only DECLARES the shipped files as AhjoNativePackFile items;
+    the shared AhjoPackNativeFiles target (tools/msbuild/
+    Ahjo.Vulkan.NativePack.targets) runs it via AhjoNativePackDependsOn,
+    packs the items and writes the manifest CI verifies the nupkg against.
+    Pack is strict: a declared file that is missing fails with AHJOPACK001.
+    A local host-RID-only pack needs -p:AhjoAllowPartialNativePack=true.
+    See docs/design/specs/2026-11-13-issue-169-native-pack-completeness-design.md.
 
     NGX-LICENSE.txt is packed at the nupkg root next to our own MIT LICENSE,
     the way PackSlangRuntimes packs SLANG-LICENSE.txt: the nupkg carries a
@@ -225,26 +231,20 @@
     What is NOT packed, and must never be: the feature DLL, and the static
     client library or archive. Only the shim we compiled ships.
   -->
-  <Target Name="PackNgxRuntimes" BeforeTargets="_GetPackageFiles;GenerateNuspec" Condition="'$(IsPackable)' == 'true'">
+  <Target Name="PackNgxRuntimes" Condition="'$(IsPackable)' == 'true'">
     <ItemGroup>
       <_NgxPackRid Include="win-x64">   <LibFile>ahjo_ngx.dll</LibFile>    </_NgxPackRid>
       <_NgxPackRid Include="linux-x64"> <LibFile>libahjo_ngx.so</LibFile>  </_NgxPackRid>
     </ItemGroup>
 
     <ItemGroup>
-      <None Include="$(_NgxBuildRootDir)%(_NgxPackRid.Identity)\%(_NgxPackRid.LibFile)"
-            Condition="Exists('$(_NgxBuildRootDir)%(_NgxPackRid.Identity)\%(_NgxPackRid.LibFile)')">
-        <Pack>true</Pack>
+      <AhjoNativePackFile Include="$(_NgxBuildRootDir)%(_NgxPackRid.Identity)\%(_NgxPackRid.LibFile)">
         <PackagePath>runtimes\%(_NgxPackRid.Identity)\native\%(_NgxPackRid.LibFile)</PackagePath>
-        <Visible>false</Visible>
-      </None>
+      </AhjoNativePackFile>
 
-      <None Include="$(_NgxSrcDir)NGX-LICENSE.txt"
-            Condition="Exists('$(_NgxSrcDir)NGX-LICENSE.txt')">
-        <Pack>true</Pack>
-        <PackagePath>\</PackagePath>
-        <Visible>false</Visible>
-      </None>
+      <AhjoNativePackFile Include="$(_NgxSrcDir)NGX-LICENSE.txt">
+        <PackagePath>NGX-LICENSE.txt</PackagePath>
+      </AhjoNativePackFile>
     </ItemGroup>
 
     <Message Importance="high" Text="NGX pack: included RIDs from $(_NgxBuildRootDir)" />

@@ -241,6 +241,13 @@ public sealed class SlangCompilerTests
     /// <c>Optimization</c> setting that did nothing. Losing the library again
     /// (a staging regression, a trimmed pack list) has to fail loudly, and
     /// this is where.</para>
+    /// <para>On win-x64 at <c>v2026.22</c> the second line reads
+    /// <c>failed to load dynamic library 'slang-glslang'</c>, with no version.
+    /// This is a behaviour check only: on Windows a Vulkan SDK on
+    /// <c>PATH</c> can supply its own <c>slang-glslang.dll</c> and keep it
+    /// green with ours deleted.
+    /// <c>SlangShippedModuleTests.ShippedNativeModules_LoadFromTheApplicationDirectory</c>
+    /// is the staging guard (#169).</para>
     /// </remarks>
     [Theory]
     [InlineData(SlangOptimizationLevel.None)]
@@ -296,6 +303,12 @@ public sealed class SlangCompilerTests
     /// shipping it is what makes the level mean anything. Only the direction
     /// is asserted; the exact counts are a property of upstream's optimizer,
     /// not of this wrapper.</para>
+    /// <para>On Windows the loader falls back to <c>PATH</c> after the
+    /// application directory, and a Vulkan SDK there ships its own
+    /// <c>slang-glslang.dll</c>, so this test can pass with ours deleted.
+    /// <c>SlangShippedModuleTests.ShippedNativeModules_LoadFromTheApplicationDirectory</c>
+    /// is the staging guard; this test checks only that the setting has an
+    /// effect (#169).</para>
     /// </remarks>
     [Fact]
     public void Optimization_ChangesTheEmittedSpirv()
