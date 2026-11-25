@@ -8,7 +8,7 @@ Windows CI provisions the Khronos Vulkan loader + Silk.NET-packaged SwiftShader 
 
 ## `vma-linux` lane — build-artifact check, not wrapper coverage
 
-Both Linux RIDs, Mesa lavapipe, runs `Ahjo.Vulkan.Vma.Native.Tests` and nothing else. It does not reopen the issue-32 decision: `Ahjo.Vulkan.Vma.Native` publishes Linux binaries, so something has to execute one before it reaches NuGet. Issue #144 shipped a `libvma.so` that SIGSEGVed on the first `vmaCreateAllocator` precisely because nothing ever did. Allocation-only work is both what lavapipe handles reliably and what actually broke, which is why the lane stops there — don't grow it into a general Linux test lane.
+linux-x64 only (linux-arm64 disabled in CI; its binary is built but unexecuted), Mesa lavapipe, runs `Ahjo.Vulkan.Vma.Native.Tests` and nothing else. It does not reopen the issue-32 decision: `Ahjo.Vulkan.Vma.Native` publishes Linux binaries, so something has to execute one before it reaches NuGet. Issue #144 shipped a `libvma.so` that SIGSEGVed on the first `vmaCreateAllocator` precisely because nothing ever did. Allocation-only work is both what lavapipe handles reliably and what actually broke, which is why the lane stops there — don't grow it into a general Linux test lane.
 
 It declares `AHJO_VULKAN_TIER=software`, so a broken ICD install can't report green while executing nothing — see the tier rules below.
 

@@ -377,10 +377,10 @@ jobs:
   # a downstream consumer. This lane compiles the .so from source on Linux and
   # runs a real allocator + buffer allocation against Mesa's lavapipe.
   #
-  # Both Linux RIDs run: the #144 branch (VMA's aligned_alloc stub) is selected
-  # by glibc's _GLIBCXX_HAVE_ALIGNED_ALLOC, which is defined on x64 and arm64
-  # alike, so arm64 shipped the same fatal binary and deserves the same proof
-  # rather than an inference from the x64 result.
+  # Only linux-x64 runs now (arm64 disabled in CI). The #144 branch (VMA's
+  # aligned_alloc stub) is selected by glibc's _GLIBCXX_HAVE_ALIGNED_ALLOC,
+  # which is defined on x64 and arm64 alike, so arm64 is an inference from
+  # the x64 result until its lane returns.
   #
   # Deliberately narrow, and NOT a revival of the Linux test matrix: issue 32
   # parked that because software rasterizers SIGSEGV mid-suite on the
@@ -400,8 +400,8 @@ jobs:
         include:
           - rid: linux-x64
             runs-on: ubuntu-latest
-          - rid: linux-arm64
-            runs-on: ubuntu-24.04-arm
+          # linux-arm64 (ubuntu-24.04-arm) is disabled in CI. The shipped
+          # linux-arm64 libvma.so is therefore built but not executed.
 
     steps:
       - name: Checkout
