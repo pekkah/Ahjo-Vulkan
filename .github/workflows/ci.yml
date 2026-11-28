@@ -377,10 +377,8 @@ jobs:
   # a downstream consumer. This lane compiles the .so from source on Linux and
   # runs a real allocator + buffer allocation against Mesa's lavapipe.
   #
-  # Only linux-x64 runs now (arm64 disabled in CI). The #144 branch (VMA's
-  # aligned_alloc stub) is selected by glibc's _GLIBCXX_HAVE_ALIGNED_ALLOC,
-  # which is defined on x64 and arm64 alike, so arm64 is an inference from
-  # the x64 result until its lane returns.
+  # linux-x64 only: linux-arm64 is not shipped. Add the lane first, then
+  # the RID.
   #
   # Deliberately narrow, and NOT a revival of the Linux test matrix: issue 32
   # parked that because software rasterizers SIGSEGV mid-suite on the
@@ -393,15 +391,11 @@ jobs:
     name: VMA native smoke (${{ matrix.rid }}, lavapipe, Vulkan software)
     runs-on: ${{ matrix.runs-on }}
     strategy:
-      # Don't let one arch's failure hide the other's result — the whole point
-      # is knowing which RIDs are actually proven.
       fail-fast: false
       matrix:
         include:
           - rid: linux-x64
             runs-on: ubuntu-latest
-          # linux-arm64 (ubuntu-24.04-arm) is disabled in CI. The shipped
-          # linux-arm64 libvma.so is therefore built but not executed.
 
     steps:
       - name: Checkout

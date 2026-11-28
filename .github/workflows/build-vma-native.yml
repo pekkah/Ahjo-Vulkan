@@ -47,10 +47,6 @@ jobs:
             runs-on: ubuntu-latest
             lib-file: libvma.so
             built-path: build/linux-x64/libvma.so
-          - rid: linux-arm64
-            runs-on: ubuntu-24.04-arm
-            lib-file: libvma.so
-            built-path: build/linux-arm64/libvma.so
           # macOS RIDs (osx-x64, osx-arm64) are intentionally omitted for
           # now. The MoltenVK runtime path needs validation before shipping
           # those binaries; revisit when surface bindings + a Mac sample
