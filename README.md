@@ -19,7 +19,7 @@ NuGet as eight packages:
   nupkg.
 - [**Ahjo.Vulkan.Vma.Native**](https://www.nuget.org/packages/Ahjo.Vulkan.Vma.Native)
   — raw P/Invoke bindings against `vk_mem_alloc.h`, plus prebuilt VMA
-  SHARED library (`vma.{dll,so}`) for Windows + Linux (x64, arm64) under
+  SHARED library (`vma.{dll,so}`) for Windows (x64, arm64) + Linux (x64) under
   `runtimes/<rid>/native/`. Pulled in transitively by `Ahjo.Vulkan`.
   Shares the same `v*` tag versioning as the rest of the stack — all
   eight packages release together. macOS RIDs aren't shipped today;

@@ -29,7 +29,7 @@ dependency — no extra setup.
 
 ## Platforms
 
-Runs on Windows and Linux (x64, arm64) against a system Vulkan 1.4
+Runs on Windows (x64, arm64) and Linux (x64) against a system Vulkan 1.4
 loader. TFM: `net11.0`. macOS support (via MoltenVK) is on the roadmap
 but not currently tested.
 
